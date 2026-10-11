@@ -161,23 +161,32 @@ func validateName(what, s string) error {
 	return nil
 }
 
+// SplitTarget splits "user@alias" (or a bare "alias") and validates both
+// parts. login is empty when the target has no user.
+func SplitTarget(target string) (login, alias string, err error) {
+	alias = target
+	if i := strings.LastIndexByte(target, '@'); i >= 0 {
+		login, alias = target[:i], target[i+1:]
+		if err := validateName("user", login); err != nil {
+			return "", "", err
+		}
+	}
+	if err := ValidateAlias(alias); err != nil {
+		return "", "", err
+	}
+	return login, alias, nil
+}
+
 // Resolve resolves target ("alias" or "user@alias") into a HostConfig. It
 // runs `ssh -G` when OpenSSH is installed, which honors Match, Include and
 // every default exactly as ssh does, and parses the config files otherwise.
 func Resolve(ctx context.Context, target string, o Overrides, env Env) (*HostConfig, error) {
-	alias := target
-	if i := strings.LastIndexByte(target, '@'); i >= 0 {
-		name := target[:i]
-		alias = target[i+1:]
-		if err := validateName("user", name); err != nil {
-			return nil, err
-		}
-		if o.User == "" {
-			o.User = name
-		}
-	}
-	if err := ValidateAlias(alias); err != nil {
+	login, alias, err := SplitTarget(target)
+	if err != nil {
 		return nil, err
+	}
+	if o.User == "" {
+		o.User = login
 	}
 
 	var opts map[string][]string

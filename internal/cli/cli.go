@@ -10,15 +10,19 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/version"
 )
 
-// Exit codes from docs/SPEC.md "CLI design". Later milestones add 3-6
-// (connection, auth, host key, bind) and 130 (interrupted).
+// Exit codes from docs/SPEC.md "CLI design". Later milestones add 6 (bind
+// failed, for pfwd fwd) and 130 (interrupted).
 const (
-	exitOK    = 0
-	exitError = 1
-	exitUsage = 2
+	exitOK      = 0
+	exitError   = 1
+	exitUsage   = 2
+	exitConnect = 3
+	exitAuth    = 4
+	exitHostKey = 5
 )
 
 // Execute runs pfwd with args (without the program name), writes normal
@@ -34,31 +38,50 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 	fmt.Fprintf(stderr, "Error: %v\n", err)
-	if isUsageError(err) {
+	code := exitCode(err)
+	if code == exitUsage {
 		fmt.Fprintf(stderr, "Run '%s --help' for usage.\n", cmd.CommandPath())
-		return exitUsage
 	}
-	return exitError
+	return code
+}
+
+// exitCode maps an error to the documented exit codes.
+func exitCode(err error) int {
+	switch {
+	case isUsageError(err):
+		return exitUsage
+	case errors.Is(err, sshx.ErrHostKey):
+		return exitHostKey
+	case errors.Is(err, sshx.ErrAuth):
+		return exitAuth
+	case errors.Is(err, sshx.ErrConnect):
+		return exitConnect
+	default:
+		return exitError
+	}
 }
 
 func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
+	var flags rootFlags
 	root := &cobra.Command{
-		Use:   "pfwd [host...]",
+		Use:   "pfwd <host>",
 		Short: "Detect and forward remote ports over SSH",
-		Long: `pfwd is the VS Code Ports panel for any terminal. It connects to hosts from
-~/.ssh/config, watches which TCP ports start listening on the remote machine,
-and forwards them to localhost with one keypress or automatically.
+		Long: `pfwd is the VS Code Ports panel for any terminal. It connects to a host from
+~/.ssh/config, watches which TCP ports start listening on it, and forwards
+them to localhost with one keypress.
 
-Run pfwd with no arguments to pick a host, or name hosts to open them.`,
-		Example:       "  pfwd devbox\n  pfwd devbox gpu-node",
+Name the host the way you would for ssh: an alias from ~/.ssh/config, or
+user@host. The flags below override the ssh config.`,
+		Example:       "  pfwd devbox\n  pfwd alice@10.0.0.5 -p 2222 -i ~/.ssh/id_work",
 		Version:       version.Get().String(),
-		Args:          cobra.ArbitraryArgs,
+		Args:          hostArgs,
 		SilenceErrors: true, // Execute prints errors itself
 		SilenceUsage:  true, // no usage dump on runtime errors
-		RunE: func(*cobra.Command, []string) error {
-			return errors.New("the TUI is not implemented yet (planned for milestone M1 in docs/SPEC.md)")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTUI(cmd, args[0], &flags)
 		},
 	}
+	flags.register(root.Flags())
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetVersionTemplate("{{.Version}}\n")

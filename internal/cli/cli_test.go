@@ -3,9 +3,12 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/version"
 )
 
@@ -52,11 +55,67 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
-func TestRootIsNotImplementedYet(t *testing.T) {
-	for _, args := range [][]string{{}, {"devbox"}, {"devbox", "gpu-node"}} {
-		code, out, errOut := run(t, args...)
-		if code != 1 || out != "" || !strings.Contains(errOut, "not implemented yet") {
-			t.Errorf("pfwd %v: code %d, stdout %q, stderr %q; want 1, empty, \"not implemented yet\"", args, code, out, errOut)
+func TestRootNeedsHost(t *testing.T) {
+	code, out, errOut := run(t)
+	if code != 2 || out != "" || !strings.Contains(errOut, "pfwd <host>") {
+		t.Errorf("pfwd: code %d, stdout %q, stderr %q; want 2 and a hint naming pfwd <host>", code, out, errOut)
+	}
+}
+
+func TestRootOneHostOnly(t *testing.T) {
+	code, _, errOut := run(t, "devbox", "gpu-node")
+	if code != 2 || !strings.Contains(errOut, "one host") {
+		t.Errorf("pfwd devbox gpu-node: code %d, stderr %q; want 2", code, errOut)
+	}
+}
+
+func TestRootRejectsBadHost(t *testing.T) {
+	for _, host := range []string{"a;b", "$(reboot)", "bob@", "@devbox", "b b@devbox"} {
+		code, _, errOut := run(t, host)
+		if code != 2 || !strings.Contains(errOut, "invalid") && !strings.Contains(errOut, "empty") {
+			t.Errorf("pfwd %q: code %d, stderr %q; want 2 and an invalid-host error", host, code, errOut)
+		}
+	}
+}
+
+func TestRootBadLogLevel(t *testing.T) {
+	code, _, errOut := run(t, "devbox", "--log-level", "loud")
+	if code != 2 || !strings.Contains(errOut, "debug, info, warn or error") {
+		t.Errorf("code %d, stderr %q", code, errOut)
+	}
+}
+
+func TestRootNeedsTerminal(t *testing.T) {
+	code, out, errOut := run(t, "devbox")
+	if code != 1 || out != "" || !strings.Contains(errOut, "interactive terminal") {
+		t.Errorf("pfwd devbox without a terminal: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}
+
+func TestExitCodeMapping(t *testing.T) {
+	cases := []struct {
+		err  error
+		want int
+	}{
+		{errors.New("boom"), 1},
+		{&usageError{errors.New("bad")}, 2},
+		{&sshx.Error{Kind: sshx.ErrConnect, Msg: "cannot reach devbox"}, 3},
+		{fmt.Errorf("wrapped: %w", &sshx.Error{Kind: sshx.ErrAuth, Msg: "auth"}), 4},
+		{&sshx.Error{Kind: sshx.ErrHostKey, Msg: "changed"}, 5},
+		{&sshx.Error{Kind: sshx.ErrUnsupported, Msg: "ProxyJump"}, 1},
+	}
+	for _, c := range cases {
+		if got := exitCode(c.err); got != c.want {
+			t.Errorf("exitCode(%v) = %d, want %d", c.err, got, c.want)
+		}
+	}
+}
+
+func TestRootHelpShowsSSHFlags(t *testing.T) {
+	code, out, _ := run(t, "--help")
+	for _, flag := range []string{"--port", "--login", "--identity", "--ssh-config", "--accept-new", "--log-level"} {
+		if code != 0 || !strings.Contains(out, flag) {
+			t.Errorf("pfwd --help lacks %s", flag)
 		}
 	}
 }
