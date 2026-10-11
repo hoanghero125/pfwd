@@ -52,6 +52,10 @@ func TestSkipHTTPProbe(t *testing.T) {
 		{27017, "", true},
 		{27017, "mongod", true},
 		{5432, "node", false}, // a known non-database process is probed
+		{5432, "docker-proxy", true}, // a container port proxy says nothing about the service
+		{6379, "rootlessport", true},
+		{3306, "pasta", true},
+		{8080, "docker-proxy", false},
 		{5173, "node", false},
 		{8000, "", false},
 	}

@@ -65,11 +65,22 @@ func SkipHTTPProbe(port uint16, process string) bool {
 	case "Postgres", "MySQL", "Redis", "MongoDB":
 		return true
 	}
-	if process != "" {
+	if process != "" && !isPortProxy(process) {
 		return false
 	}
 	switch port {
 	case 5432, 3306, 6379, 27017:
+		return true
+	}
+	return false
+}
+
+// isPortProxy reports whether process only relays a published container
+// port (Docker, rootless Docker and Podman), so its name says nothing about
+// the service behind it.
+func isPortProxy(process string) bool {
+	switch process {
+	case "docker-proxy", "rootlessport", "rootlesskit", "slirp4netns", "pasta", "pasta.avx2", "gvproxy":
 		return true
 	}
 	return false

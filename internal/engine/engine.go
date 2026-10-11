@@ -337,6 +337,9 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 		cancel:  cancel,
 		done:    make(chan struct{}),
 	}
+	if detect.SkipHTTPProbe(spec.RemotePort, hs.ports[spec.RemotePort].Process) {
+		f.Scheme = forward.SchemeNone // a database: never opened as a web page
+	}
 	e.forwards[f.ID] = f
 	e.wg.Add(1)
 	e.mu.Unlock()

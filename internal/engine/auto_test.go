@@ -267,10 +267,16 @@ func TestProbeSkipsDatabases(t *testing.T) {
 		Settings: func(HostID) HostSettings { return HostSettings{Auto: false, Filter: detect.DefaultFilter()} }}
 	e := newEngineWith(t, o)
 	connected(t, e, "devbox")
-	if _, err := e.Forward("devbox", ForwardSpec{RemotePort: 5432, LocalPort: freePort(t)}); err != nil {
+	f, err := e.Forward("devbox", ForwardSpec{RemotePort: 5432, LocalPort: freePort(t)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	noEvent[ForwardChanged](t, e, 300*time.Millisecond, func(ch ForwardChanged) bool { return ch.Forward.Scheme != forward.SchemeUnknown })
+	// Known not to speak HTTP from the start, so o and y don't treat it as
+	// a web server.
+	if f.Scheme != forward.SchemeNone {
+		t.Errorf("Scheme = %v, want none", f.Scheme)
+	}
+	noEvent[ForwardChanged](t, e, 300*time.Millisecond, func(ch ForwardChanged) bool { return ch.Forward.Scheme != forward.SchemeNone })
 	mu.Lock()
 	defer mu.Unlock()
 	if dialed != 0 {
