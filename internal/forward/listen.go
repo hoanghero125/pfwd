@@ -3,6 +3,7 @@ package forward
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 )
 
@@ -28,9 +29,17 @@ func (e *PortInUseError) Error() string {
 // Listen binds a local TCP port; bind defaults to 127.0.0.1. A busy port
 // returns a *PortInUseError with a free port nearby. On Windows that
 // includes ports reserved for Hyper-V, which fail with WSAEACCES.
+//
+// For a loopback bind, a port that another local process holds on the
+// wildcard addresses or on ::1 counts as busy too. Windows and macOS let
+// 127.0.0.1:P bind next to those, and a browser that tries ::1 first for
+// localhost would then reach that process instead of the forward.
 func Listen(bind string, port uint16) (net.Listener, error) {
 	if bind == "" {
 		bind = "127.0.0.1"
+	}
+	if isLoopback(bind) && heldElsewhere(port) {
+		return nil, &PortInUseError{Addr: bind, Port: port, Suggested: suggestPort(bind, port)}
 	}
 	addr := net.JoinHostPort(bind, strconv.Itoa(int(port)))
 	ln, err := net.Listen("tcp", addr)
@@ -46,9 +55,40 @@ func Listen(bind string, port uint16) (net.Listener, error) {
 	}
 }
 
-// suggestPort returns the first free port above port, or 0.
+func isLoopback(bind string) bool {
+	ip, err := netip.ParseAddr(bind)
+	return bind == "localhost" || (err == nil && ip.IsLoopback())
+}
+
+// heldElsewhere reports whether another socket holds port on 0.0.0.0, [::]
+// or [::1], by binding each briefly. Probes that fail for another reason
+// (no IPv6 on this machine) are ignored.
+func heldElsewhere(port uint16) bool {
+	probes := []struct{ network, host string }{
+		{"tcp4", "0.0.0.0"},
+		{"tcp6", "::"},
+		{"tcp6", "::1"},
+	}
+	for _, pr := range probes {
+		ln, err := net.Listen(pr.network, net.JoinHostPort(pr.host, strconv.Itoa(int(port))))
+		if err == nil {
+			_ = ln.Close()
+			continue
+		}
+		if isAddrInUse(err) {
+			return true
+		}
+	}
+	return false
+}
+
+// suggestPort returns the first port above port that is free on bind and,
+// for a loopback bind, not held on the other local addresses; 0 if none.
 func suggestPort(bind string, port uint16) uint16 {
 	for p := int(port) + 1; p <= int(port)+suggestRange && p <= 65535; p++ {
+		if isLoopback(bind) && heldElsewhere(uint16(p)) {
+			continue
+		}
 		ln, err := net.Listen("tcp", net.JoinHostPort(bind, strconv.Itoa(p)))
 		if err == nil {
 			_ = ln.Close()
