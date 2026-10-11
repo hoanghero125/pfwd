@@ -1,0 +1,24 @@
+ pfwd  devbox ✗ failed                                                   ? help
+────────────────────────────────────────────────────────────────────────────────
+
+  ✗ Can't connect to devbox
+
+  authentication to devbox as alice failed: the server accepted none of the 2
+  keys offered. Add your key to ssh-agent (`ssh-add <key>`) or set
+  IdentityFile for devbox in ~/.ssh/config, and check that `ssh devbox` works
+
+  Press q to quit.
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+ q quit

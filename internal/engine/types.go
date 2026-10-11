@@ -143,6 +143,12 @@ type HostKeyPrompt struct {
 	reply    chan<- bool
 }
 
+// NewHostKeyPrompt returns a prompt whose answer is sent on reply, which
+// needs room for one value. Front ends use it in tests.
+func NewHostKeyPrompt(host HostID, q sshx.HostKeyQuestion, reply chan<- bool) HostKeyPrompt {
+	return HostKeyPrompt{Host: host, Question: q, reply: reply}
+}
+
 // Answer replies to the prompt. Calls after the first are ignored.
 func (p HostKeyPrompt) Answer(ok bool) {
 	select {

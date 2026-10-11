@@ -1,0 +1,24 @@
+ pfwd  devbox ● connected                                                ? help
+────────────────────────────────────────────────────────────────────────────────
+  STATE    REMOTE  LOCAL            PROCESS              CONN  TRAFFIC
+▶ ● fwd    :5173   localhost:5173   node                 2     ↓12K/s ↑1.0K/s
+  ✗ fail   :8000   localhost:8000   disconnected         0     —
+  ● fwd    :8888   localhost:8888   jupyter-lab          0     ↓0 ↑0
+  ───────────────────────── detected, not forwarded ──────────────────────────
+  —        :22     —                ?                    —     —
+  —        :╭──────────────────────────────────────────────────────╮
+  —        :│ Quit pfwd?                                           │
+            │                                                      │
+            │ 2 forwards are active. Quitting stops them.          │
+            │                                                      │
+            │ y quit   n stay                                      │
+            ╰──────────────────────────────────────────────────────╯
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+ ✓ Forwarded :5173 to localhost:5173
+ enter forward/stop  F other local port  x stop  ? help  q quit

@@ -1,0 +1,24 @@
+ pfwd  devbox ● connected                                                ? help
+────────────────────────────────────────────────────────────────────────────────
+
+  Can't list ports on devbox yet: it runs Darwin, and pfwd reads Linux servers
+  today.
+  macOS, BSD and Windows servers come in v0.4.0.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+ ? help  q quit

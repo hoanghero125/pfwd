@@ -229,7 +229,7 @@ type prompter struct {
 
 func (p prompter) ConfirmHostKey(ctx context.Context, q sshx.HostKeyQuestion) (bool, error) {
 	reply := make(chan bool, 1)
-	p.e.emit(HostKeyPrompt{Host: p.host, Question: q, reply: reply})
+	p.e.emit(NewHostKeyPrompt(p.host, q, reply))
 	select {
 	case ok := <-reply:
 		return ok, nil
