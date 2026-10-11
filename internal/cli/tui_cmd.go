@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/pflag"
 	"golang.org/x/term"
 
-	"github.com/hoanghero125/pfwd/internal/config"
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/notify"
 	"github.com/hoanghero125/pfwd/internal/sshx"
@@ -84,11 +83,7 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	if f.port < 0 || f.port > 65535 {
 		return &usageError{fmt.Errorf("invalid port %d: use a number from 1 to 65535", f.port)}
 	}
-	cfgPath, err := configPath(cmd)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load(cfgPath)
+	cfg, cfgPath, err := loadConfig(cmd)
 	if err != nil {
 		return err
 	}

@@ -47,10 +47,35 @@ default and a comment on what it does.`,
 
 // configPath is --config if given, else config.Path.
 func configPath(cmd *cobra.Command) (string, error) {
+	path, _, err := namedConfig(cmd)
+	return path, err
+}
+
+// namedConfig is the config path and what named it: "--config",
+// "PFWD_CONFIG", or "" for the default location.
+func namedConfig(cmd *cobra.Command) (path, by string, err error) {
 	if p, err := cmd.Flags().GetString("config"); err == nil && p != "" {
-		return p, nil
+		return p, "--config", nil
 	}
-	return config.Path()
+	if p := os.Getenv("PFWD_CONFIG"); p != "" {
+		return p, "PFWD_CONFIG", nil
+	}
+	path, err = config.Path()
+	return path, "", err
+}
+
+// loadConfig loads the config for running pfwd. A file named by --config
+// or PFWD_CONFIG must exist: a typo there must not mean the defaults.
+func loadConfig(cmd *cobra.Command) (config.Config, string, error) {
+	path, by, err := namedConfig(cmd)
+	if err != nil {
+		return config.Config{}, "", err
+	}
+	if _, err := os.Stat(path); by != "" && errors.Is(err, fs.ErrNotExist) {
+		return config.Config{}, "", fmt.Errorf("the config file %s (from %s) does not exist; check the path, or create it with `pfwd config edit`", path, by)
+	}
+	cfg, err := config.Load(path)
+	return cfg, path, err
 }
 
 // wantJSON reports whether --json was given.

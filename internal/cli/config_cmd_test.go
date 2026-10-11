@@ -22,7 +22,12 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	if err := os.Setenv("PFWD_CONFIG", filepath.Join(dir, "absent.toml")); err != nil {
+	// An empty file: the defaults, whatever the user's own config says.
+	cfg := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfg, nil, 0o600); err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("PFWD_CONFIG", cfg); err != nil {
 		panic(err)
 	}
 	code := m.Run()
@@ -261,5 +266,20 @@ func TestBadLogLevelNamesItsSource(t *testing.T) {
 	code, _, errOut = run(t, "devbox", "--log-level", "loud")
 	if code != 2 || !strings.Contains(errOut, "--log-level") {
 		t.Errorf("--log-level loud: code %d, stderr %q; want 2, naming --log-level", code, errOut)
+	}
+}
+
+// TestRootRefusesMissingNamedConfig: a config file named with --config or
+// PFWD_CONFIG must exist; a typo must not mean "run with the defaults".
+func TestRootRefusesMissingNamedConfig(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "typo.toml")
+	code, _, errOut := run(t, "devbox", "--config", missing)
+	if code != 1 || !strings.Contains(errOut, missing) || !strings.Contains(errOut, "does not exist") {
+		t.Errorf("--config with a missing file: code %d, stderr %q", code, errOut)
+	}
+	t.Setenv("PFWD_CONFIG", missing)
+	code, _, errOut = run(t, "devbox")
+	if code != 1 || !strings.Contains(errOut, "PFWD_CONFIG") {
+		t.Errorf("PFWD_CONFIG with a missing file: code %d, stderr %q", code, errOut)
 	}
 }
