@@ -538,3 +538,18 @@ func TestConnDialContextAndWait(t *testing.T) {
 		t.Fatal("Wait did not return after Close")
 	}
 }
+
+// TestDialKnownHostsDevNull covers configs that keep no host key memory
+// (UserKnownHostsFile /dev/null with StrictHostKeyChecking no, as
+// `vagrant ssh-config` writes): every connection works and nothing is saved.
+func TestDialKnownHostsDevNull(t *testing.T) {
+	f := newFixture(t, sshtest.Options{})
+	f.hc.KnownHostsFiles = []string{os.DevNull}
+	f.hc.StrictHostKeyChecking = "no"
+	mustDial(t, f.hc, DialOptions{})
+	// A different server on a new port, as after `vagrant destroy && vagrant up`.
+	g := newFixture(t, sshtest.Options{})
+	g.hc.KnownHostsFiles = []string{os.DevNull}
+	g.hc.StrictHostKeyChecking = "no"
+	mustDial(t, g.hc, DialOptions{})
+}

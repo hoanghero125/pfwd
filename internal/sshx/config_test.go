@@ -77,9 +77,9 @@ func TestExpandPath(t *testing.T) {
 		{"~/.ssh/id", filepath.Join(env.Home, ".ssh", "id")},
 		{"~", env.Home},
 		{"%d/keys/%h", filepath.Join(env.Home, "keys", "dev.example.com")},
-		{"/keys/%u-%r-%n-%p", filepath.FromSlash("/keys/alice-bob-dev-2222")},
-		{"/keys/100%%", filepath.FromSlash("/keys/100%")},
-		{"/keys/%Z", filepath.FromSlash("/keys/%Z")},
+		{"%d/keys/%u-%r-%n-%p", filepath.Join(env.Home, "keys", "alice-bob-dev-2222")},
+		{"%d/keys/100%%", filepath.Join(env.Home, "keys", "100%")},
+		{"%d/keys/%Z", filepath.Join(env.Home, "keys", "%Z")},
 		{"", ""},
 	}
 	if runtime.GOOS == "windows" {
@@ -87,6 +87,14 @@ func TestExpandPath(t *testing.T) {
 			struct{ in, want string }{"/c/Users/a/.ssh/k", `C:\Users\a\.ssh\k`},
 			struct{ in, want string }{`__PROGRAMDATA__\ssh/ssh_known_hosts`, filepath.Join(env.ProgramData, "ssh", "ssh_known_hosts")},
 			struct{ in, want string }{`C:\Users\a/.ssh/known_hosts`, `C:\Users\a\.ssh\known_hosts`},
+			// /dev/null means "no file", as OpenSSH for Windows treats it.
+			struct{ in, want string }{"/dev/null", os.DevNull},
+			// Other drive-less POSIX paths (from an MSYS ssh) must not
+			// resolve to the drive root, where any user can create files.
+			struct{ in, want string }{"/etc/ssh/ssh_known_hosts", ""},
+			struct{ in, want string }{`\etc\ssh\ssh_known_hosts`, ""},
+			struct{ in, want string }{`\\.\pipe\openssh-ssh-agent`, `\\.\pipe\openssh-ssh-agent`},
+			struct{ in, want string }{`\\server\share\key`, `\\server\share\key`},
 		)
 	}
 	for _, c := range cases {
@@ -139,10 +147,14 @@ func TestFromOptions(t *testing.T) {
 		IdentityFiles:         []string{filepath.Join(env.Home, ".ssh", "id_ed25519"), filepath.Join(env.Home, "keys", "bob")},
 		IdentitiesOnly:        true,
 		IdentityAgent:         "none",
-		KnownHostsFiles:       []string{filepath.Join(env.Home, ".ssh", "known_hosts"), filepath.Join(env.Home, ".ssh", "known_hosts2"), filepath.FromSlash("/etc/ssh/ssh_known_hosts")},
+		KnownHostsFiles:       []string{filepath.Join(env.Home, ".ssh", "known_hosts"), filepath.Join(env.Home, ".ssh", "known_hosts2")},
 		StrictHostKeyChecking: "accept-new",
 		HostKeyAlias:          "devbox-key",
 		ConnectTimeout:        5 * time.Second,
+	}
+	if runtime.GOOS != "windows" {
+		// On Windows a drive-less POSIX path is dropped (TestExpandPath).
+		want.KnownHostsFiles = append(want.KnownHostsFiles, "/etc/ssh/ssh_known_hosts")
 	}
 	if !reflect.DeepEqual(hc, want) {
 		t.Errorf("fromOptions =\n%+v\nwant\n%+v", hc, want)
@@ -174,6 +186,26 @@ func TestFromOptionsStrictValues(t *testing.T) {
 		if hc.StrictHostKeyChecking != want {
 			t.Errorf("StrictHostKeyChecking %q → %q, want %q", in, hc.StrictHostKeyChecking, want)
 		}
+	}
+}
+
+func TestFromOptionsDevNullKnownHosts(t *testing.T) {
+	env := testEnv(t)
+	opts := map[string][]string{
+		"userknownhostsfile":   {"/dev/null"},
+		"globalknownhostsfile": {"/etc/ssh/ssh_known_hosts"},
+	}
+	hc, err := fromOptions("vagrant", opts, Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{os.DevNull, filepath.FromSlash("/etc/ssh/ssh_known_hosts")}
+	if runtime.GOOS == "windows" {
+		// The POSIX global file doesn't exist on Windows and is dropped.
+		want = []string{os.DevNull}
+	}
+	if !reflect.DeepEqual(hc.KnownHostsFiles, want) {
+		t.Errorf("KnownHostsFiles = %q, want %q", hc.KnownHostsFiles, want)
 	}
 }
 

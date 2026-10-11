@@ -372,8 +372,11 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 	for _, key := range []string{"userknownhostsfile", "globalknownhostsfile"} {
 		for _, line := range opts[key] {
 			for _, p := range splitPaths(line) {
-				if p != "none" {
-					hc.KnownHostsFiles = append(hc.KnownHostsFiles, expandPath(p, tok, env))
+				if p == "none" {
+					continue
+				}
+				if ep := expandPath(p, tok, env); ep != "" {
+					hc.KnownHostsFiles = append(hc.KnownHostsFiles, ep)
 				}
 			}
 		}
@@ -445,8 +448,9 @@ type tokens struct {
 }
 
 // expandPath expands ~ and the %d %u %h %n %p %r %% tokens, then on Windows
-// converts MSYS paths (/c/Users/...) and the __PROGRAMDATA__ placeholder
-// that the native OpenSSH prints.
+// converts MSYS paths (/c/Users/...), the __PROGRAMDATA__ placeholder that
+// the native OpenSSH prints, and /dev/null (to NUL). On Windows it returns
+// "" for a drive-less POSIX path; callers skip it.
 func expandPath(p string, tok tokens, env Env) string {
 	if p == "" {
 		return ""
@@ -490,8 +494,19 @@ func expandPath(p string, tok tokens, env Env) string {
 		if rest, ok := strings.CutPrefix(p, "__PROGRAMDATA__"); ok {
 			p = env.ProgramData + rest
 		}
+		if p == "/dev/null" {
+			return os.DevNull
+		}
 		if len(p) >= 2 && p[0] == '/' && unicode.IsLetter(rune(p[1])) && (len(p) == 2 || p[2] == '/') {
 			p = strings.ToUpper(p[1:2]) + `:\` + strings.TrimPrefix(p[2:], "/")
+		}
+		// Any other POSIX absolute path (an MSYS ssh's /etc/ssh/...) would
+		// resolve against the current drive's root, where any local user can
+		// create files, so it is dropped. UNC paths (\\server, \\.\pipe) stay.
+		rooted := strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`)
+		unc := strings.HasPrefix(p, `\\`) || strings.HasPrefix(p, "//")
+		if rooted && !unc {
+			return ""
 		}
 	}
 	return filepath.Clean(filepath.FromSlash(p))
