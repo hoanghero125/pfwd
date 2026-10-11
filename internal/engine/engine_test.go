@@ -267,9 +267,18 @@ func TestForwardActiveAndPipes(t *testing.T) {
 	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "hello" {
 		t.Fatalf("echo = %q, %v", buf, err)
 	}
-	fs := e.Forwards()
-	if len(fs) != 1 || fs[0].Stats.BytesOut != 5 || fs[0].Stats.BytesIn != 5 {
-		t.Errorf("Forwards = %+v", fs)
+	// The counters move right after each write, so the echo can arrive
+	// before they do; wait for them instead of reading once.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		fs := e.Forwards()
+		if len(fs) == 1 && fs[0].Stats.BytesOut == 5 && fs[0].Stats.BytesIn == 5 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Forwards = %+v, want 5 bytes each way", fs)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
