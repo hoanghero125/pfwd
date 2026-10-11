@@ -301,8 +301,17 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 		}
 		e.mu.Unlock()
 	}
+	// A manual forward of what is already forwarded the same way (an
+	// auto-forward the user hasn't seen yet) returns that forward. It is
+	// checked again after a busy port, in case the other one won the race.
+	if f := e.sameForward(host, spec); f != nil {
+		return e.snapshot(f), nil
+	}
 	ln, err := forward.Listen(spec.BindAddr, spec.LocalPort)
 	if err != nil {
+		if f := e.sameForward(host, spec); f != nil {
+			return e.snapshot(f), nil
+		}
 		return Forward{}, err
 	}
 	target := net.JoinHostPort(spec.RemoteHost, itoa(spec.RemotePort))

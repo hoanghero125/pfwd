@@ -106,6 +106,23 @@ func (e *Engine) hasForwardLocked(host HostID, remotePort uint16) bool {
 	return false
 }
 
+// sameForward returns host's forward of spec's remote port on the same
+// local address, for a manual spec; nil otherwise.
+func (e *Engine) sameForward(host HostID, spec ForwardSpec) *fwd {
+	if spec.Auto {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, f := range e.forwards {
+		s := f.Spec
+		if f.Host == host && s.Kind == spec.Kind && s.RemotePort == spec.RemotePort && s.LocalPort == spec.LocalPort && s.BindAddr == spec.BindAddr {
+			return f
+		}
+	}
+	return nil
+}
+
 // autoForward forwards a new port unless auto is off, the port is
 // declined or filtered, or it is already forwarded. A taken local port
 // follows OnConflict; any failure declines the port for this run, so a
@@ -141,6 +158,11 @@ func (e *Engine) autoForward(host HostID, hs *hostState, p detect.RemotePort) {
 		return
 	case err != nil:
 		e.mu.Lock()
+		if e.hasForwardLocked(host, p.Port) {
+			// A manual forward of the port won the race for the local port.
+			e.mu.Unlock()
+			return
+		}
 		hs.declined[p.Port] = true
 		e.mu.Unlock()
 		e.log.Info("auto-forward failed", "host", host, "port", p.Port, "err", err)

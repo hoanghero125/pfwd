@@ -344,3 +344,27 @@ func TestNotifierHearsAutoForwards(t *testing.T) {
 		t.Errorf("a manual forward sent a notification: %q", n.got())
 	}
 }
+
+// TestManualForwardOfAutoForwardedPort: enter on a port whose
+// auto-forward the TUI hasn't shown yet gets that forward back, not a
+// "port busy" conflict and a second forward on the next port.
+func TestManualForwardOfAutoForwardedPort(t *testing.T) {
+	p := freePort(t)
+	c := newFakeConn("")
+	e := newEngineWith(t, autoOptions(dialTo(c)))
+	e.Connect("devbox")
+	c.send(listen(p, "node"))
+	c.send(listen(p, "node"))
+	auto := next(t, e, isAutoForwardOf(p))
+
+	f, err := e.Forward("devbox", ForwardSpec{RemotePort: p, LocalPort: p})
+	if err != nil {
+		t.Fatalf("Forward = %v; want the existing auto-forward", err)
+	}
+	if f.ID != auto.Forward.ID {
+		t.Errorf("Forward returned %s, want the auto-forward %s", f.ID, auto.Forward.ID)
+	}
+	if n := len(e.Forwards()); n != 1 {
+		t.Errorf("%d forwards, want 1", n)
+	}
+}
