@@ -519,3 +519,31 @@ func TestStatusAndLogUseTime(t *testing.T) {
 		t.Errorf("log:\n%s", view(m))
 	}
 }
+
+// TestCursorFollowsItsPort: when the selected detected port is
+// auto-forwarded, its row moves to the forwards, and the cursor goes with
+// it, so the next enter acts on the same port.
+func TestCursorFollowsItsPort(t *testing.T) {
+	e := newFakeEngine()
+	m := connectedWith(newModel(e), rp(3000, "node"), rp(5000, "x"), rp(5173, "vite"))
+	m, _ = press(t, m, "G", "enter") // forward 5173 by hand: it moves to the top
+	m, _ = press(t, m, "down")       // the detected :3000
+	if l := lineWith(t, m, ":3000"); !strings.Contains(l, "▶") {
+		t.Fatalf("cursor is not on :3000:\n%s", view(m))
+	}
+	m = apply(m, engine.ForwardChanged{Forward: engine.Forward{
+		ID: "9", Host: "devbox", State: engine.Active,
+		Spec: engine.ForwardSpec{BindAddr: "127.0.0.1", LocalPort: 3000, RemoteHost: "127.0.0.1", RemotePort: 3000, Auto: true},
+	}})
+	_, _ = press(t, m, "enter")
+	if len(e.stopped) != 1 || e.stopped[0] != "9" {
+		t.Errorf("enter stopped %v; want the auto-forward of :3000 (9)", e.stopped)
+	}
+
+	// And back: when that forward stops, the cursor stays on :3000.
+	m = apply(m, engine.ForwardChanged{Forward: engine.Forward{ID: "9", Host: "devbox", State: engine.Stopped,
+		Spec: engine.ForwardSpec{RemotePort: 3000, LocalPort: 3000}}})
+	if l := lineWith(t, m, ":3000"); !strings.Contains(l, "▶") {
+		t.Errorf("cursor left :3000 when its forward stopped:\n%s", view(m))
+	}
+}

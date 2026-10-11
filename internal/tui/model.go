@@ -127,6 +127,9 @@ type Model struct {
 	rows     []row
 	cursor   int
 	selected string
+	// selectedPort is the selected row's remote port, so the cursor can
+	// follow it between the forwards and the detected ports.
+	selectedPort uint16
 	// offset is the first table line on screen.
 	offset int
 
@@ -510,10 +513,22 @@ func (m *Model) rebuild() {
 	m.rows = rows
 
 	idx := slices.IndexFunc(rows, func(r row) bool { return r.key == m.selected })
+	if idx < 0 && m.selectedPort != 0 {
+		// The port was forwarded or stopped, so its row moved group.
+		idx = slices.IndexFunc(rows, func(r row) bool { return r.remotePort() == m.selectedPort })
+	}
 	if idx < 0 {
 		idx = min(m.cursor, len(rows)-1)
 	}
 	m.setCursor(idx)
+}
+
+// remotePort is the server port a row stands for.
+func (r row) remotePort() uint16 {
+	if r.fwd != nil {
+		return r.fwd.Spec.RemotePort
+	}
+	return r.port.Port
 }
 
 // matches reports whether a row contains the filter in its port, local
@@ -559,11 +574,12 @@ func compareIDs(a, b string) int {
 
 func (m *Model) setCursor(i int) {
 	if len(m.rows) == 0 {
-		m.cursor, m.selected, m.offset = 0, "", 0
+		m.cursor, m.selected, m.selectedPort, m.offset = 0, "", 0, 0
 		return
 	}
 	m.cursor = max(0, min(i, len(m.rows)-1))
 	m.selected = m.rows[m.cursor].key
+	m.selectedPort = m.rows[m.cursor].remotePort()
 	m.scrollToCursor()
 }
 
