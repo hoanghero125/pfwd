@@ -510,13 +510,13 @@ func TestViewFitsWindow(t *testing.T) {
 func TestServerTextCannotInjectEscapes(t *testing.T) {
 	const (
 		osc52 = "\x1b]52;c;ZXZpbA==\x07" // write the clipboard
-		clear = "\x1b[2J"                // clear the screen
+		cls   = "\x1b[2J"                // clear the screen
 		c1CSI = "\u009b2J"               // the same as a C1 control
 		bidi  = "\u202e"                 // right-to-left override
 	)
-	evil := "node" + osc52 + clear + c1CSI + bidi
+	evil := "node" + osc52 + cls + c1CSI + bidi
 	e := newFakeEngine()
-	e.forwardErr = errors.New("ssh: rejected: " + clear + "open failed")
+	e.forwardErr = errors.New("ssh: rejected: " + cls + "open failed")
 	m := apply(newModel(e),
 		engine.SessionChanged{Host: "devbox", State: engine.Connected},
 		engine.PortsChanged{Host: "devbox", Strategy: detect.SS, Ports: []detect.RemotePort{rp(8123, evil)}},
@@ -531,7 +531,7 @@ func TestServerTextCannotInjectEscapes(t *testing.T) {
 	screens = append(screens, m.View().Content)
 	m = apply(newModel(e), engine.SessionChanged{Host: "devbox", State: engine.SessionFailed, Err: errors.New("banner" + osc52)})
 	screens = append(screens, m.View().Content)
-	m = apply(newModel(e), engine.NewHostKeyPrompt("devbox", sshx.HostKeyQuestion{Host: "devbox", KeyType: "ssh-ed25519" + clear, Fingerprint: "SHA256:x"}, make(chan bool, 1)))
+	m = apply(newModel(e), engine.NewHostKeyPrompt("devbox", sshx.HostKeyQuestion{Host: "devbox", KeyType: "ssh-ed25519" + cls, Fingerprint: "SHA256:x"}, make(chan bool, 1)))
 	screens = append(screens, m.View().Content)
 
 	for i, s := range screens {
