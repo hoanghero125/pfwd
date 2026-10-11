@@ -503,3 +503,45 @@ func TestViewFitsWindow(t *testing.T) {
 		}
 	}
 }
+
+// TestServerTextCannotInjectEscapes pins the fix for terminal escape
+// injection: process names, uname output and error text come from the
+// server, and must never reach the terminal as control sequences.
+func TestServerTextCannotInjectEscapes(t *testing.T) {
+	const (
+		osc52 = "\x1b]52;c;ZXZpbA==\x07" // write the clipboard
+		clear = "\x1b[2J"                // clear the screen
+		c1CSI = "\u009b2J"               // the same as a C1 control
+		bidi  = "\u202e"                 // right-to-left override
+	)
+	evil := "node" + osc52 + clear + c1CSI + bidi
+	e := newFakeEngine()
+	e.forwardErr = errors.New("ssh: rejected: " + clear + "open failed")
+	m := apply(newModel(e),
+		engine.SessionChanged{Host: "devbox", State: engine.Connected},
+		engine.PortsChanged{Host: "devbox", Strategy: detect.SS, Ports: []detect.RemotePort{rp(8123, evil)}},
+	)
+	m, _ = press(t, m, "enter")
+	screens := []string{m.View().Content}
+
+	m = apply(newModel(e),
+		engine.SessionChanged{Host: "devbox", State: engine.Connected},
+		engine.PortsChanged{Host: "devbox", Strategy: detect.None, OS: "Linux" + osc52},
+	)
+	screens = append(screens, m.View().Content)
+	m = apply(newModel(e), engine.SessionChanged{Host: "devbox", State: engine.SessionFailed, Err: errors.New("banner" + osc52)})
+	screens = append(screens, m.View().Content)
+	m = apply(newModel(e), engine.NewHostKeyPrompt("devbox", sshx.HostKeyQuestion{Host: "devbox", KeyType: "ssh-ed25519" + clear, Fingerprint: "SHA256:x"}, make(chan bool, 1)))
+	screens = append(screens, m.View().Content)
+
+	for i, s := range screens {
+		for _, bad := range []string{"\x1b]", "\x1b[2J", "\x07", "\u009b", bidi} {
+			if strings.Contains(s, bad) {
+				t.Errorf("screen %d contains %q", i, bad)
+			}
+		}
+	}
+	if !strings.Contains(ansi.Strip(screens[0]), "node") {
+		t.Error("the readable part of the process name was lost")
+	}
+}

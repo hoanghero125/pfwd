@@ -67,12 +67,12 @@ func (m Model) modalLines() []string {
 		}
 	case modalHostKey:
 		q := md.prompt.Question
-		title = "First connection to " + string(md.prompt.Host)
+		title = "First connection to " + clean(string(md.prompt.Host))
 		body = append(body,
 			"pfwd has not seen this server's key before. Check the fingerprint with whoever runs the server before you trust it.",
 			"",
-			"  "+q.KeyType,
-			"  "+q.Fingerprint,
+			"  "+clean(q.KeyType),
+			"  "+clean(q.Fingerprint),
 			"",
 			m.hint("y", "trust and save to known_hosts", "n", "don't connect"),
 		)
