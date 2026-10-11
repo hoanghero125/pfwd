@@ -64,7 +64,7 @@ Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux,
 
 ## Not supported yet
 
-- Passphrase-protected keys that aren't in ssh-agent: run `ssh-add` first. Passphrase and password prompts come in v0.3.0.
+- Password and one-time-code (2FA, keyboard-interactive) logins, and passphrase-protected keys that aren't in ssh-agent (run `ssh-add` first). Prompts for all three come in v0.3.0; until then pfwd says which one the server asked for.
 - `ProxyJump` and `ProxyCommand` hosts (v0.3.0).
 - macOS, BSD and Windows servers (v0.4.0). The machine running pfwd can be macOS, Linux or Windows today.
 - Reconnecting after a dropped connection (v0.3.0): restart pfwd for now.

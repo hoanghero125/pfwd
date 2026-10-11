@@ -39,6 +39,12 @@ type Options struct {
 	// DenyTCPForwarding rejects direct-tcpip channels, like an sshd with
 	// AllowTcpForwarding no.
 	DenyTCPForwarding bool
+	// OneTimeCode enables keyboard-interactive auth that asks for this code.
+	OneTimeCode string
+	// KeyThenCode makes an accepted key only a first step: the client must
+	// then answer the OneTimeCode prompt, like AuthenticationMethods
+	// publickey,keyboard-interactive.
+	KeyThenCode bool
 }
 
 // Server is a running test server. It stops, and waits for all of its
@@ -74,10 +80,29 @@ func Start(tb testing.TB, o Options) *Server {
 	}
 
 	cfg := &ssh.ServerConfig{}
+	var askCode func(ssh.ConnMetadata, ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error)
+	if o.OneTimeCode != "" {
+		askCode = func(_ ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+			answers, err := challenge("", "", []string{"Verification code: "}, []bool{false})
+			if err != nil {
+				return nil, err
+			}
+			if len(answers) == 1 && subtle.ConstantTimeCompare([]byte(answers[0]), []byte(o.OneTimeCode)) == 1 {
+				return nil, nil
+			}
+			return nil, errors.New("sshtest: wrong code")
+		}
+		if !o.KeyThenCode {
+			cfg.KeyboardInteractiveCallback = askCode
+		}
+	}
 	if len(o.AuthorizedKeys) > 0 {
 		cfg.PublicKeyCallback = func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			for _, k := range o.AuthorizedKeys {
 				if bytes.Equal(k.Marshal(), key.Marshal()) {
+					if o.KeyThenCode {
+						return nil, &ssh.PartialSuccessError{Next: ssh.ServerAuthCallbacks{KeyboardInteractiveCallback: askCode}}
+					}
 					return nil, nil
 				}
 			}

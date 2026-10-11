@@ -104,9 +104,23 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 
 	cfg := &ssh.ClientConfig{
 		User: hc.User,
-		Auth: []ssh.AuthMethod{ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
-			return signers, nil
-		})},
+		// Password and keyboard-interactive are offered only to learn that
+		// the server wants them: their callbacks end the handshake with a
+		// marker error instead of prompting (prompts arrive in v0.3.0).
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
+				return signers, nil
+			}),
+			ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+				if len(questions) == 0 {
+					return nil, nil // an informational round; answering it is free
+				}
+				return nil, errWantsCode
+			}),
+			ssh.PasswordCallback(func() (string, error) {
+				return "", errWantsPassword
+			}),
+		},
 		HostKeyCallback:   checker.callback(ctx),
 		HostKeyAlgorithms: checker.algorithms(),
 	}
@@ -131,10 +145,25 @@ func unsupported(alias, option string) error {
 		"%s uses %s, which pfwd does not support yet (planned for v0.3.0); connect to a host without it for now", alias, option)}
 }
 
+// Marker errors from the password and keyboard-interactive callbacks.
+var (
+	errWantsPassword = errors.New("the server asks for a password")
+	errWantsCode     = errors.New("the server asks for keyboard-interactive input")
+)
+
 func handshakeError(hc *HostConfig, addr string, err error, offered int, notes []string) error {
 	var e *Error
 	if errors.As(err, &e) {
 		return e
+	}
+	if errors.Is(err, errWantsPassword) || errors.Is(err, errWantsCode) {
+		what := "a password"
+		if errors.Is(err, errWantsCode) {
+			what = "a password or one-time code (keyboard-interactive login)"
+		}
+		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf(
+			"logging in to %s as %s needs %s, which pfwd supports from v0.3.0. For now, use a host that accepts your key alone; `ssh-copy-id %s` installs your public key there",
+			hc.Alias, hc.User, what, hc.Alias)}
 	}
 	if strings.Contains(err.Error(), "unable to authenticate") {
 		var b strings.Builder

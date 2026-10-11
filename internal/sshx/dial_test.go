@@ -583,3 +583,51 @@ func TestConnDialContextTargetClosed(t *testing.T) {
 		t.Errorf("message should name the host and the target: %v", err)
 	}
 }
+
+// startKeylessServer starts a server that refuses every key, with the given
+// auth options, and returns a config that knows its host key.
+func startKeylessServer(t *testing.T, o sshtest.Options) *HostConfig {
+	t.Helper()
+	dir := t.TempDir()
+	keyPath, _ := writeKey(t, dir, "id_ed25519", "")
+	srv := sshtest.Start(t, o)
+	kh := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(kh, []byte(srv.KnownHostsLine()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &HostConfig{
+		Alias: "uni", HostName: srv.Host(), Port: srv.Port(), User: "student",
+		IdentityFiles: []string{keyPath}, KnownHostsFiles: []string{kh}, StrictHostKeyChecking: "ask",
+	}
+}
+
+func TestDialPasswordOnlyServer(t *testing.T) {
+	hc := startKeylessServer(t, sshtest.Options{Password: "hunter2"})
+	_, err := Dial(t.Context(), hc, DialOptions{dialAgent: noAgent})
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("err = %v, want ErrAuth", err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "password") || !strings.Contains(msg, "v0.3.0") || strings.Contains(msg, "ssh-add") {
+		t.Errorf("message should say the server wants a password and when pfwd supports it, not suggest ssh-add: %v", err)
+	}
+}
+
+func TestDialOneTimeCodeServer(t *testing.T) {
+	hc := startKeylessServer(t, sshtest.Options{OneTimeCode: "123456"})
+	_, err := Dial(t.Context(), hc, DialOptions{dialAgent: noAgent})
+	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "one-time code") || !strings.Contains(err.Error(), "v0.3.0") {
+		t.Errorf("err = %v, want ErrAuth naming the one-time code and v0.3.0", err)
+	}
+}
+
+func TestDialKeyThenOneTimeCode(t *testing.T) {
+	f := newFixture(t, sshtest.Options{OneTimeCode: "123456", KeyThenCode: true})
+	_, err := Dial(t.Context(), f.hc, DialOptions{dialAgent: noAgent})
+	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "one-time code") {
+		t.Errorf("err = %v, want ErrAuth naming the one-time code", err)
+	}
+	if strings.Contains(err.Error(), "accepted none") {
+		t.Errorf("the server accepted the key, but the message says it didn't: %v", err)
+	}
+}
