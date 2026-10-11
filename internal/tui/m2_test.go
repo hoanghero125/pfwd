@@ -105,7 +105,7 @@ func TestColumnsDropInOrder(t *testing.T) {
 	}
 }
 
-// TestCellsNeverTouch pins ux-4: a cut value keeps a space before the
+// TestCellsNeverTouch: a cut value keeps a space before the
 // next column.
 func TestCellsNeverTouch(t *testing.T) {
 	e := newFakeEngine()
@@ -384,7 +384,7 @@ func TestMouse(t *testing.T) {
 	}
 }
 
-// TestTooSmallOnlyQuits pins ux-6.
+// TestTooSmallOnlyQuits: a window too small to draw in only takes q.
 func TestTooSmallOnlyQuits(t *testing.T) {
 	e := newFakeEngine()
 	m := sized(connectedWith(newModel(e), rp(5173, "node")), 50, 10)
@@ -400,7 +400,7 @@ func TestTooSmallOnlyQuits(t *testing.T) {
 	}
 }
 
-// TestBackOutKeys pins ux-7: esc and q close every modal.
+// TestBackOutKeys: esc and q close every modal.
 func TestBackOutKeys(t *testing.T) {
 	for _, k := range []string{"esc", "q"} {
 		m := connectedWith(newModel(newFakeEngine()), rp(5173, "node"))
@@ -419,7 +419,7 @@ func TestBackOutKeys(t *testing.T) {
 	}
 }
 
-// TestScrollKeepsOffset pins ux-8: moving up inside the visible rows
+// TestScrollKeepsOffset: moving up inside the visible rows
 // doesn't drag the view.
 func TestScrollKeepsOffset(t *testing.T) {
 	var ports []engine.Port
