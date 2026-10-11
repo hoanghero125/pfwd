@@ -4,11 +4,13 @@ version: "2"
 
 run:
   relative-path-mode: gomod
+  build-tags: [e2e] # lint the end-to-end tests too
   modules-download-mode: readonly # fail instead of silently editing go.mod/go.sum
 
 linters:
   default: standard # errcheck, govet, ineffassign, staticcheck, unused
   enable:
+    - bidichk     # invisible bidi characters in source (Trojan Source)
     - bodyclose   # unclosed HTTP response bodies
     - copyloopvar # redundant `v := v` copies
     - errorlint   # errors.Is/As instead of == and type switches

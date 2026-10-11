@@ -1,0 +1,24 @@
+ pfwd  devbox ◐ connecting                                               ? help
+────────────────────────────────────────────────────────────────────────────────
+
+  Connecting to devbox…
+
+
+            ╭──────────────────────────────────────────────────────╮
+            │ First connection to devbox                           │
+            │                                                      │
+            │ pfwd has not seen this server's key before. Check    │
+            │ the fingerprint with whoever runs the server before  │
+            │ you trust it.                                        │
+            │                                                      │
+            │   ssh-ed25519                                        │
+            │   SHA256:KkzXxjJZNedqGLrx+HOOCWJgJimyaMj/kxgCfnf8M7A │
+            │                                                      │
+            │ y trust and save to known_hosts   n don't connect    │
+            ╰──────────────────────────────────────────────────────╯
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+ q quit

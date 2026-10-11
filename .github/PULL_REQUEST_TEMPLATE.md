@@ -24,6 +24,5 @@ Closes #
 - [ ] PR title follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 - [ ] `make lint test` passes locally
 - [ ] Tests added or updated (or this PR explains why none are needed)
-- [ ] Docs updated (`README.md`, `docs/`, command `--help` text) where behavior changed
-- [ ] Related items in the spec checklist (`docs/SPEC.md`) are ticked
+- [ ] Docs updated (`README.md`, command `--help` text) where behavior changed
 - [ ] No secrets, private hostnames or personal data in code, tests, fixtures or screenshots

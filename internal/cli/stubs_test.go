@@ -79,7 +79,7 @@ func TestStubUsageErrorsExit2(t *testing.T) {
 // TestEveryCommandRejectsBadUsage fails when a command is missing here, so
 // each new command has to declare its usage errors.
 var badArgs = map[string][]string{
-	"pfwd":                       nil, // [host...]
+	"pfwd":                       {"a", "b"}, // one host at a time until M5
 	"pfwd attach":                {"extra"},
 	"pfwd completion":            {"bsh"},
 	"pfwd completion bash":       {"extra"},

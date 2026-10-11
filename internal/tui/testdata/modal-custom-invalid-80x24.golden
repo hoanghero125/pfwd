@@ -1,0 +1,24 @@
+ pfwd  devbox ● connected                                                ? help
+────────────────────────────────────────────────────────────────────────────────
+  STATE    REMOTE  LOCAL            PROCESS              CONN  TRAFFIC
+▶ —        :5173   —                node                 —     —
+
+
+
+
+            ╭──────────────────────────────────────────────────────╮
+            │ Forward :5173 to another local port                  │
+            │                                                      │
+            │ Local port  0█                                       │
+            │ Enter a port from 1 to 65535.                        │
+            │ enter forward   esc cancel                           │
+            ╰──────────────────────────────────────────────────────╯
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+ enter forward/stop  F other local port  x stop  ? help  q quit

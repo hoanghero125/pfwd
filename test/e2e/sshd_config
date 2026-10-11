@@ -1,0 +1,11 @@
+# Minimal sshd for the e2e tests: one ed25519 host key, keys only, and TCP
+# forwarding on (Alpine's default config turns it off).
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+AuthorizedKeysFile .ssh/authorized_keys
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+AllowTcpForwarding yes
+PidFile /run/sshd.pid

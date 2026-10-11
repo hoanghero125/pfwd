@@ -56,8 +56,9 @@ lint: $(GOLANGCI_LINT)
 $(GOLANGCI_LINT):
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/$(GOLANGCI_LINT_VERSION)/install.sh | sh -s -- -b "$(GOLANGCI_LINT_DIR)" $(GOLANGCI_LINT_VERSION)
 
+# End-to-end tests against sshd containers; needs Docker with the compose plugin.
 e2e:
-	@echo "no end-to-end tests yet (added in M1)"
+	go test -tags e2e -count=1 -timeout 10m -v ./test/e2e/...
 
 demo:
 	@echo "no demo tapes yet (added in M2)"

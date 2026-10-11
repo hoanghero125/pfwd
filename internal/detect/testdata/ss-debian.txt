@@ -1,0 +1,5 @@
+State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess                           
+LISTEN 0      5            0.0.0.0:8123      0.0.0.0:*    users:(("python3",pid=3235,fd=3))
+LISTEN 0      5          127.0.0.1:5173      0.0.0.0:*    users:(("python3",pid=3236,fd=3))
+LISTEN 0      5              [::1]:6006         [::]:*    users:(("python3",pid=3238,fd=3))
+LISTEN 0      5                  *:8000            *:*    users:(("python3",pid=3237,fd=3))
