@@ -30,6 +30,11 @@ func TestMain(m *testing.M) {
 			os.Exit(3)
 		}
 		os.Exit(0)
+	case "startupinfo":
+		if err := os.WriteFile(os.Getenv(helperOutEnv), []byte(startupInfo()), 0o600); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
 	case "fail":
 		os.Exit(2)
 	case "hang":
