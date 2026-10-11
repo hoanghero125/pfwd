@@ -547,3 +547,54 @@ func TestCursorFollowsItsPort(t *testing.T) {
 		t.Errorf("cursor left :3000 when its forward stopped:\n%s", view(m))
 	}
 }
+
+// TestEnterFollowsOnConflict: forward.on_conflict decides what enter does
+// when the local port is taken; only "ask" (the default) opens the modal.
+func TestEnterFollowsOnConflict(t *testing.T) {
+	busy := func() *forward.PortInUseError {
+		return &forward.PortInUseError{Addr: "127.0.0.1", Port: 8123, Suggested: 8124}
+	}
+	for _, tc := range []struct {
+		policy    string
+		wantModal bool
+		check     func(t *testing.T, e *fakeEngine, m Model)
+	}{
+		{"", true, nil},
+		{"ask", true, nil},
+		{"next", false, func(t *testing.T, e *fakeEngine, m Model) {
+			if len(e.specs) != 2 || e.specs[1].LocalPort != 8124 || !strings.Contains(view(m), "Forwarded :8123 to localhost:8124") {
+				t.Errorf("next: specs %+v\n%s", e.specs, view(m))
+			}
+		}},
+		{"random", false, func(t *testing.T, e *fakeEngine, m Model) {
+			if len(e.specs) != 2 || e.specs[1].LocalPort == 0 || e.specs[1].LocalPort == 8123 {
+				t.Errorf("random: specs %+v", e.specs)
+			}
+		}},
+		{"fail", false, func(t *testing.T, e *fakeEngine, m Model) {
+			if len(e.specs) != 1 || !strings.Contains(view(m), "✗ ") {
+				t.Errorf("fail: specs %+v\n%s", e.specs, view(m))
+			}
+		}},
+	} {
+		e := newFakeEngine()
+		e.forwardErr = busy()
+		m := connectedWith(newModelWith(e, Options{OnConflict: tc.policy}), rp(8123, "python3"))
+		m, _ = press(t, m, "enter")
+		if got := m.modal.kind == modalConflict; got != tc.wantModal {
+			t.Errorf("on_conflict %q: modal %v, want %v", tc.policy, got, tc.wantModal)
+		}
+		if tc.check != nil {
+			tc.check(t, e, m)
+		}
+	}
+
+	// A port typed into F is the user's choice: a clash there always asks.
+	e := newFakeEngine()
+	m := connectedWith(newModelWith(e, Options{OnConflict: "next"}), rp(8123, "python3"))
+	e.forwardErr = &forward.PortInUseError{Addr: "127.0.0.1", Port: 9000, Suggested: 9001}
+	m, _ = press(t, m, "F", "9", "0", "0", "0", "enter")
+	if m.modal.kind != modalConflict {
+		t.Errorf("a busy custom port did not ask; specs %+v", e.specs)
+	}
+}

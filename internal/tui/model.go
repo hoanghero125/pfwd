@@ -49,6 +49,10 @@ type Options struct {
 	// BindAddr is the local address forwards listen on; one that isn't
 	// loopback gets a badge in the host bar.
 	BindAddr string
+	// OnConflict is what enter does when the local port is taken: "next"
+	// uses the free port nearby, "random" any free port, "fail" reports
+	// the error, and anything else ("ask") opens the conflict modal.
+	OnConflict string
 }
 
 // statusFor is how long the status line shows the last event.
@@ -187,6 +191,9 @@ type (
 		spec engine.ForwardSpec
 		fwd  engine.Forward
 		err  error
+		// resolve applies Options.OnConflict to a taken port; a port the
+		// user typed always asks.
+		resolve bool
 	}
 	stopResultMsg struct {
 		id     string
@@ -251,7 +258,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyStats(msg)
 		return m, m.tick()
 	case forwardResultMsg:
-		m.applyForwardResult(msg)
+		return m, m.applyForwardResult(msg)
 	case stopResultMsg:
 		m.applyStopResult(msg)
 	case openResultMsg:
@@ -430,15 +437,16 @@ func (m *Model) applyStats(msg statsMsg) {
 	m.rebuild()
 }
 
-func (m *Model) applyForwardResult(msg forwardResultMsg) {
+// applyForwardResult records a forward, or handles why it failed. A taken
+// local port follows Options.OnConflict, which may retry.
+func (m *Model) applyForwardResult(msg forwardResultMsg) tea.Cmd {
 	if msg.err != nil {
 		var inUse *forward.PortInUseError
 		if errors.As(msg.err, &inUse) {
-			m.modal = modalState{kind: modalConflict, spec: msg.spec, busy: inUse.Port, bind: inUse.Addr, suggested: inUse.Suggested}
-			return
+			return m.portTaken(msg, inUse)
 		}
 		m.event(statusErr, "%s", msg.err.Error())
-		return
+		return nil
 	}
 	if _, ok := m.forwards[msg.fwd.ID]; !ok {
 		m.forwards[msg.fwd.ID] = msg.fwd
@@ -447,6 +455,26 @@ func (m *Model) applyForwardResult(msg forwardResultMsg) {
 	m.selected = "f:" + msg.fwd.ID
 	m.setStatus(statusOK, "Forwarded :%d to %s", msg.fwd.Spec.RemotePort, localAddr(msg.fwd.Spec))
 	m.rebuild()
+	return nil
+}
+
+// portTaken follows forward.on_conflict for a forward made with enter;
+// "ask", and any port the user typed, opens the conflict modal.
+func (m *Model) portTaken(msg forwardResultMsg, inUse *forward.PortInUseError) tea.Cmd {
+	spec := msg.spec
+	switch {
+	case !msg.resolve:
+	case m.opts.OnConflict == "next" && inUse.Suggested != 0:
+		spec.LocalPort = inUse.Suggested
+		return m.forwardCmd(spec)
+	case m.opts.OnConflict == "random":
+		return m.randomPortCmd(spec)
+	case m.opts.OnConflict == "fail" || m.opts.OnConflict == "next":
+		m.event(statusErr, "%s", inUse.Error())
+		return nil
+	}
+	m.modal = modalState{kind: modalConflict, spec: spec, busy: inUse.Port, bind: inUse.Addr, suggested: inUse.Suggested}
+	return nil
 }
 
 func (m *Model) applyStopResult(msg stopResultMsg) {
@@ -648,6 +676,30 @@ func (m Model) activeForwards() int {
 func (m Model) forwardCmd(spec engine.ForwardSpec) tea.Cmd {
 	eng, host := m.eng, m.host
 	return func() tea.Msg {
+		f, err := eng.Forward(host, spec)
+		return forwardResultMsg{spec: spec, fwd: f, err: err}
+	}
+}
+
+// enterCmd forwards a detected port with enter: a taken local port then
+// follows Options.OnConflict.
+func (m Model) enterCmd(spec engine.ForwardSpec) tea.Cmd {
+	eng, host := m.eng, m.host
+	return func() tea.Msg {
+		f, err := eng.Forward(host, spec)
+		return forwardResultMsg{spec: spec, fwd: f, err: err, resolve: true}
+	}
+}
+
+// randomPortCmd forwards spec to any free local port.
+func (m Model) randomPortCmd(spec engine.ForwardSpec) tea.Cmd {
+	eng, host, bind := m.eng, m.host, m.opts.BindAddr
+	return func() tea.Msg {
+		port, err := forward.FreePort(bind)
+		if err != nil {
+			return forwardResultMsg{spec: spec, err: err}
+		}
+		spec.LocalPort = port
 		f, err := eng.Forward(host, spec)
 		return forwardResultMsg{spec: spec, fwd: f, err: err}
 	}

@@ -62,8 +62,9 @@ func TestTUIOptionsFromConfig(t *testing.T) {
 	}
 
 	cfg.UI = config.UI{Theme: config.ThemeLight, Mouse: false, ConfirmQuit: false, ShowHidden: true, Glyphs: config.GlyphsASCII}
+	cfg.Forward.OnConflict = config.ConflictFail
 	o = tuiOptions(cfg, env(nil), "linux")
-	if o.Theme != "light" || o.Mouse || !o.SkipQuitConfirm || !o.ShowHidden || !o.ASCII {
+	if o.Theme != "light" || o.Mouse || !o.SkipQuitConfirm || !o.ShowHidden || !o.ASCII || o.OnConflict != "fail" {
 		t.Errorf("from config = %+v", o)
 	}
 

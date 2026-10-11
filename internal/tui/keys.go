@@ -49,7 +49,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case r.fwd != nil:
 			return m, m.stopCmd(*r.fwd)
 		default:
-			return m, m.forwardCmd(specFor(*r.port))
+			return m, m.enterCmd(specFor(*r.port))
 		}
 	case "F":
 		r, ok := m.current()

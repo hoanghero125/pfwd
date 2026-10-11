@@ -1,11 +1,11 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
 	"time"
 
 	"github.com/hoanghero125/pfwd/internal/detect"
@@ -126,7 +126,7 @@ func (e *Engine) autoForward(host HostID, hs *hostState, p detect.RemotePort) {
 		case ConflictFail:
 			retry = false
 		case ConflictRandom:
-			spec.LocalPort, err = freeLocalPort(spec.BindAddr)
+			spec.LocalPort, err = forward.FreePort(cmp.Or(spec.BindAddr, e.o.BindAddr))
 			retry = err == nil
 		default:
 			spec.LocalPort = inUse.Suggested
@@ -148,23 +148,6 @@ func (e *Engine) autoForward(host HostID, hs *hostState, p detect.RemotePort) {
 		return
 	}
 	e.notify(host, p, f)
-}
-
-// freeLocalPort asks the OS for a free local port on bind.
-func freeLocalPort(bind string) (uint16, error) {
-	if bind == "" {
-		bind = "127.0.0.1"
-	}
-	ln, err := net.Listen("tcp", net.JoinHostPort(bind, "0"))
-	if err != nil {
-		return 0, fmt.Errorf("find a free local port: %w", err)
-	}
-	defer ln.Close()
-	ap, err := netip.ParseAddrPort(ln.Addr().String())
-	if err != nil {
-		return 0, fmt.Errorf("find a free local port: %w", err)
-	}
-	return ap.Port(), nil
 }
 
 // goOwned runs fn in a goroutine the engine waits for, unless Close has

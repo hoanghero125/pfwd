@@ -97,3 +97,21 @@ func suggestPort(bind string, port uint16) uint16 {
 	}
 	return 0
 }
+
+// FreePort asks the OS for a free TCP port on bind ("" means 127.0.0.1).
+// Another program can take it before it is used, so Listen still checks.
+func FreePort(bind string) (uint16, error) {
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(bind, "0"))
+	if err != nil {
+		return 0, fmt.Errorf("find a free local port on %s: %w; check forward.bind", bind, err)
+	}
+	defer ln.Close()
+	ap, err := netip.ParseAddrPort(ln.Addr().String())
+	if err != nil {
+		return 0, fmt.Errorf("find a free local port: %w", err)
+	}
+	return ap.Port(), nil
+}

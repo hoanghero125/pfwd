@@ -76,6 +76,7 @@ func tuiOptions(cfg config.Config, getenv func(string) string, goos string) tui.
 		SkipQuitConfirm: !cfg.UI.ConfirmQuit,
 		ShowHidden:      cfg.UI.ShowHidden,
 		BindAddr:        cfg.Forward.Bind,
+		OnConflict:      string(cfg.Forward.OnConflict),
 	}
 	if cfg.UI.Theme == config.ThemeDark || cfg.UI.Theme == config.ThemeLight {
 		o.Theme = string(cfg.UI.Theme)
