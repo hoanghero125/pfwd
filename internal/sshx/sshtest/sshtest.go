@@ -26,6 +26,9 @@ import (
 type Options struct {
 	// AuthorizedKeys enables publickey auth for these keys.
 	AuthorizedKeys []ssh.PublicKey
+	// TrustedUserCAKeys accepts user certificates signed by these CAs, like
+	// sshd's TrustedUserCAKeys.
+	TrustedUserCAKeys []ssh.PublicKey
 	// Password enables password auth when non-empty.
 	Password string
 	// HostKey is the server's host key; nil generates a fresh ed25519 key.
@@ -96,17 +99,31 @@ func Start(tb testing.TB, o Options) *Server {
 			cfg.KeyboardInteractiveCallback = askCode
 		}
 	}
-	if len(o.AuthorizedKeys) > 0 {
-		cfg.PublicKeyCallback = func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			for _, k := range o.AuthorizedKeys {
-				if bytes.Equal(k.Marshal(), key.Marshal()) {
-					if o.KeyThenCode {
-						return nil, &ssh.PartialSuccessError{Next: ssh.ServerAuthCallbacks{KeyboardInteractiveCallback: askCode}}
-					}
-					return nil, nil
-				}
+	certs := &ssh.CertChecker{IsUserAuthority: func(auth ssh.PublicKey) bool {
+		for _, ca := range o.TrustedUserCAKeys {
+			if bytes.Equal(ca.Marshal(), auth.Marshal()) {
+				return true
 			}
-			return nil, errors.New("sshtest: key not authorized")
+		}
+		return false
+	}}
+	if len(o.AuthorizedKeys) > 0 || len(o.TrustedUserCAKeys) > 0 {
+		cfg.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			accepted := false
+			if _, isCert := key.(*ssh.Certificate); isCert {
+				_, err := certs.Authenticate(conn, key)
+				accepted = err == nil
+			}
+			for _, k := range o.AuthorizedKeys {
+				accepted = accepted || bytes.Equal(k.Marshal(), key.Marshal())
+			}
+			if !accepted {
+				return nil, errors.New("sshtest: key not authorized")
+			}
+			if o.KeyThenCode {
+				return nil, &ssh.PartialSuccessError{Next: ssh.ServerAuthCallbacks{KeyboardInteractiveCallback: askCode}}
+			}
+			return nil, nil
 		}
 	}
 	if o.Password != "" {

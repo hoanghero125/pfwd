@@ -18,10 +18,12 @@ type keyFile struct {
 	encrypted bool
 }
 
-// loadKeyFiles reads the identity files that exist. Missing files are
-// skipped silently, like OpenSSH does for its default list; other problems
-// become notes for the auth error message. Key material is never logged.
-func loadKeyFiles(paths []string) (files []keyFile, notes []string) {
+// loadKeyFiles reads the identity files that exist, and the certificates
+// stored next to them as <path>-cert.pub (OpenSSH loads those on its own).
+// Missing files are skipped silently, like OpenSSH does for its default
+// list; other problems become notes for the auth error message. Key
+// material is never logged.
+func loadKeyFiles(paths []string) (files []keyFile, certs []*ssh.Certificate, notes []string) {
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -41,11 +43,35 @@ func loadKeyFiles(paths []string) (files []keyFile, notes []string) {
 			files = append(files, keyFile{path: p, pub: pub, encrypted: true})
 		case err != nil:
 			notes = append(notes, fmt.Sprintf("could not use %s: %v", p, err))
+			continue
 		default:
 			files = append(files, keyFile{path: p, signer: signer, pub: signer.PublicKey()})
 		}
+		if cert, ok := readPublicKey(p + "-cert.pub").(*ssh.Certificate); ok {
+			certs = append(certs, cert)
+		}
 	}
-	return files, notes
+	return files, certs, notes
+}
+
+// loadCertFiles reads CertificateFile entries. Unreadable or non-certificate
+// files become notes.
+func loadCertFiles(paths []string) (certs []*ssh.Certificate, notes []string) {
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				notes = append(notes, fmt.Sprintf("could not read %s: %v", p, err))
+			}
+			continue
+		}
+		cert, ok := readPublicKey(p).(*ssh.Certificate)
+		if !ok {
+			notes = append(notes, fmt.Sprintf("%s is not an SSH certificate", p))
+			continue
+		}
+		certs = append(certs, cert)
+	}
+	return certs, notes
 }
 
 func readPublicKey(path string) ssh.PublicKey {
@@ -60,37 +86,83 @@ func readPublicKey(path string) ssh.PublicKey {
 	return pub
 }
 
+// asCert returns pub as a certificate, if it is one. Keys from ssh-agent
+// arrive as *agent.Key whatever their type, so the wire form is parsed.
+func asCert(pub ssh.PublicKey) (*ssh.Certificate, bool) {
+	if cert, ok := pub.(*ssh.Certificate); ok {
+		return cert, true
+	}
+	parsed, err := ssh.ParsePublicKey(pub.Marshal())
+	if err != nil {
+		return nil, false
+	}
+	cert, ok := parsed.(*ssh.Certificate)
+	return cert, ok
+}
+
+// keyID identifies the key pair behind a public key: a certificate counts
+// as the key it certifies.
+func keyID(pub ssh.PublicKey) string {
+	if cert, ok := asCert(pub); ok {
+		return string(cert.Key.Marshal())
+	}
+	return string(pub.Marshal())
+}
+
 // orderSigners decides which keys are offered, in order: agent keys that
-// match an identity file, then the other agent keys (unless
-// IdentitiesOnly), then identity files the agent does not hold. All of
-// them go into one publickey method, because x/crypto stops trying a method
-// name once it has failed.
-func orderSigners(hc *HostConfig, agentKeys []ssh.Signer, files []keyFile) (signers []ssh.Signer, notes []string) {
-	isFileKey := make(map[string]bool)
+// match an identity file or certificate, then the other agent keys (unless
+// IdentitiesOnly), then identity files the agent does not hold. Each key is
+// offered with its certificates first, as OpenSSH does. All of them go into
+// one publickey method, because x/crypto stops trying a method name once it
+// has failed.
+func orderSigners(hc *HostConfig, agentKeys []ssh.Signer, files []keyFile, certs []*ssh.Certificate) (signers []ssh.Signer, notes []string) {
+	configured := make(map[string]bool)
 	for _, f := range files {
 		if f.pub != nil {
-			isFileKey[string(f.pub.Marshal())] = true
+			configured[keyID(f.pub)] = true
 		}
+	}
+	certsFor := make(map[string][]*ssh.Certificate)
+	for _, c := range certs {
+		id := keyID(c)
+		certsFor[id] = append(certsFor[id], c)
+		configured[id] = true
 	}
 	inAgent := make(map[string]bool)
 	for _, s := range agentKeys {
-		inAgent[string(s.PublicKey().Marshal())] = true
+		inAgent[keyID(s.PublicKey())] = true
+	}
+
+	offered := make(map[string]bool)
+	offer := func(s ssh.Signer) {
+		if _, isCert := asCert(s.PublicKey()); !isCert {
+			for _, c := range certsFor[keyID(s.PublicKey())] {
+				if cs, err := ssh.NewCertSigner(c, s); err == nil && !offered[string(cs.PublicKey().Marshal())] {
+					offered[string(cs.PublicKey().Marshal())] = true
+					signers = append(signers, cs)
+				}
+			}
+		}
+		if k := string(s.PublicKey().Marshal()); !offered[k] {
+			offered[k] = true
+			signers = append(signers, s)
+		}
 	}
 
 	for _, s := range agentKeys {
-		if isFileKey[string(s.PublicKey().Marshal())] {
-			signers = append(signers, s)
+		if configured[keyID(s.PublicKey())] {
+			offer(s)
 		}
 	}
 	if !hc.IdentitiesOnly {
 		for _, s := range agentKeys {
-			if !isFileKey[string(s.PublicKey().Marshal())] {
-				signers = append(signers, s)
+			if !configured[keyID(s.PublicKey())] {
+				offer(s)
 			}
 		}
 	}
 	for _, f := range files {
-		if f.pub != nil && inAgent[string(f.pub.Marshal())] {
+		if f.pub != nil && inAgent[keyID(f.pub)] {
 			continue
 		}
 		if f.encrypted {
@@ -98,7 +170,7 @@ func orderSigners(hc *HostConfig, agentKeys []ssh.Signer, files []keyFile) (sign
 				"%s is passphrase-protected; run `ssh-add %s` to unlock it in ssh-agent (pfwd asks for passphrases from v0.3.0)", f.path, f.path))
 			continue
 		}
-		signers = append(signers, f.signer)
+		offer(f.signer)
 	}
 	return signers, notes
 }

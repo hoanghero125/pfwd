@@ -30,8 +30,11 @@ type HostConfig struct {
 	Port     int
 	// IdentityFiles are expanded key paths in the order they are tried.
 	// Missing files are skipped at dial time, like OpenSSH does.
-	IdentityFiles  []string
-	IdentitiesOnly bool
+	IdentityFiles []string
+	// CertificateFiles are CertificateFile entries, expanded. Certificates
+	// named <IdentityFile>-cert.pub are found without being listed here.
+	CertificateFiles []string
+	IdentitiesOnly   bool
 	// IdentityAgent is "" for the default agent, "none" to disable the
 	// agent, or a socket or pipe path.
 	IdentityAgent string
@@ -281,13 +284,15 @@ func optionsFromFiles(alias string, o Overrides, env Env) (map[string][]string, 
 			}
 		}
 	}
-	// IdentityFile accumulates across files, like OpenSSH.
-	for _, c := range cfgs {
-		vs, err := c.GetAll(alias, "identityfile")
-		if err != nil {
-			return nil, fmt.Errorf("read ssh config for %s: %w", alias, err)
+	// IdentityFile and CertificateFile accumulate across files, like OpenSSH.
+	for _, key := range []string{"identityfile", "certificatefile"} {
+		for _, c := range cfgs {
+			vs, err := c.GetAll(alias, key)
+			if err != nil {
+				return nil, fmt.Errorf("read ssh config for %s: %w", alias, err)
+			}
+			opts[key] = append(opts[key], vs...)
 		}
-		opts["identityfile"] = append(opts["identityfile"], vs...)
 	}
 	if len(opts["identityfile"]) == 0 {
 		opts["identityfile"] = defaultIdentityFiles
@@ -359,6 +364,11 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 		if p = expandPath(p, tok, env); p != "" && !seen[p] {
 			seen[p] = true
 			hc.IdentityFiles = append(hc.IdentityFiles, p)
+		}
+	}
+	for _, p := range opts["certificatefile"] {
+		if p = expandPath(p, tok, env); p != "" {
+			hc.CertificateFiles = append(hc.CertificateFiles, p)
 		}
 	}
 	hc.IdentitiesOnly = isYes(first("identitiesonly"))

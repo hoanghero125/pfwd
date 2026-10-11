@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -629,5 +630,111 @@ func TestDialKeyThenOneTimeCode(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "accepted none") {
 		t.Errorf("the server accepted the key, but the message says it didn't: %v", err)
+	}
+}
+
+// newCA returns a user CA signer.
+func newCA(t *testing.T) ssh.Signer {
+	t.Helper()
+	ca, _ := ed25519Signer(t)
+	return ca
+}
+
+// signUserCert signs pub as a user certificate for the "tester" principal.
+func signUserCert(t *testing.T, ca ssh.Signer, pub ssh.PublicKey) *ssh.Certificate {
+	t.Helper()
+	cert := &ssh.Certificate{
+		Key:             pub,
+		CertType:        ssh.UserCert,
+		KeyId:           "pfwd-test",
+		ValidPrincipals: []string{"tester"},
+		ValidBefore:     ssh.CertTimeInfinity,
+	}
+	if err := cert.SignCert(rand.Reader, ca); err != nil {
+		t.Fatal(err)
+	}
+	return cert
+}
+
+// startCAServer starts a server that trusts only certificates from ca.
+func startCAServer(t *testing.T, ca ssh.Signer) *HostConfig {
+	t.Helper()
+	srv := sshtest.Start(t, sshtest.Options{TrustedUserCAKeys: []ssh.PublicKey{ca.PublicKey()}})
+	kh := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(kh, []byte(srv.KnownHostsLine()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &HostConfig{Alias: "certhost", HostName: srv.Host(), Port: srv.Port(), User: "tester",
+		KnownHostsFiles: []string{kh}, StrictHostKeyChecking: "ask"}
+}
+
+func TestDialCertificateNextToKeyFile(t *testing.T) {
+	ca := newCA(t)
+	hc := startCAServer(t, ca)
+	keyPath, key := writeKey(t, t.TempDir(), "id_ed25519", "")
+	cert := signUserCert(t, ca, key.PublicKey())
+	if err := os.WriteFile(keyPath+"-cert.pub", ssh.MarshalAuthorizedKey(cert), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hc.IdentityFiles = []string{keyPath}
+	mustDial(t, hc, DialOptions{})
+}
+
+func TestDialCertificateFile(t *testing.T) {
+	ca := newCA(t)
+	hc := startCAServer(t, ca)
+	dir := t.TempDir()
+	keyPath, key := writeKey(t, dir, "id_work", "")
+	certPath := filepath.Join(dir, "work-cert.pub")
+	if err := os.WriteFile(certPath, ssh.MarshalAuthorizedKey(signUserCert(t, ca, key.PublicKey())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hc.IdentityFiles = []string{keyPath}
+	hc.CertificateFiles = []string{certPath}
+	mustDial(t, hc, DialOptions{})
+}
+
+func TestDialAgentCertificateWithIdentitiesOnly(t *testing.T) {
+	ca := newCA(t)
+	hc := startCAServer(t, ca)
+	keyPath, key := writeKey(t, t.TempDir(), "id_ed25519", "")
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := ssh.ParseRawPrivateKey(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kr := agent.NewKeyring()
+	if err := kr.Add(agent.AddedKey{PrivateKey: raw, Certificate: signUserCert(t, ca, key.PublicKey())}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	t.Cleanup(wg.Wait)
+	dialAgent := func(*HostConfig) (io.ReadWriteCloser, error) {
+		client, server := net.Pipe()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = agent.ServeAgent(kr, server)
+			server.Close()
+		}()
+		return client, nil
+	}
+	hc.IdentityFiles = []string{keyPath}
+	hc.IdentitiesOnly = true
+	mustDial(t, hc, DialOptions{dialAgent: dialAgent})
+}
+
+func TestFromOptionsCertificateFile(t *testing.T) {
+	env := testEnv(t)
+	hc, err := fromOptions("h", map[string][]string{"certificatefile": {"~/.ssh/a-cert.pub", "%d/b-cert.pub"}}, Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(env.Home, ".ssh", "a-cert.pub"), filepath.Join(env.Home, "b-cert.pub")}
+	if !reflect.DeepEqual(hc.CertificateFiles, want) {
+		t.Errorf("CertificateFiles = %q, want %q", hc.CertificateFiles, want)
 	}
 }

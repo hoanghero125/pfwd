@@ -77,8 +77,10 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 			}
 		}
 	}
-	files, notes := loadKeyFiles(hc.IdentityFiles)
-	signers, moreNotes := orderSigners(hc, agentKeys, files)
+	files, certs, notes := loadKeyFiles(hc.IdentityFiles)
+	certFiles, certNotes := loadCertFiles(hc.CertificateFiles)
+	notes = append(notes, certNotes...)
+	signers, moreNotes := orderSigners(hc, agentKeys, files, append(certs, certFiles...))
 	notes = append(notes, moreNotes...)
 	log.Debug("offering keys", "host", hc.Alias, "agent_keys", len(agentKeys), "key_files", len(files), "offered", len(signers))
 
