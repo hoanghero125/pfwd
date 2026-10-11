@@ -1,5 +1,6 @@
 # pfwd build tasks. Run make from a POSIX shell (Git Bash on Windows).
-# Tool versions are pinned here and in .github/workflows/ci.yml.
+# Tool versions are pinned here and in .github/workflows/*.yml (golangci-lint,
+# govulncheck, GoReleaser). Dependabot does not bump these: update them together.
 
 MODULE                := github.com/hoanghero125/pfwd
 GOLANGCI_LINT_VERSION := v2.14.0
@@ -42,16 +43,18 @@ test:
 
 # Banned-call check, golangci-lint (includes staticcheck and govet), govulncheck.
 lint: $(GOLANGCI_LINT)
-	@if git grep -n -I -F --untracked 'InsecureIgnoreHostKey' -- '*.go' ':(exclude)docs/**'; then \
-		echo "error: ssh.InsecureIgnoreHostKey is banned; host keys must always be verified" >&2; \
-		exit 1; \
+	@git grep -n -I -F --untracked 'InsecureIgnoreHostKey' -- '*.go' ':(exclude)docs/**'; status=$$?; \
+	if [ $$status -eq 0 ]; then \
+		echo "error: ssh.InsecureIgnoreHostKey is banned; host keys must always be verified" >&2; exit 1; \
+	elif [ $$status -ne 1 ]; then \
+		echo "error: git grep failed (exit $$status), so the InsecureIgnoreHostKey ban could not be checked" >&2; exit 1; \
 	fi
 	$(GOLANGCI_LINT) config verify
 	$(GOLANGCI_LINT) run ./...
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 $(GOLANGCI_LINT):
-	curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b "$(GOLANGCI_LINT_DIR)" $(GOLANGCI_LINT_VERSION)
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/$(GOLANGCI_LINT_VERSION)/install.sh | sh -s -- -b "$(GOLANGCI_LINT_DIR)" $(GOLANGCI_LINT_VERSION)
 
 e2e:
 	@echo "no end-to-end tests yet (added in M1)"

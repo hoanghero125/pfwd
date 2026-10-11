@@ -10,7 +10,8 @@ updates:
         update-types: [minor, patch]
         patterns: ["*"]
     commit-message:
-      prefix: deps
+      prefix: build # "build(deps): bump ..." (Conventional Commits)
+      include: scope
     cooldown:
       default-days: 3
       semver-major-days: 14
@@ -24,6 +25,7 @@ updates:
       actions:
         patterns: ["*"]
     commit-message:
-      prefix: ci
+      prefix: ci # "ci(deps): bump ..."
+      include: scope
     cooldown:
       default-days: 7

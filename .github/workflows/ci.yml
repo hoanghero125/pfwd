@@ -10,12 +10,13 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }} # keep every run on main
 
 jobs:
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -33,8 +34,14 @@ jobs:
       - name: Ban ssh.InsecureIgnoreHostKey
         shell: bash
         run: |
-          if git grep -n -I -F 'InsecureIgnoreHostKey' -- '*.go' ':(exclude)docs/**'; then
+          set +e # git grep exits 1 for "no match"; anything above 1 is an error
+          git grep -n -I -F 'InsecureIgnoreHostKey' -- '*.go' ':(exclude)docs/**'
+          status=$?
+          if [ "$status" -eq 0 ]; then
             echo "::error::ssh.InsecureIgnoreHostKey is banned: host keys must always be verified"
+            exit 1
+          elif [ "$status" -ne 1 ]; then
+            echo "::error::git grep failed (exit $status), so the ban could not be checked"
             exit 1
           fi
       - name: go vet
@@ -53,6 +60,7 @@ jobs:
   snapshot:
     name: goreleaser snapshot
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,11 +72,11 @@ jobs:
       - name: goreleaser check
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: "~> v2"
+          version: v2.18.3 # pinned like the Makefile's tools; bump by hand
           args: check
       - name: goreleaser snapshot
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: "~> v2"
+          version: v2.18.3
           # --snapshot skips publishing but not signing; keyless cosign only runs in release.yml.
           args: release --snapshot --clean --skip=sign
