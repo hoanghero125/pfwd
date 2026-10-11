@@ -58,7 +58,7 @@ $(GOLANGCI_LINT):
 
 # End-to-end tests against sshd containers; needs Docker with the compose plugin.
 e2e:
-	go test -tags e2e -count=1 -timeout 10m ./test/e2e/...
+	go test -tags e2e -count=1 -timeout 10m -v ./test/e2e/...
 
 demo:
 	@echo "no demo tapes yet (added in M2)"

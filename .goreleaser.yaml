@@ -102,6 +102,57 @@ nfpms:
         file_info:
           mode: 0644
 
+# Homebrew and Scoop push over SSH with a deploy key that can only write to
+# its own repo (secrets set in release.yml). skip_upload: auto leaves
+# prereleases out of both.
+homebrew_casks:
+  - name: pfwd
+    ids: [default]
+    directory: Casks
+    homepage: https://github.com/hoanghero125/pfwd
+    description: Detect and forward remote ports over SSH from a terminal UI
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "pfwd {{ .Tag }}"
+    skip_upload: auto
+    repository:
+      owner: hoanghero125
+      name: homebrew-tap
+      branch: main
+      git:
+        url: git@github.com:hoanghero125/homebrew-tap.git
+        private_key: '{{ envOrDefault "HOMEBREW_TAP_DEPLOY_KEY" "" }}'
+    hooks:
+      post:
+        # The binary isn't notarized yet, so clear the quarantine flag
+        # Gatekeeper would otherwise block it with.
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/pfwd"]
+          end
+
+scoops:
+  - name: pfwd
+    ids: [default]
+    directory: bucket
+    homepage: https://github.com/hoanghero125/pfwd
+    description: Detect and forward remote ports over SSH from a terminal UI
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "pfwd {{ .Tag }}"
+    skip_upload: auto
+    repository:
+      owner: hoanghero125
+      name: scoop-bucket
+      branch: main
+      git:
+        url: git@github.com:hoanghero125/scoop-bucket.git
+        private_key: '{{ envOrDefault "SCOOP_BUCKET_DEPLOY_KEY" "" }}'
+
 sboms:
   - id: archives
     artifacts: archive
