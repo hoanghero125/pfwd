@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/hoanghero125/pfwd/internal/engine"
+	"github.com/hoanghero125/pfwd/internal/safetext"
 )
 
 type modalKind int
@@ -67,12 +68,12 @@ func (m Model) modalLines() []string {
 		}
 	case modalHostKey:
 		q := md.prompt.Question
-		title = "First connection to " + clean(string(md.prompt.Host))
+		title = "First connection to " + safetext.Clean(string(md.prompt.Host))
 		body = append(body,
 			"pfwd has not seen this server's key before. Check the fingerprint with whoever runs the server before you trust it.",
 			"",
-			"  "+clean(q.KeyType),
-			"  "+clean(q.Fingerprint),
+			"  "+safetext.Clean(q.KeyType),
+			"  "+safetext.Clean(q.Fingerprint),
 			"",
 			m.hint("y", "trust and save to known_hosts", "n", "don't connect"),
 		)

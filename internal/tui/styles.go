@@ -3,8 +3,6 @@ package tui
 import (
 	"fmt"
 	"strconv"
-	"strings"
-	"unicode"
 
 	"charm.land/lipgloss/v2"
 )
@@ -47,23 +45,4 @@ func formatRate(b float64) string {
 
 func itoa(n int) string {
 	return strconv.Itoa(n)
-}
-
-// clean makes text from the server, the ssh config or an error safe to draw.
-// Control characters (C0 including ESC, DEL and C1) and bidi overrides
-// become U+FFFD, so a hostile process name or server message can't move
-// the cursor, clear the screen, retitle the window or write the clipboard.
-func clean(s string) string {
-	s = strings.ToValidUTF8(s, "\ufffd")
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r == '\t' || r == '\n' || r == '\r':
-			return ' '
-		case unicode.IsControl(r),
-			r >= '\u202a' && r <= '\u202e',
-			r >= '\u2066' && r <= '\u2069':
-			return '\ufffd'
-		}
-		return r
-	}, s)
 }

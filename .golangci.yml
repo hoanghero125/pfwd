@@ -10,6 +10,7 @@ run:
 linters:
   default: standard # errcheck, govet, ineffassign, staticcheck, unused
   enable:
+    - bidichk     # invisible bidi characters in source (Trojan Source)
     - bodyclose   # unclosed HTTP response bodies
     - copyloopvar # redundant `v := v` copies
     - errorlint   # errors.Is/As instead of == and type switches

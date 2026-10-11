@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hoanghero125/pfwd/internal/safetext"
 	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/version"
 )
@@ -37,12 +38,18 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 	if err == nil {
 		return exitOK
 	}
-	fmt.Fprintf(stderr, "Error: %v\n", err)
+	fmt.Fprint(stderr, errorLine(err))
 	code := exitCode(err)
 	if code == exitUsage {
 		fmt.Fprintf(stderr, "Run '%s --help' for usage.\n", cmd.CommandPath())
 	}
 	return code
+}
+
+// errorLine formats err for stderr. Errors can carry text from the server,
+// so it goes through safetext.Clean like everything the TUI draws.
+func errorLine(err error) string {
+	return "Error: " + safetext.Clean(err.Error()) + "\n"
 }
 
 // exitCode maps an error to the documented exit codes.

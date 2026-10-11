@@ -9,6 +9,7 @@ import (
 
 	"github.com/hoanghero125/pfwd/internal/detect"
 	"github.com/hoanghero125/pfwd/internal/engine"
+	"github.com/hoanghero125/pfwd/internal/safetext"
 )
 
 // The smallest window pfwd draws in; below it shows a "too small" note.
@@ -21,7 +22,7 @@ const (
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
-	v.WindowTitle = "pfwd: " + clean(string(m.host))
+	v.WindowTitle = "pfwd: " + safetext.Clean(string(m.host))
 	return v
 }
 
@@ -83,7 +84,7 @@ func (m Model) hostBar(w int) string {
 	default:
 		state = th.warn.Render("◐") + " connecting"
 	}
-	left := " " + th.bold.Render("pfwd") + "  " + clean(string(m.host)) + " " + state
+	left := " " + th.bold.Render("pfwd") + "  " + safetext.Clean(string(m.host)) + " " + state
 	right := th.accent.Render("?") + " " + th.faint.Render("help") + " "
 	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 1 {
@@ -99,11 +100,11 @@ func (m Model) statusLine() string {
 	}
 	switch s.kind {
 	case statusOK:
-		return " " + m.th.ok.Render("✓") + " " + clean(s.text)
+		return " " + m.th.ok.Render("✓") + " " + safetext.Clean(s.text)
 	case statusErr:
-		return " " + m.th.bad.Render("✗") + " " + clean(s.text)
+		return " " + m.th.bad.Render("✗") + " " + safetext.Clean(s.text)
 	default:
-		return " " + clean(s.text)
+		return " " + safetext.Clean(s.text)
 	}
 }
 
@@ -120,7 +121,7 @@ func (m Model) hints() string {
 // body is the area between the top and bottom rules, exactly h lines.
 func (m Model) body(w, h int) []string {
 	var lines []string
-	host := clean(string(m.host))
+	host := safetext.Clean(string(m.host))
 	switch {
 	case m.session == engine.SessionFailed:
 		title := "Can't connect to " + host
@@ -129,7 +130,7 @@ func (m Model) body(w, h int) []string {
 		}
 		lines = append(lines, "", "  "+m.th.bad.Render("✗ "+title), "")
 		if m.sessErr != nil {
-			for _, l := range strings.Split(ansi.Wordwrap(clean(m.sessErr.Error()), w-4, ""), "\n") {
+			for _, l := range strings.Split(ansi.Wordwrap(safetext.Clean(m.sessErr.Error()), w-4, ""), "\n") {
 				lines = append(lines, "  "+l)
 			}
 			lines = append(lines, "")
@@ -158,13 +159,13 @@ func (m Model) body(w, h int) []string {
 }
 
 func (m Model) unavailable() []string {
-	host := clean(string(m.host))
+	host := safetext.Clean(string(m.host))
 	switch {
 	case m.detectErr != nil:
-		return []string{"Can't list ports on " + host + ": " + clean(m.detectErr.Error())}
+		return []string{"Can't list ports on " + host + ": " + safetext.Clean(m.detectErr.Error())}
 	case m.remoteOS != "" && m.remoteOS != "Linux":
 		return []string{
-			"Can't list ports on " + host + " yet: it runs " + clean(m.remoteOS) + ", and pfwd reads Linux servers today.",
+			"Can't list ports on " + host + " yet: it runs " + safetext.Clean(m.remoteOS) + ", and pfwd reads Linux servers today.",
 			"macOS, BSD and Windows servers come in v0.4.0.",
 		}
 	default:
@@ -281,7 +282,7 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 		}
 		switch {
 		case f.State == engine.Failed && f.Err != nil:
-			process = th.faint.Render(clean(f.Err.Error()))
+			process = th.faint.Render(safetext.Clean(f.Err.Error()))
 		case r.port == nil:
 			process = th.faint.Render("not listening")
 		default:
@@ -311,7 +312,7 @@ func (m Model) processText(p detect.RemotePort) string {
 	if p.Process == "" {
 		return m.th.faint.Render("?")
 	}
-	return clean(p.Process)
+	return safetext.Clean(p.Process)
 }
 
 func (m Model) trafficText(id string) string {
