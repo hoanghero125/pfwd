@@ -1,0 +1,22 @@
+# Build output
+/bin/
+/dist/
+
+# Web UI build output and dependencies (M6)
+/web/dist/
+/web/node_modules/
+
+# Test artifacts
+*.test
+coverage.out
+
+# Local settings and secrets
+.env
+.env.*
+.claude/settings.local.json
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
