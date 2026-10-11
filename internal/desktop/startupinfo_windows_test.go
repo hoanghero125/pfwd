@@ -14,7 +14,9 @@ import (
 // window: "flags show".
 func startupInfo() string {
 	var si windows.StartupInfo
-	windows.GetStartupInfo(&si)
+	if err := windows.GetStartupInfo(&si); err != nil {
+		return err.Error()
+	}
 	return fmt.Sprintf("%d %d", si.Flags, si.ShowWindow)
 }
 
