@@ -7,9 +7,9 @@ The VS Code Ports panel for any terminal. Agentless, one binary, every OS.
 [![Go Report Card](https://goreportcard.com/badge/github.com/hoanghero125/pfwd)](https://goreportcard.com/report/github.com/hoanghero125/pfwd)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`pfwd devbox` connects to a host from your `~/.ssh/config` and shows a live table of the TCP ports listening on it. Start `npm run dev` on the server, the port shows up a second or two later, and one key makes it `localhost:5173` on your laptop.
+`pfwd devbox` connects to a host from your `~/.ssh/config` and shows a live table of the TCP ports listening on it. Start `npm run dev` on the server and, a second or two later, `localhost:5173` on your laptop reaches it. You don't press anything.
 
-> **Status: v0.1.0, early.** One host at a time, Linux servers, local forwards. Auto-forward, reconnects, `-R`/`-D` forwards, macOS/BSD/Windows servers, scripting commands and a web UI come in later releases.
+> **Status: v0.2.0, early.** One host at a time, Linux servers, local forwards. Reconnects, `-R`/`-D` forwards, macOS/BSD/Windows servers, scripting commands and a web UI come in later releases.
 
 ## Install
 
@@ -33,12 +33,17 @@ pfwd devbox -p 2222 -i ~/.ssh/id_work -F ./ssh_config
 The first time you connect to a server, pfwd shows its host key fingerprint and asks before saving it to `known_hosts`, the way `ssh` does. Then the table fills in:
 
 ```
- pfwd  devbox ● connected                                                ? help
+ pfwd  devbox ● connected                                     auto: on   ? help
 ────────────────────────────────────────────────────────────────────────────────
-  STATE    REMOTE  LOCAL            PROCESS              CONN  TRAFFIC
-▶ ● fwd    :5173   localhost:5173   node                 2     ↓12K/s ↑1.0K/s
+  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
+▶ ● fwd   :5173   localhost:5173  node         Vite http    2    ↓12K/s ↑1.0K/s
+  ● fwd   :8888   localhost:8888  jupyter-lab  Jupyter http 0    ↓0 ↑0
   ───────────────────────── detected, not forwarded ──────────────────────────
-  —        :8888   —                jupyter-lab          —     —
+  —       :6379   —               redis-server Redis        —    —
+  —       :9090   —               ?            Prometheus   —    —
+─ 1 ignored hidden, h shows ────────────────────────────────────────────────────
+ ✓ Forwarded :5173 to localhost:5173 (auto)
+ enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit
 ```
 
 | Key | Does |
@@ -47,10 +52,58 @@ The first time you connect to a server, pfwd shows its host key fingerprint and 
 | `enter` or `f` | forward the port to the same local port, or stop the forward |
 | `F` | forward to a different local port |
 | `x` | stop the forward |
+| `o` | open the forward in your browser (`https://` when the server speaks TLS) |
+| `y` | copy its URL |
+| `a` | turn auto-forward on or off for this host |
+| `/` | filter rows by port, process or label; `esc` clears the filter |
+| `h` | show or hide ignored ports |
+| `L` | event log |
 | `?` | help |
 | `q` or `ctrl+c` | quit (asks first while forwards are active) |
 
-If the local port is taken, pfwd offers the next free one instead.
+If the local port is taken, pfwd offers the next free one instead. With `ui.mouse` on (the default), a click selects a row and the wheel scrolls.
+
+## Auto-forward
+
+A port that starts listening while pfwd is connected gets forwarded to the same local port, with no key press, once two snapshots in a row have seen it. A desktop notification tells you, unless you set `ui.notifications = false`. Ports that were already listening when pfwd connected stay in the table, unforwarded, until you press `enter`.
+
+Some ports are never auto-forwarded and are hidden from the table: port 22 and processes such as `sshd`, `systemd-resolved` and `containerd`. The view line under the table counts them; `h` shows them. `detect.ignore_ports` and `detect.ignore_processes` change the lists, and `forward.auto_ports` limits auto-forward to the ports you name.
+
+A port you stop with `x` stays stopped for the rest of the session, and so does one whose auto-forward failed. Press `enter` on it to forward it by hand. Turn auto-forward off for a host with `a`, for one run with `--no-auto`, or for good with `forward.auto = false`.
+
+Each new forward is probed once, through the SSH connection, to see whether it speaks HTTP or HTTPS. The LABEL column shows the result next to the service name. Database ports (Postgres, MySQL, Redis, MongoDB) are not probed.
+
+## Configuration
+
+pfwd works without a config file. To change its defaults, run `pfwd config edit`: it creates the file with every setting at its default, commented, and opens it in `$VISUAL`, `$EDITOR`, or notepad on Windows and vi elsewhere. `pfwd config validate` checks the file and points at the line and column of anything it doesn't accept; pfwd refuses to start with a broken config, so you never get silent defaults.
+
+The file lives at `~/.config/pfwd/config.toml` on Linux, `~/Library/Application Support/pfwd/config.toml` on macOS and `%AppData%\pfwd\config.toml` on Windows. `pfwd config path` prints it. `PFWD_CONFIG` or `--config` points pfwd at another file.
+
+```toml
+[detect]
+interval = "2s"            # how often to list the server's ports
+ignore_ports = [22]        # ports or ranges like "9000-9100"
+
+[forward]
+auto = true                # forward new ports automatically
+auto_ports = []            # if not empty, only auto-forward these, e.g. ["3000-3999", 5173]
+bind = "127.0.0.1"         # 0.0.0.0 exposes forwards to your network
+on_conflict = "ask"        # when a local port is taken: ask, next, random or fail
+
+[ui]
+theme = "auto"             # auto, dark or light
+notifications = true       # desktop notification when a port is auto-forwarded
+
+[labels]
+8000 = "API"
+
+[hosts.devbox]             # overrides for one host, by ssh config alias
+auto = false
+```
+
+A few settings are accepted now but take effect in later releases: `forward.auto_expire`, `forward.restore` and `ssh.keepalive_*`, `ssh.reconnect_max_backoff` in v0.3.0, along with `hosts.<alias>.forwards`; `forward.privileged_offset` in v0.4.0. `pfwd config validate` says so when you set one.
+
+These flags override the file for one run: `--auto` and `--no-auto`, `--bind`, `--interval` and `--no-color`. pfwd also honors `NO_COLOR`, and draws ASCII instead of Unicode symbols in the old Windows console (`ui.glyphs` changes that).
 
 ## How it works
 
@@ -58,7 +111,7 @@ pfwd resolves the host with `ssh -G`, so `Match`, `Include` and every default wo
 
 Nothing gets installed on the server. pfwd runs one probe, then a small `sh` loop on a single SSH channel that lists listening sockets with `ss` every 2 seconds, or reads `/proc/net/tcp` on busybox systems. It writes no files there and uploads no binary.
 
-Forwards listen on `127.0.0.1` only, so your network can't reach them.
+Forwards listen on `127.0.0.1` unless you change `forward.bind` or pass `--bind`, so your network can't reach them. When they listen on another address, the top bar says so.
 
 Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux, `~/Library/Application Support/pfwd` on macOS, `%APPDATA%\pfwd` on Windows. Set `--log-level debug` or `PFWD_LOG=debug` for more detail.
 
