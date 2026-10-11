@@ -19,7 +19,7 @@ import (
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden files in testdata")
 
-// mainScreen is the design brief's main screen: three forwards (one whose
+// mainScreen is the full main screen: three forwards (one whose
 // port went away) and three detected ports.
 func mainScreen(t *testing.T) Model {
 	t.Helper()
