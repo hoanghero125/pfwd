@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -270,5 +271,23 @@ func TestServeStopsOnCancel(t *testing.T) {
 	if c2, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
 		c2.Close()
 		t.Error("listener still accepts after Serve returned")
+	}
+}
+
+func TestLocalReportsDialErrors(t *testing.T) {
+	reported := make(chan error, 4)
+	_, addr, _, _ := serve(t, "127.0.0.1:9", failDialer{}, Options{OnDialError: func(err error) { reported <- err }})
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	select {
+	case err := <-reported:
+		if err == nil || !strings.Contains(err.Error(), "administratively prohibited") {
+			t.Errorf("reported %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the dial failure was not reported")
 	}
 }

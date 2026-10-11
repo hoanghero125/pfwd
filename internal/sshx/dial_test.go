@@ -553,3 +553,33 @@ func TestDialKnownHostsDevNull(t *testing.T) {
 	g.hc.StrictHostKeyChecking = "no"
 	mustDial(t, g.hc, DialOptions{})
 }
+
+func TestConnDialContextForwardingRefused(t *testing.T) {
+	f := newFixture(t, sshtest.Options{DenyTCPForwarding: true})
+	c := mustDial(t, f.hc, DialOptions{})
+	_, err := c.DialContext(t.Context(), "tcp", "127.0.0.1:8123")
+	if !errors.Is(err, ErrForwardingRefused) {
+		t.Fatalf("DialContext = %v, want ErrForwardingRefused", err)
+	}
+	if !strings.Contains(err.Error(), "testhost") || !strings.Contains(err.Error(), "AllowTcpForwarding") {
+		t.Errorf("message should name the host and the sshd setting: %v", err)
+	}
+}
+
+func TestConnDialContextTargetClosed(t *testing.T) {
+	f := newFixture(t, sshtest.Options{})
+	c := mustDial(t, f.hc, DialOptions{})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := ln.Addr().String()
+	ln.Close()
+	_, err = c.DialContext(t.Context(), "tcp", closed)
+	if err == nil || errors.Is(err, ErrForwardingRefused) {
+		t.Fatalf("DialContext to a closed port = %v, want a plain error", err)
+	}
+	if !strings.Contains(err.Error(), "testhost") || !strings.Contains(err.Error(), closed) {
+		t.Errorf("message should name the host and the target: %v", err)
+	}
+}

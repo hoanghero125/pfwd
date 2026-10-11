@@ -16,6 +16,9 @@ var (
 	// ErrUnsupported means the ssh config asks for something pfwd does not
 	// support yet.
 	ErrUnsupported = errors.New("not supported yet")
+	// ErrForwardingRefused means the server refuses TCP forwarding
+	// (AllowTcpForwarding no, or DisableForwarding yes, in sshd_config).
+	ErrForwardingRefused = errors.New("server refuses TCP forwarding")
 )
 
 // Error is a user-facing error: Msg is a complete sentence with a suggested

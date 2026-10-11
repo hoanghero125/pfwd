@@ -30,6 +30,9 @@ type Options struct {
 	MaxConns int
 	// Logger receives debug details; nil discards them.
 	Logger *slog.Logger
+	// OnDialError, if set, is called with every failed dial to the target,
+	// from the goroutine serving that connection. It must not block.
+	OnDialError func(error)
 }
 
 // Stats are a forward's counters. BytesIn flows from the server to local
@@ -51,6 +54,7 @@ type Local struct {
 	target string
 	sem    chan struct{}
 	log    *slog.Logger
+	onFail func(error)
 
 	conns, total, in, out, last atomic.Int64
 
@@ -73,6 +77,7 @@ func NewLocal(ln net.Listener, d Dialer, target string, o Options) *Local {
 		target: target,
 		sem:    make(chan struct{}, o.MaxConns),
 		log:    o.Logger,
+		onFail: o.OnDialError,
 		open:   make(map[net.Conn]struct{}),
 	}
 }
@@ -152,7 +157,10 @@ func (l *Local) handle(ctx context.Context, client net.Conn) {
 	remote, err := l.dialer.DialContext(dialCtx, "tcp", l.target)
 	cancel()
 	if err != nil {
-		l.log.Debug("forward dial failed", "target", l.target, "err", err)
+		l.log.Info("forward dial failed", "target", l.target, "err", err)
+		if l.onFail != nil {
+			l.onFail(err)
+		}
 		return
 	}
 	if !l.track(remote) {

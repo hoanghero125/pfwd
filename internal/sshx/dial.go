@@ -36,6 +36,7 @@ type DialOptions struct {
 // Conn is an authenticated SSH connection.
 type Conn struct {
 	client *ssh.Client
+	alias  string // for error messages
 }
 
 // Dial connects to the host, verifies its host key and authenticates.
@@ -122,7 +123,7 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 		return nil, handshakeError(hc, addr, err, len(signers), notes)
 	}
 	_ = nc.SetDeadline(time.Time{})
-	return &Conn{client: ssh.NewClient(sc, chans, reqs)}, nil
+	return &Conn{client: ssh.NewClient(sc, chans, reqs), alias: hc.Alias}, nil
 }
 
 func unsupported(alias, option string) error {
@@ -154,8 +155,19 @@ func handshakeError(hc *HostConfig, addr string, err error, offered int, notes [
 }
 
 // DialContext opens a direct-tcpip channel to addr, as seen from the server.
+// A server that refuses forwarding returns an error that matches
+// ErrForwardingRefused.
 func (c *Conn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	return c.client.DialContext(ctx, network, addr)
+	conn, err := c.client.DialContext(ctx, network, addr)
+	if err == nil {
+		return conn, nil
+	}
+	var refused *ssh.OpenChannelError
+	if errors.As(err, &refused) && refused.Reason == ssh.Prohibited {
+		return nil, &Error{Kind: ErrForwardingRefused, Err: err, Msg: fmt.Sprintf(
+			"%s refuses TCP forwarding (AllowTcpForwarding or DisableForwarding in its sshd_config); ask the server's admin to allow it", c.alias)}
+	}
+	return nil, fmt.Errorf("%s could not connect to %s: %w; check that something still listens there", c.alias, addr, err)
 }
 
 // Output runs cmd on the server and returns its stdout. A non-zero exit

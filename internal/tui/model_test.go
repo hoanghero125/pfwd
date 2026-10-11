@@ -545,3 +545,23 @@ func TestServerTextCannotInjectEscapes(t *testing.T) {
 		t.Error("the readable part of the process name was lost")
 	}
 }
+
+func TestForwardErrorsReachTheStatusLine(t *testing.T) {
+	e := newFakeEngine()
+	m := connectedWith(newModel(e), rp(8123, "python3"))
+	m, _ = press(t, m, "enter")
+	fw := e.Forwards()[0]
+
+	fw.Err = errors.New("devbox could not connect to 127.0.0.1:8123: connection refused")
+	m = apply(m, engine.ForwardChanged{Forward: fw})
+	if v := view(m); !strings.Contains(v, "✗ :8123: devbox could not connect") || !strings.Contains(v, "● fwd") {
+		t.Errorf("an active forward's dial error is not shown:\n%s", v)
+	}
+
+	fw.State = engine.Failed
+	fw.Err = &sshx.Error{Kind: sshx.ErrForwardingRefused, Msg: "devbox refuses TCP forwarding"}
+	m = apply(m, engine.ForwardChanged{Forward: fw})
+	if v := view(m); !strings.Contains(v, "✗ :8123: devbox refuses TCP forwarding") || !strings.Contains(v, "✗ fail") {
+		t.Errorf("a refused forward is not shown as failed:\n%s", v)
+	}
+}

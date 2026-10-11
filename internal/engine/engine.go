@@ -267,7 +267,12 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 		return Forward{}, err
 	}
 	target := net.JoinHostPort(spec.RemoteHost, itoa(spec.RemotePort))
-	local := forward.NewLocal(ln, conn, target, forward.Options{Logger: e.log})
+	// f is set below, before Serve starts, so the callback always sees it.
+	var f *fwd
+	local := forward.NewLocal(ln, conn, target, forward.Options{
+		Logger:      e.log,
+		OnDialError: func(err error) { e.dialFailed(f, err) },
+	})
 
 	e.mu.Lock()
 	if e.closed || e.sessions[host] == nil || e.sessions[host].conn != conn {
@@ -277,7 +282,7 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 	}
 	e.nextID++
 	ctx, cancel := context.WithCancel(e.ctx)
-	f := &fwd{
+	f = &fwd{
 		Forward: Forward{ID: strconv.Itoa(e.nextID), Host: host, Spec: spec, State: Active, StartedAt: e.o.Now()},
 		local:   local,
 		cancel:  cancel,
@@ -317,6 +322,30 @@ func (e *Engine) serve(ctx context.Context, f *fwd) {
 	e.log.Info("forward failed", "id", f.ID, "err", err)
 	e.mu.Lock()
 	f.State, f.Err = Failed, err
+	e.mu.Unlock()
+	e.emit(ForwardChanged{Forward: e.snapshot(f)})
+}
+
+// dialFailed records a connection through f that could not reach its
+// target. A server that refuses forwarding fails the forward for good and
+// closes its listener. Other errors (nothing listening on the target, say)
+// stay on the active forward so front ends can show them, and are emitted
+// once per distinct message so a retrying client can't flood the events.
+func (e *Engine) dialFailed(f *fwd, err error) {
+	e.mu.Lock()
+	switch {
+	case f.State != Active:
+		e.mu.Unlock()
+		return
+	case errors.Is(err, sshx.ErrForwardingRefused):
+		f.State, f.Err = Failed, err
+		f.cancel()
+	case f.Err != nil && f.Err.Error() == err.Error():
+		e.mu.Unlock()
+		return
+	default:
+		f.Err = err
+	}
 	e.mu.Unlock()
 	e.emit(ForwardChanged{Forward: e.snapshot(f)})
 }

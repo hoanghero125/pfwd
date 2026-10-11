@@ -29,6 +29,7 @@ type fakeConn struct {
 	probe    string
 	probeErr error
 	frames   []string
+	dialErr  error // returned by DialContext when set
 
 	once    sync.Once
 	gone    chan struct{}
@@ -65,6 +66,9 @@ func (c *fakeConn) DialContext(ctx context.Context, network, addr string) (net.C
 	case <-c.gone:
 		return nil, errors.New("connection closed")
 	default:
+	}
+	if c.dialErr != nil {
+		return nil, c.dialErr
 	}
 	var d net.Dialer
 	return d.DialContext(ctx, network, addr)
@@ -444,5 +448,74 @@ func TestStateStrings(t *testing.T) {
 		if s.String() != want {
 			t.Errorf("%d = %q, want %q", s, s.String(), want)
 		}
+	}
+}
+
+func dialLocal(t *testing.T, port uint16) {
+	t.Helper()
+	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", itoa(port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, _ = c.Read(make([]byte, 1)) // the forward closes it after the failed dial
+	c.Close()
+}
+
+func TestForwardRefusedByServerFails(t *testing.T) {
+	c := newFakeConn()
+	c.dialErr = &sshx.Error{Kind: sshx.ErrForwardingRefused, Msg: "devbox refuses TCP forwarding (AllowTcpForwarding or DisableForwarding in its sshd_config); ask the server's admin to allow it"}
+	e := newEngine(t, dialTo(c))
+	connected(t, e, "devbox")
+	local := freePort(t)
+	f, err := e.Forward("devbox", ForwardSpec{LocalPort: local, RemotePort: 8888})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialLocal(t, local)
+	failed := next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.State == Failed })
+	if !errors.Is(failed.Forward.Err, sshx.ErrForwardingRefused) {
+		t.Errorf("Err = %v, want ErrForwardingRefused", failed.Forward.Err)
+	}
+	if fs := e.Forwards(); len(fs) != 1 || fs[0].State != Failed {
+		t.Errorf("Forwards = %+v", fs)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", itoa(local)), 200*time.Millisecond)
+		if err != nil {
+			break
+		}
+		conn.Close()
+		if time.Now().After(deadline) {
+			t.Fatal("the listener of a refused forward is still open")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestForwardDialErrorShownWhileActive(t *testing.T) {
+	c := newFakeConn()
+	c.dialErr = errors.New("devbox could not connect to 127.0.0.1:8888: connection refused; check that something still listens there")
+	e := newEngine(t, dialTo(c))
+	connected(t, e, "devbox")
+	local := freePort(t)
+	f, err := e.Forward("devbox", ForwardSpec{LocalPort: local, RemotePort: 8888})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.Err == nil })
+	dialLocal(t, local)
+	got := next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.Err != nil })
+	if got.Forward.State != Active || !strings.Contains(got.Forward.Err.Error(), "connection refused") {
+		t.Errorf("ForwardChanged = %+v, want Active with the dial error", got.Forward)
+	}
+	// The same error again is not re-sent, so a retrying browser can't
+	// flood the event stream.
+	dialLocal(t, local)
+	select {
+	case ev := <-e.Events():
+		t.Errorf("unexpected event after a repeated error: %+v", ev)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

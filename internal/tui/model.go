@@ -204,10 +204,16 @@ func (m *Model) applyEvent(ev engine.Event) {
 		if f.Host != m.host {
 			return
 		}
+		prev, had := m.forwards[f.ID]
 		if f.State == engine.Stopped {
 			m.dropForward(f.ID)
 		} else {
 			m.forwards[f.ID] = f
+		}
+		// A new error on a forward (the server refuses forwarding, or
+		// nothing listens on the target any more) goes to the status line.
+		if f.Err != nil && (!had || prev.Err == nil || prev.Err.Error() != f.Err.Error()) {
+			m.setStatus(statusErr, ":%d: %s", f.Spec.RemotePort, f.Err.Error())
 		}
 	case engine.HostKeyPrompt:
 		if ev.Host == m.host {
