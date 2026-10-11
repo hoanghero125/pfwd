@@ -1,24 +1,24 @@
- pfwd  devbox ● connected                                                ? help
+ pfwd  devbox ● connected                                     auto: on   ? help
 ────────────────────────────────────────────────────────────────────────────────
-  STATE    REMOTE  LOCAL            PROCESS              CONN  TRAFFIC
-▶ ● fwd    :5173   localhost:5173   node                 2     ↓12K/s ↑1.0K/s
-  ✗ fail   :8000   localhost:8000   disconnected         0     —
-  ● fwd    :8888   localhost:8888   jupyter-lab          0     ↓0 ↑0
-  ──────────╭──────────────────────────────────────────────────────╮──────────
-  —        :│ Keys                                                 │
-  —        :│                                                      │
-  —        :│ ↑ ↓  j k     move                                    │
-            │ g G          first, last                             │
-            │ enter  f     forward the port, or stop it            │
+  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
+▶ ● fwd   :5╭──────────────────────────────────────────────────────╮K/s ↑1.0K/s
+  ✗ fail  :8│ Keys                                                 │
+  ● fwd   :8│                                                      │↑0
+  ──────────│ ↑ ↓  j k     move                                    │──────────
+  —       :6│ g G          first, last                             │
+  —       :9│ enter  f     forward the port, or stop it            │
             │ F            forward to another local port           │
             │ x            stop the forward                        │
-            │ ?            close this help                         │
+            │ o            open in the browser                     │
+            │ y            copy the URL                            │
+            │ a            turn auto-forward on or off             │
+            │ /            filter by port, process or label        │
+            │ h            show or hide ignored ports              │
+            │ L            event log                               │
+            │ ?  esc       close this help                         │
             │ q  ctrl+c    quit                                    │
             ╰──────────────────────────────────────────────────────╯
 
-
-
-
-────────────────────────────────────────────────────────────────────────────────
+─ 1 ignored hidden, h shows ────────────────────────────────────────────────────
  ✓ Forwarded :5173 to localhost:5173
- enter forward/stop  F other local port  x stop  ? help  q quit
+ enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit

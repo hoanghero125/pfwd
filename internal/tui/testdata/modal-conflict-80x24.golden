@@ -1,7 +1,7 @@
  pfwd  devbox ● connected                                                ? help
 ────────────────────────────────────────────────────────────────────────────────
-  STATE    REMOTE  LOCAL            PROCESS              CONN  TRAFFIC
-▶ —        :5173   —                node                 —     —
+  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
+▶ —       :5173   —               node                      —    —
 
 
 
@@ -9,7 +9,7 @@
             ╭──────────────────────────────────────────────────────╮
             │ Port 5173 is busy on this machine                    │
             │                                                      │
-            │ Something here already listens on 127.0.0.1:5173.    │
+            │ Something here already uses 127.0.0.1:5173.          │
             │                                                      │
             │ enter use localhost:5174   F other port   esc cancel │
             ╰──────────────────────────────────────────────────────╯
@@ -21,4 +21,4 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 
- enter forward/stop  F other local port  x stop  ? help  q quit
+ enter forward  F other port  a auto  / filter  L log  ? help  q quit

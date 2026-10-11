@@ -1,13 +1,12 @@
- pfwd  devbox ● connected                                                                                                            ? help
+ pfwd  devbox ● connected                                                                                                 auto: on   ? help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  STATE    REMOTE  LOCAL            PROCESS                                 CONN  TRAFFIC
-▶ ● fwd    :5173   localhost:5173   node                                    2     ↓12K/s ↑1.0K/s
-  ✗ fail   :8000   localhost:8000   disconnected                            0     —
-  ● fwd    :8888   localhost:8888   jupyter-lab                             0     ↓0 ↑0
+  STATE   REMOTE  LOCAL           PROCESS                                 LABEL             CONN TRAFFIC
+▶ ● fwd   :5173   localhost:5173  node                                    Vite http         2    ↓12K/s ↑1.0K/s
+  ✗ fail  :8000   localhost:8000  disconnected                                              0    —
+  ● fwd   :8888   localhost:8888  jupyter-lab                             Jupyter http      0    ↓0 ↑0
   ─────────────────────────────────────────────────────── detected, not forwarded ────────────────────────────────────────────────────────
-  —        :22     —                ?                                       —     —
-  —        :6379   —                redis-server                            —     —
-  —        :9090   —                ?                                       —     —
+  —       :6379   —               redis-server                            Redis             —    —
+  —       :9090   —               ?                                       Prometheus        —    —
 
 
 
@@ -35,6 +34,7 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+─ 1 ignored hidden, h shows ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  ✓ Forwarded :5173 to localhost:5173
- enter forward/stop  F other local port  x stop  ? help  q quit
+ enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit

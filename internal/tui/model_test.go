@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"image/color"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,7 @@ type fakeEngine struct {
 	forwards   []engine.Forward
 	specs      []engine.ForwardSpec
 	stopped    []string
+	auto       []bool
 	nextID     int
 }
 
@@ -67,6 +69,18 @@ func (f *fakeEngine) Stop(id string) error {
 	return errors.New("no such forward")
 }
 
+func (f *fakeEngine) SetAuto(_ engine.HostID, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.auto = append(f.auto, on)
+}
+
+func (f *fakeEngine) autoCalls() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.auto...)
+}
+
 func (f *fakeEngine) Forwards() []engine.Forward {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -75,9 +89,24 @@ func (f *fakeEngine) Forwards() []engine.Forward {
 
 var t0 = time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
 
+// Background colors a terminal may report.
+var (
+	black     = color.RGBA{A: 0xff}
+	lightGray = color.RGBA{R: 0xee, G: 0xee, B: 0xee, A: 0xff}
+)
+
+func hostKeyQuestion() sshx.HostKeyQuestion {
+	return sshx.HostKeyQuestion{Host: "devbox", KeyType: "ssh-ed25519", Fingerprint: "SHA256:abc"}
+}
+
 func newModel(e Engine) Model {
-	m := New(e, "devbox")
+	return newModelWith(e, Options{})
+}
+
+func newModelWith(e Engine, opts Options) Model {
+	m := New(e, "devbox", opts)
 	m.now = func() time.Time { return t0 }
+	m.goos = "linux"
 	// Tests send tickMsg themselves; a real tick would loop forever.
 	m.every = func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil }
 	return m

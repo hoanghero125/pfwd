@@ -206,7 +206,7 @@ func forwardDetectedPort(t *testing.T, service, process string) {
 	})
 	defer eng.Close()
 	host := engine.HostID(service)
-	d := newDriver(tui.New(eng, host))
+	d := newDriver(tui.New(eng, host, tui.Options{}))
 	eng.Connect(host)
 
 	// sshd itself is listening, so the table appears once detection runs.

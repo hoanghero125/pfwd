@@ -55,12 +55,18 @@ func (m Model) modalLines() []string {
 	case modalHelp:
 		title = "Keys"
 		keys := [][2]string{
-			{"↑ ↓  j k", "move"},
+			{th.g.upDown + "  j k", "move"},
 			{"g G", "first, last"},
 			{"enter  f", "forward the port, or stop it"},
 			{"F", "forward to another local port"},
 			{"x", "stop the forward"},
-			{"?", "close this help"},
+			{"o", "open in the browser"},
+			{"y", "copy the URL"},
+			{"a", "turn auto-forward on or off"},
+			{"/", "filter by port, process or label"},
+			{"h", "show or hide ignored ports"},
+			{"L", "event log"},
+			{"?  esc", "close this help"},
 			{"q  ctrl+c", "quit"},
 		}
 		for _, k := range keys {
@@ -79,7 +85,7 @@ func (m Model) modalLines() []string {
 		)
 	case modalPort:
 		title = "Forward :" + itoa(int(md.spec.RemotePort)) + " to another local port"
-		field := "Local port  " + md.input + th.accent.Render("█")
+		field := "Local port  " + md.input + th.accent.Render(th.g.block)
 		errLine := ""
 		if md.inputErr != "" {
 			errLine = th.bad.Render(md.inputErr)
@@ -88,9 +94,14 @@ func (m Model) modalLines() []string {
 	case modalConflict:
 		port := itoa(int(md.busy))
 		title = "Port " + port + " is busy on this machine"
-		where := "Something here already listens on " + md.bind + ":" + port + "."
+		addr := md.bind + ":" + port
+		where := "Something here already uses " + addr + "."
+		if m.goos == "windows" {
+			// Windows reserves port ranges that nothing visibly listens on.
+			where = "Something here already uses " + addr + ", or Windows reserved it. Hyper-V, WSL and Docker reserve port ranges; `netsh int ipv4 show excludedportrange protocol=tcp` lists them."
+		}
 		if md.suggested == 0 {
-			where = "Something here already listens on " + md.bind + ":" + port + ", and the next 100 ports are taken too."
+			where = strings.TrimSuffix(where, ".") + ". The next 100 ports are taken too."
 			body = append(body, where, "", m.hint("F", "choose a port", "esc", "cancel"))
 		} else {
 			body = append(body, where, "", m.hint("enter", "use localhost:"+itoa(int(md.suggested)), "F", "other port", "esc", "cancel"))
@@ -116,15 +127,15 @@ func (m Model) modalLines() []string {
 	return box(th, lines, modalInner)
 }
 
-// box draws a rounded border around lines padded to inner cells.
+// box draws a border around lines padded to inner cells.
 func box(th theme, lines []string, inner int) []string {
-	edge := th.accent
+	edge, g := th.accent, th.g
 	out := make([]string, 0, len(lines)+2)
-	out = append(out, edge.Render("╭"+strings.Repeat("─", inner+2)+"╮"))
+	out = append(out, edge.Render(g.topLeft+strings.Repeat(g.rule, inner+2)+g.topRight))
 	for _, l := range lines {
-		out = append(out, edge.Render("│")+" "+pad(ansi.Truncate(l, inner, ""), inner)+" "+edge.Render("│"))
+		out = append(out, edge.Render(g.side)+" "+pad(ansi.Truncate(l, inner, ""), inner)+" "+edge.Render(g.side))
 	}
-	out = append(out, edge.Render("╰"+strings.Repeat("─", inner+2)+"╯"))
+	out = append(out, edge.Render(g.bottomLeft+strings.Repeat(g.rule, inner+2)+g.bottomRight))
 	return out
 }
 

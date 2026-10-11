@@ -1,0 +1,40 @@
+ pfwd  devbox ● connected                                                                                                 auto: on   ? help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  STATE   REMOTE  LOCAL           PROCESS                                 LABEL             CONN TRAFFIC
+▶ ● fwd   :5173   localhost:5173  node                                    Vite http         2    ↓12K/s ↑1.0K/s
+  ✗ fail  :8000   localhost:8000  disconnected                                              0    —
+  ● fwd   :8888   localhost:8888  jupyter-lab                             Jupyter http      0    ↓0 ↑0
+  ─────────────────────────────────────────────────────── detected, not forwarded ────────────────────────────────────────────────────────
+  ignored :22     —               sshd                                                      —    —
+  —       :6379   —               redis-server                            Redis             —    —
+  —       :9090   —               ?                                       Prometheus        —    —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ✓ Forwarded :5173 to localhost:5173
+ enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit

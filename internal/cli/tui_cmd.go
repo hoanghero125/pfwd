@@ -119,7 +119,7 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	host := engine.HostID(hc.Alias)
 	eng.Connect(host)
 
-	prog := tea.NewProgram(tui.New(eng, host), tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out))
+	prog := tea.NewProgram(tui.New(eng, host, tui.Options{}), tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out))
 	final, err := prog.Run()
 	if err != nil {
 		return fmt.Errorf("run the terminal UI: %w", err)

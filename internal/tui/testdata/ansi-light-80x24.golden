@@ -1,0 +1,24 @@
+ \e[1mpfwd\e[m  devbox \e[32m●\e[m connected                                     auto: \e[32mon\e[m   \e[34m?\e[m \e[2mhelp\e[m 
+\e[2m────────────────────────────────────────────────────────────────────────────────\e[m
+\e[2m  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC\e[m        
+\e[48;5;254m\e[34m▶\e[m\e[48;5;254m \e[32m●\e[m\e[48;5;254m fwd   :5173   \e[1mlocalhost:5173\e[m\e[48;5;254m  node         Vite \e[2mhttp\e[m\e[48;5;254m    2    ↓12K/s ↑1.0K/s \e[m
+  \e[31m✗\e[m fail  :8000   localhost:8000  \e[2mdisconnected\e[m              0    \e[2m—\e[m              
+  \e[32m●\e[m fwd   :8888   \e[1mlocalhost:8888\e[m  jupyter-lab  Jupyter \e[2mhttp\e[m 0    ↓0 ↑0          
+  \e[2m───────────────────────── detected, not forwarded ──────────────────────────\e[m  
+  \e[2m—\e[m       :6379   \e[2m—\e[m               redis-server Redis        \e[2m—\e[m    \e[2m—\e[m              
+  \e[2m—\e[m       :9090   \e[2m—\e[m               \e[2m?\e[m            Prometheus   \e[2m—\e[m    \e[2m—\e[m              
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+\e[2m─ \e[m\e[2m1 ignored hidden, h shows\e[m \e[2m────────────────────────────────────────────────────\e[m
+ \e[32m✓\e[m Forwarded :5173 to localhost:5173                                            
+ \e[34menter\e[m \e[2mstop\e[m  \e[34mo\e[m \e[2mopen\e[m  \e[34my\e[m \e[2mcopy\e[m  \e[34ma\e[m \e[2mauto\e[m  \e[34m/\e[m \e[2mfilter\e[m  \e[34mL\e[m \e[2mlog\e[m  \e[34m?\e[m \e[2mhelp\e[m  \e[34mq\e[m \e[2mquit\e[m            
