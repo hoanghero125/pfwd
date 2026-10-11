@@ -1,0 +1,26 @@
+# sshd fixtures for test/e2e. e2e_test.go starts and stops them with a fresh
+# key for every run; to run them by hand, set PFWD_E2E_AUTHORIZED_KEY.
+name: pfwd-e2e
+
+x-sshd: &sshd
+  environment:
+    AUTHORIZED_KEY: ${PFWD_E2E_AUTHORIZED_KEY:?set by the e2e test}
+  ports: ["127.0.0.1::22"] # a free host port; the test asks docker compose for it
+  healthcheck:
+    # Port 22 (hex 0016) listening on 0.0.0.0.
+    test: ["CMD-SHELL", "grep -q ':0016 00000000:0000 0A' /proc/net/tcp"]
+    interval: 1s
+    timeout: 2s
+    retries: 30
+
+services:
+  ss:
+    <<: *sshd
+    build:
+      context: .
+      args:
+        WITH_SS: "1"
+  proc:
+    <<: *sshd
+    build:
+      context: .
