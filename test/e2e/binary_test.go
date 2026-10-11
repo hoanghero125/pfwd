@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -20,7 +21,8 @@ import (
 
 // TestE2EBinary runs the real pfwd binary in a pseudo-terminal: the host
 // comes from an ssh config passed with -F, the unknown host key is accepted
-// with accept-new, the table renders, and q quits with exit code 0.
+// with accept-new, the table renders (with sshd on :22 hidden by the
+// default ignore list), and q quits with exit code 0.
 func TestE2EBinary(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "pfwd")
@@ -72,10 +74,10 @@ func TestE2EBinary(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(shown(), ":22") {
+	for !strings.Contains(shown(), "ignored hidden") {
 		if time.Now().After(deadline) {
 			_ = cmd.Process.Kill()
-			t.Fatalf("the table never showed :22; the terminal got:\n%s", shown())
+			t.Fatalf("the table never counted :22 as hidden; the terminal got:\n%s", shown())
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -93,7 +95,12 @@ func TestE2EBinary(t *testing.T) {
 		_ = cmd.Process.Kill()
 		t.Fatal("pfwd did not quit after q")
 	}
-	if data, err := os.ReadFile(filepath.Join(dir, "state", "pfwd", "pfwd.log")); err != nil || !strings.Contains(string(data), `"msg":"connected"`) {
+	logPath := filepath.Join(dir, "state", "pfwd", "pfwd.log")
+	if runtime.GOOS == "darwin" {
+		// macOS keeps state under Library, whatever XDG_STATE_HOME says.
+		logPath = filepath.Join(dir, "Library", "Application Support", "pfwd", "pfwd.log")
+	}
+	if data, err := os.ReadFile(logPath); err != nil || !strings.Contains(string(data), `"msg":"connected"`) {
 		t.Errorf("pfwd.log = %q, %v; want a connected entry", data, err)
 	}
 	if data, err := os.ReadFile(filepath.Join(dir, "known_hosts")); err != nil || !strings.Contains(string(data), "ssh-ed25519") {

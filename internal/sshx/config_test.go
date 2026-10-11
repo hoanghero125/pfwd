@@ -194,6 +194,24 @@ func TestFromOptionsMissingIdentity(t *testing.T) {
 	}
 }
 
+func TestFromOptionsKnownHostsSettings(t *testing.T) {
+	env := testEnv(t)
+	hc, err := fromOptions("h", map[string][]string{"hashknownhosts": {"yes"}, "userknownhostsfile": {"none"}, "globalknownhostsfile": {"~/global"}}, Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hc.HashKnownHosts || !hc.NoUserKnownHosts {
+		t.Errorf("HashKnownHosts %v, NoUserKnownHosts %v; want both", hc.HashKnownHosts, hc.NoUserKnownHosts)
+	}
+	hc, err = fromOptions("h", map[string][]string{"hashknownhosts": {"no"}, "userknownhostsfile": {"~/kh"}}, Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hc.HashKnownHosts || hc.NoUserKnownHosts {
+		t.Errorf("HashKnownHosts %v, NoUserKnownHosts %v; want neither", hc.HashKnownHosts, hc.NoUserKnownHosts)
+	}
+}
+
 func TestFromOptionsStrictValues(t *testing.T) {
 	env := testEnv(t)
 	for in, want := range map[string]string{"yes": "yes", "true": "yes", "no": "no", "off": "no", "false": "no", "accept-new": "accept-new", "ask": "ask", "": "ask"} {

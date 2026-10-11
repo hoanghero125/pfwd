@@ -128,14 +128,22 @@ func (c *hostKeyChecker) changedError(err error, key ssh.PublicKey) error {
 }
 
 // add appends the key to the user's known_hosts file (the first one listed),
-// creating the file and its directory when needed.
+// creating the file and its directory when needed. With no user file
+// (UserKnownHostsFile none) the key is trusted for this connection only.
 func (c *hostKeyChecker) add(key ssh.PublicKey) error {
+	if c.hc.NoUserKnownHosts {
+		return nil
+	}
 	if len(c.hc.KnownHostsFiles) == 0 {
 		return &Error{Kind: ErrHostKey, Msg: fmt.Sprintf(
 			"host key for %s is unknown and no known_hosts file is configured; set UserKnownHostsFile in ~/.ssh/config", c.hc.Alias)}
 	}
 	path := c.hc.KnownHostsFiles[0]
-	if err := appendKnownHost(path, knownhosts.Line([]string{knownhosts.Normalize(c.lookup)}, key)); err != nil {
+	name := knownhosts.Normalize(c.lookup)
+	if c.hc.HashKnownHosts {
+		name = xknownhosts.HashHostname(name)
+	}
+	if err := appendKnownHost(path, knownhosts.Line([]string{name}, key)); err != nil {
 		return &Error{Kind: ErrHostKey, Err: err, Msg: fmt.Sprintf(
 			"could not save the host key for %s to %s: %v; check that the file is writable", c.hc.Alias, path, err)}
 	}

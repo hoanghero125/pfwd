@@ -40,6 +40,12 @@ type HostConfig struct {
 	IdentityAgent string
 	// KnownHostsFiles lists the user files first, then the global ones.
 	KnownHostsFiles []string
+	// NoUserKnownHosts is set when no user known_hosts file is usable
+	// (UserKnownHostsFile none): an accepted key is then trusted for this
+	// connection only, and no global file is written.
+	NoUserKnownHosts bool
+	// HashKnownHosts saves new host keys under a hashed host name.
+	HashKnownHosts bool
 	// StrictHostKeyChecking is "yes", "no", "ask" or "accept-new".
 	StrictHostKeyChecking string
 	HostKeyAlias          string
@@ -236,7 +242,7 @@ func parseSSHG(r io.Reader) map[string][]string {
 var fileKeys = []string{
 	"hostname", "user", "port", "identitiesonly", "identityagent", "proxyjump",
 	"proxycommand", "stricthostkeychecking", "hostkeyalias", "connecttimeout",
-	"userknownhostsfile", "globalknownhostsfile",
+	"userknownhostsfile", "globalknownhostsfile", "hashknownhosts",
 }
 
 var defaultIdentityFiles = []string{
@@ -381,6 +387,7 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 		}
 	}
 	hc.IdentitiesOnly = isYes(first("identitiesonly"))
+	hc.HashKnownHosts = isYes(first("hashknownhosts"))
 	switch agent := first("identityagent"); agent {
 	case "", "SSH_AUTH_SOCK":
 	case "none":
@@ -398,6 +405,9 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 					hc.KnownHostsFiles = append(hc.KnownHostsFiles, ep)
 				}
 			}
+		}
+		if key == "userknownhostsfile" {
+			hc.NoUserKnownHosts = len(hc.KnownHostsFiles) == 0
 		}
 	}
 	switch strings.ToLower(first("stricthostkeychecking")) {
