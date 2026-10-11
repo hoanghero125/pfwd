@@ -1,0 +1,123 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# GoReleaser v2 (OSS). Package-manager publishers (Homebrew cask, Scoop,
+# winget, AUR) are added in M1 together with their repos and token.
+version: 2
+
+project_name: pfwd
+
+before:
+  hooks:
+    - go mod tidy -diff # fail if go.mod/go.sum are not tidy
+    - make web          # no-op until web/ exists (M6)
+
+builds:
+  - id: pfwd
+    main: ./cmd/pfwd
+    binary: pfwd
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/hoanghero125/pfwd/internal/version.Version={{ .Version }}
+      - -X github.com/hoanghero125/pfwd/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/hoanghero125/pfwd/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin, windows, freebsd]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: freebsd
+        goarch: arm64
+
+archives:
+  - id: default
+    ids: [pfwd]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Breaking changes
+      regexp: '^.*?\w+(\(.+\))?!:.+$'
+      order: 0
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 1
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 2
+    - title: Performance
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 3
+    - title: Other
+      order: 999
+
+nfpms:
+  - id: packages
+    ids: [pfwd]
+    package_name: pfwd
+    file_name_template: '{{ replace .ConventionalFileName "~" "-" }}'
+    vendor: Hoang Do
+    homepage: https://github.com/hoanghero125/pfwd
+    maintainer: "Hoang Do <dekthedev.business@gmail.com>"
+    description: The VS Code Ports panel for any terminal. Detects and forwards remote ports over SSH.
+    license: MIT
+    formats: [deb, rpm, apk]
+    bindir: /usr/bin
+    section: net
+    mtime: "{{ .CommitDate }}"
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/pfwd/LICENSE
+        file_info:
+          mode: 0644
+
+sboms:
+  - id: archives
+    artifacts: archive
+    disable: "{{ .IsSnapshot }}" # needs syft; release.yml installs it
+
+signs:
+  # Keyless cosign via GitHub OIDC, release.yml only. OSS has no if/disable
+  # here, so snapshots pass --skip=sign (make snapshot, ci.yml).
+  - id: cosign
+    cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    output: true
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+
+release:
+  github:
+    owner: hoanghero125
+    name: pfwd
+  prerelease: auto
+  name_template: "{{ .ProjectName }} {{ .Tag }}"
