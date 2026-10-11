@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hoanghero125/pfwd/internal/version"
 )
 
 // run executes pfwd in-process and returns its exit code, stdout and stderr.
@@ -45,8 +47,8 @@ func TestVersionJSON(t *testing.T) {
 
 func TestVersionFlag(t *testing.T) {
 	code, out, _ := run(t, "--version")
-	if code != 0 || !strings.HasPrefix(out, "pfwd ") {
-		t.Errorf("pfwd --version: code %d, stdout %q", code, out)
+	if want := version.Get().String() + "\n"; code != 0 || out != want {
+		t.Errorf("pfwd --version: code %d, stdout %q; want 0, %q", code, out, want)
 	}
 }
 
@@ -65,13 +67,15 @@ func TestUsageErrorsExit2(t *testing.T) {
 		{"version", "extra"},
 		{"version", "--no-such-flag"},
 		{"completion", "bash", "extra"},
+		{"completion", "bsh"}, // a typo must not print help to stdout: `source <(pfwd completion bsh)`
 	} {
 		code, out, errOut := run(t, args...)
 		if code != 2 {
 			t.Errorf("pfwd %v: exit code %d, want 2 (stderr %q)", args, code, errOut)
 		}
-		if out != "" || !strings.HasPrefix(errOut, "Error: ") || !strings.Contains(errOut, "--help' for usage") {
-			t.Errorf("pfwd %v: stdout %q, stderr %q; want empty stdout and an error with a --help hint", args, out, errOut)
+		if out != "" || !strings.HasPrefix(errOut, "Error: ") || strings.Count(errOut, "Error: ") != 1 ||
+			!strings.Contains(errOut, "--help' for usage") {
+			t.Errorf("pfwd %v: stdout %q, stderr %q; want empty stdout and one error line with a --help hint", args, out, errOut)
 		}
 	}
 }

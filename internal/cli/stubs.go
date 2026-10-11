@@ -7,8 +7,9 @@ import (
 )
 
 // stubCmds returns the subcommands from docs/SPEC.md "CLI design" whose
-// behavior lands in later milestones. Their arguments are validated already,
-// so scripts get the final usage errors (exit 2) from day one.
+// behavior lands in later milestones. Their positional arguments are
+// validated already (bad ones exit 2); flags such as `stop --all` and
+// `fwd -R/-D/--detach` arrive with each command's implementation.
 func stubCmds() []*cobra.Command {
 	return []*cobra.Command{
 		stub("fwd <host> <spec>...", "Create forwards on a host", "M5", cobra.MinimumNArgs(2),

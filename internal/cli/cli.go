@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -28,10 +27,8 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 	if args == nil {
 		args = []string{} // cobra would fall back to os.Args
 	}
-	root := newRootCmd()
+	root := newRootCmd(stdout, stderr)
 	root.SetArgs(args)
-	root.SetOut(stdout)
-	root.SetErr(stderr)
 	cmd, err := root.ExecuteC()
 	if err == nil {
 		return exitOK
@@ -44,7 +41,7 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 	return exitError
 }
 
-func newRootCmd() *cobra.Command {
+func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "pfwd [host...]",
 		Short: "Detect and forward remote ports over SSH",
@@ -62,6 +59,8 @@ Run pfwd with no arguments to pick a host, or name hosts to open them.`,
 			return errors.New("the TUI is not implemented yet (planned for milestone M1 in docs/SPEC.md)")
 		},
 	}
+	root.SetOut(stdout)
+	root.SetErr(stderr)
 	root.SetVersionTemplate("{{.Version}}\n")
 	// Inherited by every subcommand: bad flags are usage errors (exit 2).
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
@@ -70,7 +69,26 @@ Run pfwd with no arguments to pick a host, or name hosts to open them.`,
 	root.PersistentFlags().Bool("json", false, "print JSON instead of human-readable output")
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(stubCmds()...)
+	wireCompletion(root) // after SetOut: cobra captures the writer when it builds the shell commands
 	return root
+}
+
+// wireCompletion adds cobra's "completion" command up front (cobra would
+// otherwise add it lazily) and makes bad arguments usage errors. cobra's own
+// version prints help and exits 0 for an unknown shell, so a typo in
+// `source <(pfwd completion bsh)` would make the shell evaluate the help text.
+func wireCompletion(root *cobra.Command) {
+	root.InitDefaultCompletionCmd()
+	for _, c := range root.Commands() {
+		if c.Name() != "completion" {
+			continue
+		}
+		c.Args = usageArgs(cobra.NoArgs)
+		c.RunE = func(c *cobra.Command, _ []string) error { return c.Help() }
+		for _, shell := range c.Commands() {
+			shell.Args = usageArgs(cobra.NoArgs)
+		}
+	}
 }
 
 // usageError marks a bad invocation (unknown subcommand, bad flag, wrong
@@ -90,9 +108,8 @@ func usageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
 	}
 }
 
-// isUsageError reports whether err comes from a bad invocation. cobra's own
-// commands, such as "completion", return plain "unknown command" errors.
+// isUsageError reports whether err comes from a bad invocation.
 func isUsageError(err error) bool {
 	var ue *usageError
-	return errors.As(err, &ue) || strings.HasPrefix(err.Error(), "unknown command ")
+	return errors.As(err, &ue)
 }
