@@ -6,10 +6,12 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -118,5 +120,73 @@ func TestNotifyOverDBus(t *testing.T) {
 	}
 	if len(*calls) != 0 {
 		t.Errorf("notify-send ran although D-Bus worked: %+v", *calls)
+	}
+}
+
+func TestSessionBusAddress(t *testing.T) {
+	dir := t.TempDir()
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	if got, err := sessionBusAddress(env(map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=/x"})); err != nil || got != "unix:path=/x" {
+		t.Errorf("from the environment: %q, %v", got, err)
+	}
+	if _, err := sessionBusAddress(env(map[string]string{"XDG_RUNTIME_DIR": dir})); err == nil {
+		t.Error("found a bus in a runtime directory without one")
+	}
+	ln, err := net.Listen("unix", filepath.Join(dir, "bus"))
+	if err != nil {
+		t.Skipf("no unix sockets here: %v", err)
+	}
+	defer ln.Close()
+	want := "unix:path=" + filepath.Join(dir, "bus")
+	if got, err := sessionBusAddress(env(map[string]string{"XDG_RUNTIME_DIR": dir})); err != nil || got != want {
+		t.Errorf("from XDG_RUNTIME_DIR: %q, %v; want %q", got, err, want)
+	}
+	if _, err := sessionBusAddress(env(nil)); err == nil {
+		t.Error("found a bus with neither variable set")
+	}
+}
+
+// TestNotifyDoesNotGuessTheBus: godbus's own lookup tries
+// /run/user/<uid>/bus and then sets DBUS_SESSION_BUS_ADDRESS for the whole
+// process. Notify looks only where the environment points, and never
+// changes it. It needs dbus-daemon and a writable /run/user, as in CI's
+// containers.
+func TestNotifyDoesNotGuessTheBus(t *testing.T) {
+	daemon, err := exec.LookPath("dbus-daemon")
+	if err != nil {
+		t.Skip("dbus-daemon is not installed")
+	}
+	dir := filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
+	sock := filepath.Join(dir, "bus")
+	if _, err := os.Stat(sock); err == nil {
+		t.Skip("a session bus already runs at " + sock)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Skipf("can't create %s: %v", dir, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cmd := exec.CommandContext(ctx, daemon, "--session", "--nofork", "--nopidfile", "--address=unix:path="+sock, "--print-address=1")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); _ = cmd.Wait(); _ = os.Remove(sock) })
+	if _, err := bufio.NewReader(out).ReadString('\n'); err != nil {
+		t.Fatalf("dbus-daemon did not start: %v", err)
+	}
+
+	noBus(t)
+	n, calls := fakeNotifier(nil)
+	if err := n.Notify(t.Context(), "t", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("DBUS_SESSION_BUS_ADDRESS"); got != "" {
+		t.Errorf("Notify set DBUS_SESSION_BUS_ADDRESS to %q", got)
+	}
+	if len(*calls) != 1 || (*calls)[0].name != "notify-send" {
+		t.Errorf("calls = %+v; want the notify-send fallback, not the guessed bus", *calls)
 	}
 }
