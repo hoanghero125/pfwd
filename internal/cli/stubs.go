@@ -6,47 +6,47 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// stubCmds returns the subcommands from docs/SPEC.md "CLI design" whose
-// behavior lands in later milestones. Their positional arguments are
+// stubCmds returns the planned subcommands whose behavior lands in later
+// releases. Their positional arguments are
 // validated already (bad ones exit 2); flags such as `stop --all` and
 // `fwd -R/-D/--detach` arrive with each command's implementation.
 func stubCmds() []*cobra.Command {
 	return []*cobra.Command{
-		stub("fwd <host> <spec>...", "Create forwards on a host", "M5", cobra.MinimumNArgs(2),
+		stub("fwd <host> <spec>...", "Create forwards on a host", "v0.5.0", cobra.MinimumNArgs(2),
 			"  pfwd fwd devbox 5432 8080:3000"),
-		stub("ls [host]", "List detected ports and forwards", "M5", cobra.MaximumNArgs(1),
+		stub("ls [host]", "List detected ports and forwards", "v0.5.0", cobra.MaximumNArgs(1),
 			"  pfwd ls devbox --json"),
-		stub("stop <id|host:port>...", "Stop forwards in the daemon", "M5", cobra.MinimumNArgs(1),
+		stub("stop <id|host:port>...", "Stop forwards in the daemon", "v0.5.0", cobra.MinimumNArgs(1),
 			"  pfwd stop devbox:5432"),
-		stub("hosts", "List hosts from ssh config with last-used time", "M5", cobra.NoArgs, ""),
+		stub("hosts", "List hosts from ssh config with last-used time", "v0.5.0", cobra.NoArgs, ""),
 		group("daemon", "Run the engine in the background",
-			stub("start", "Start the daemon", "M5", cobra.NoArgs, ""),
-			stub("stop", "Stop the daemon and all its forwards", "M5", cobra.NoArgs, ""),
-			stub("status", "Show whether the daemon is running", "M5", cobra.NoArgs, ""),
+			stub("start", "Start the daemon", "v0.5.0", cobra.NoArgs, ""),
+			stub("stop", "Stop the daemon and all its forwards", "v0.5.0", cobra.NoArgs, ""),
+			stub("status", "Show whether the daemon is running", "v0.5.0", cobra.NoArgs, ""),
 		),
-		stub("attach", "Open the TUI on the running daemon", "M5", cobra.NoArgs, ""),
-		stub("doctor [host]", "Diagnose config, auth, detection and port binding for a host", "M5", cobra.MaximumNArgs(1),
+		stub("attach", "Open the TUI on the running daemon", "v0.5.0", cobra.NoArgs, ""),
+		stub("doctor [host]", "Diagnose config, auth, detection and port binding for a host", "v0.5.0", cobra.MaximumNArgs(1),
 			"  pfwd doctor devbox"),
 		group("config", "Manage the config file",
-			stub("path", "Print the config file path", "M2", cobra.NoArgs, ""),
-			stub("edit", "Open the config file in your editor", "M2", cobra.NoArgs, ""),
-			stub("validate", "Check the config file for unknown keys and bad values", "M2", cobra.NoArgs, ""),
+			stub("path", "Print the config file path", "v0.2.0", cobra.NoArgs, ""),
+			stub("edit", "Open the config file in your editor", "v0.2.0", cobra.NoArgs, ""),
+			stub("validate", "Check the config file for unknown keys and bad values", "v0.2.0", cobra.NoArgs, ""),
 		),
-		stub("ui [host...]", "Open the web UI in the browser", "M6", cobra.ArbitraryArgs,
+		stub("ui [host...]", "Open the web UI in the browser", "v0.6.0", cobra.ArbitraryArgs,
 			"  pfwd ui devbox"),
 	}
 }
 
 // stub builds a command that validates its arguments and then reports that
 // it is not implemented yet.
-func stub(use, short, milestone string, args cobra.PositionalArgs, example string) *cobra.Command {
+func stub(use, short, release string, args cobra.PositionalArgs, example string) *cobra.Command {
 	return &cobra.Command{
 		Use:     use,
 		Short:   short,
 		Example: example,
 		Args:    usageArgs(args),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return fmt.Errorf("%q is not implemented yet (planned for milestone %s in docs/SPEC.md)", cmd.CommandPath(), milestone)
+			return fmt.Errorf("%q is not implemented yet (planned for %s)", cmd.CommandPath(), release)
 		},
 	}
 }

@@ -9,7 +9,7 @@ The VS Code Ports panel for any terminal. Agentless, one binary, every OS.
 
 `pfwd devbox` connects to a host from your `~/.ssh/config` and shows a live table of the TCP ports listening on it. Start `npm run dev` on the server, the port shows up a second or two later, and one key makes it `localhost:5173` on your laptop.
 
-> **Status: v0.1.0, early.** One host at a time, Linux servers, local forwards. Auto-forward, reconnects, `-R`/`-D` forwards, macOS/BSD/Windows servers, scripting commands and a web UI come in later releases; the [build spec](docs/SPEC.md) has the plan.
+> **Status: v0.1.0, early.** One host at a time, Linux servers, local forwards. Auto-forward, reconnects, `-R`/`-D` forwards, macOS/BSD/Windows servers, scripting commands and a web UI come in later releases.
 
 ## Install
 

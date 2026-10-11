@@ -1,6 +1,6 @@
 # Contributing to pfwd
 
-Thanks for helping. pfwd is built milestone by milestone from [docs/SPEC.md](docs/SPEC.md); read the spec section for the area you are changing first.
+Thanks for helping. Before you change an area, read its package doc comment and tests; they describe how it is meant to behave.
 
 ## Development setup
 

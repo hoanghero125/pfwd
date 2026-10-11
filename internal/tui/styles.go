@@ -9,8 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// theme holds the styles from docs/design/tui.md. Colors are the terminal's
-// own ANSI palette, so pfwd follows the user's light or dark theme.
+// theme holds the TUI's styles. Colors are the terminal's own ANSI palette,
+// so pfwd follows the user's light or dark theme.
 type theme struct {
 	faint, bold, accent, ok, warn, bad lipgloss.Style
 }

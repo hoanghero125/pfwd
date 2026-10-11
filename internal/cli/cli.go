@@ -1,6 +1,6 @@
 // Package cli wires pfwd's command tree: the root command that opens the
-// TUI, the scriptable subcommands, and the mapping from errors to the exit
-// codes documented in docs/SPEC.md ("CLI design").
+// TUI, the scriptable subcommands, and the mapping from errors to exit
+// codes.
 package cli
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/hoanghero125/pfwd/internal/version"
 )
 
-// Exit codes from docs/SPEC.md "CLI design". Later milestones add 6 (bind
+// Exit codes. Later releases add 6 (bind
 // failed, for pfwd fwd) and 130 (interrupted).
 const (
 	exitOK      = 0
