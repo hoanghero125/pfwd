@@ -22,7 +22,8 @@ import (
 // TestE2EBinary runs the real pfwd binary in a pseudo-terminal: the host
 // comes from an ssh config passed with -F, the unknown host key is accepted
 // with accept-new, the table renders (with sshd on :22 hidden by the
-// default ignore list), and q quits with exit code 0.
+// default ignore list), a server started afterwards is auto-forwarded
+// with the settings of a config file, and q then y quit with exit code 0.
 func TestE2EBinary(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "pfwd")
@@ -45,8 +46,15 @@ func TestE2EBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	pfwdConfig := filepath.Join(dir, "config.toml")
+	settings := "[detect]\ndebounce_scans = 1\n\n[ui]\nnotifications = false\n"
+	if err := os.WriteFile(pfwdConfig, []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	cmd := exec.Command(bin, "-F", cfg, "e2e-ss")
-	cmd.Env = append(os.Environ(), "HOME="+dir, "XDG_STATE_HOME="+filepath.Join(dir, "state"), "TERM=xterm-256color")
+	cmd.Env = append(os.Environ(), "HOME="+dir, "XDG_STATE_HOME="+filepath.Join(dir, "state"), "TERM=xterm-256color",
+		"PFWD_CONFIG="+pfwdConfig)
 	term, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 30, Cols: 100})
 	if err != nil {
 		t.Fatalf("start pfwd in a pty: %v", err)
@@ -73,15 +81,31 @@ func TestE2EBinary(t *testing.T) {
 		return ansi.Strip(screen.String())
 	}
 
-	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(shown(), "ignored hidden") {
-		if time.Now().After(deadline) {
-			_ = cmd.Process.Kill()
-			t.Fatalf("the table never counted :22 as hidden; the terminal got:\n%s", shown())
+	waitShown := func(want, what string, timeout time.Duration) {
+		t.Helper()
+		deadline := time.Now().Add(timeout)
+		for !strings.Contains(shown(), want) {
+			if time.Now().After(deadline) {
+				_ = cmd.Process.Kill()
+				t.Fatalf("%s; the terminal got:\n%s", what, shown())
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
+	waitShown("ignored hidden", "the table never counted :22 as hidden", 20*time.Second)
+
+	// With debounce_scans = 1, a new server is forwarded on the next
+	// snapshot or the one after.
+	startServer(t, "ss", "3000")
+	waitShown("Forwarded :3000 to localhost:3000 (auto)", "the new server was not auto-forwarded", 6*time.Second)
+	get(t, "3000")
+
+	// An active forward makes q ask first.
 	if _, err := io.WriteString(term, "q"); err != nil {
+		t.Fatal(err)
+	}
+	waitShown("Quit pfwd?", "q did not ask to confirm", 5*time.Second)
+	if _, err := io.WriteString(term, "y"); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -93,7 +117,7 @@ func TestE2EBinary(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatal("pfwd did not quit after q")
+		t.Fatal("pfwd did not quit after q and y")
 	}
 	logPath := filepath.Join(dir, "state", "pfwd", "pfwd.log")
 	if runtime.GOOS == "darwin" {
