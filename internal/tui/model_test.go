@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"image/color"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,7 @@ type fakeEngine struct {
 	forwards   []engine.Forward
 	specs      []engine.ForwardSpec
 	stopped    []string
+	auto       []bool
 	nextID     int
 }
 
@@ -67,6 +69,18 @@ func (f *fakeEngine) Stop(id string) error {
 	return errors.New("no such forward")
 }
 
+func (f *fakeEngine) SetAuto(_ engine.HostID, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.auto = append(f.auto, on)
+}
+
+func (f *fakeEngine) autoCalls() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.auto...)
+}
+
 func (f *fakeEngine) Forwards() []engine.Forward {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -75,9 +89,24 @@ func (f *fakeEngine) Forwards() []engine.Forward {
 
 var t0 = time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
 
+// Background colors a terminal may report.
+var (
+	black     = color.RGBA{A: 0xff}
+	lightGray = color.RGBA{R: 0xee, G: 0xee, B: 0xee, A: 0xff}
+)
+
+func hostKeyQuestion() sshx.HostKeyQuestion {
+	return sshx.HostKeyQuestion{Host: "devbox", KeyType: "ssh-ed25519", Fingerprint: "SHA256:abc"}
+}
+
 func newModel(e Engine) Model {
-	m := New(e, "devbox")
+	return newModelWith(e, Options{})
+}
+
+func newModelWith(e Engine, opts Options) Model {
+	m := New(e, "devbox", opts)
 	m.now = func() time.Time { return t0 }
+	m.goos = "linux"
 	// Tests send tickMsg themselves; a real tick would loop forever.
 	m.every = func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil }
 	return m
@@ -178,18 +207,18 @@ func apply(m Model, evs ...engine.Event) Model {
 	return m
 }
 
-func connectedWith(m Model, ports ...detect.RemotePort) Model {
+func connectedWith(m Model, ports ...engine.Port) Model {
 	return apply(m,
 		engine.SessionChanged{Host: "devbox", State: engine.Connected},
 		engine.PortsChanged{Host: "devbox", Strategy: detect.SS, OS: "Linux", Ports: ports},
 	)
 }
 
-func rp(port uint16, process string, addrs ...string) detect.RemotePort {
+func rp(port uint16, process string, addrs ...string) engine.Port {
 	if len(addrs) == 0 {
 		addrs = []string{"0.0.0.0"}
 	}
-	return detect.RemotePort{Port: port, Addrs: addrs, Process: process}
+	return engine.Port{RemotePort: detect.RemotePort{Port: port, Addrs: addrs, Process: process}}
 }
 
 func view(m Model) string {
@@ -409,7 +438,7 @@ func TestCursorStaysOnPort(t *testing.T) {
 	e := newFakeEngine()
 	m := connectedWith(newModel(e), rp(5173, "node"), rp(8123, "python3"))
 	m, _ = press(t, m, "down") // on 8123
-	m = apply(m, engine.PortsChanged{Host: "devbox", Strategy: detect.SS, Ports: []detect.RemotePort{rp(3000, "ruby"), rp(5173, "node"), rp(8123, "python3")}})
+	m = apply(m, engine.PortsChanged{Host: "devbox", Strategy: detect.SS, Ports: []engine.Port{rp(3000, "ruby"), rp(5173, "node"), rp(8123, "python3")}})
 	_, _ = press(t, m, "enter")
 	if len(e.specs) != 1 || e.specs[0].RemotePort != 8123 {
 		t.Errorf("cursor moved off 8123: specs = %+v", e.specs)
@@ -420,7 +449,7 @@ func TestCursorClampsWhenRowsShrink(t *testing.T) {
 	e := newFakeEngine()
 	m := connectedWith(newModel(e), rp(5173, "node"), rp(8123, "python3"), rp(9000, "x"))
 	m, _ = press(t, m, "G")
-	m = apply(m, engine.PortsChanged{Host: "devbox", Strategy: detect.SS, Ports: []detect.RemotePort{rp(5173, "node")}})
+	m = apply(m, engine.PortsChanged{Host: "devbox", Strategy: detect.SS, Ports: []engine.Port{rp(5173, "node")}})
 	_, _ = press(t, m, "enter")
 	if len(e.specs) != 1 || e.specs[0].RemotePort != 5173 {
 		t.Errorf("specs = %+v", e.specs)
@@ -519,7 +548,7 @@ func TestServerTextCannotInjectEscapes(t *testing.T) {
 	e.forwardErr = errors.New("ssh: rejected: " + cls + "open failed")
 	m := apply(newModel(e),
 		engine.SessionChanged{Host: "devbox", State: engine.Connected},
-		engine.PortsChanged{Host: "devbox", Strategy: detect.SS, Ports: []detect.RemotePort{rp(8123, evil)}},
+		engine.PortsChanged{Host: "devbox", Strategy: detect.SS, Ports: []engine.Port{rp(8123, evil)}},
 	)
 	m, _ = press(t, m, "enter")
 	screens := []string{m.View().Content}

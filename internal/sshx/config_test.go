@@ -163,6 +163,9 @@ func TestFromOptions(t *testing.T) {
 
 func TestFromOptionsOverrides(t *testing.T) {
 	env := testEnv(t)
+	if err := os.WriteFile(filepath.Join(env.Home, "k"), []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	opts := map[string][]string{"user": {"bob"}, "port": {"2222"}, "identityfile": {"~/.ssh/id_rsa"}}
 	hc, err := fromOptions("devbox", opts, Overrides{User: "carol", Port: 2200, Identities: []string{"~/k"}}, env)
 	if err != nil {
@@ -173,6 +176,39 @@ func TestFromOptionsOverrides(t *testing.T) {
 	}
 	if want := []string{filepath.Join(env.Home, "k"), filepath.Join(env.Home, ".ssh", "id_rsa")}; !reflect.DeepEqual(hc.IdentityFiles, want) {
 		t.Errorf("IdentityFiles = %q, want %q", hc.IdentityFiles, want)
+	}
+}
+
+// TestFromOptionsMissingIdentity: a key named with -i must exist, unlike
+// the IdentityFile defaults, which ssh skips when absent.
+func TestFromOptionsMissingIdentity(t *testing.T) {
+	env := testEnv(t)
+	opts := map[string][]string{"identityfile": {"~/.ssh/id_absent"}}
+	_, err := fromOptions("devbox", opts, Overrides{Identities: []string{"~/.ssh/id_typo"}}, env)
+	want := filepath.Join(env.Home, ".ssh", "id_typo")
+	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "-i") {
+		t.Errorf("fromOptions with a missing -i file: %v; want an error naming %s and -i", err, want)
+	}
+	if _, err := fromOptions("devbox", opts, Overrides{}, env); err != nil {
+		t.Errorf("a missing IdentityFile from the ssh config must not fail: %v", err)
+	}
+}
+
+func TestFromOptionsKnownHostsSettings(t *testing.T) {
+	env := testEnv(t)
+	hc, err := fromOptions("h", map[string][]string{"hashknownhosts": {"yes"}, "userknownhostsfile": {"none"}, "globalknownhostsfile": {"~/global"}}, Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hc.HashKnownHosts || !hc.NoUserKnownHosts {
+		t.Errorf("HashKnownHosts %v, NoUserKnownHosts %v; want both", hc.HashKnownHosts, hc.NoUserKnownHosts)
+	}
+	hc, err = fromOptions("h", map[string][]string{"hashknownhosts": {"no"}, "userknownhostsfile": {"~/kh"}}, Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hc.HashKnownHosts || hc.NoUserKnownHosts {
+		t.Errorf("HashKnownHosts %v, NoUserKnownHosts %v; want neither", hc.HashKnownHosts, hc.NoUserKnownHosts)
 	}
 }
 

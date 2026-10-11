@@ -738,3 +738,60 @@ func TestFromOptionsCertificateFile(t *testing.T) {
 		t.Errorf("CertificateFiles = %q, want %q", hc.CertificateFiles, want)
 	}
 }
+
+func TestConnOutputIsCapped(t *testing.T) {
+	f := newFixture(t, sshtest.Options{Exec: func(_ context.Context, _ string, stdout io.Writer) int {
+		chunk := []byte(strings.Repeat("x", 4096))
+		for range 256 { // 1 MiB
+			if _, err := stdout.Write(chunk); err != nil {
+				return 1
+			}
+		}
+		return 0
+	}})
+	c := mustDial(t, f.hc, DialOptions{})
+	out, err := c.Output(t.Context(), "flood")
+	if err != nil {
+		t.Fatalf("Output: %v", err)
+	}
+	if len(out) != maxOutput {
+		t.Errorf("Output returned %d bytes, want the first %d", len(out), maxOutput)
+	}
+}
+
+// TestDialHashKnownHosts: with HashKnownHosts yes, a new host is saved
+// hashed, like OpenSSH does, and is trusted on the next connection.
+func TestDialHashKnownHosts(t *testing.T) {
+	f := newFixture(t, sshtest.Options{})
+	kh := filepath.Join(t.TempDir(), "known_hosts")
+	f.hc.KnownHostsFiles = []string{kh}
+	f.hc.HashKnownHosts = true
+	mustDial(t, f.hc, DialOptions{AcceptNew: true})
+	data, err := os.ReadFile(kh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, "|1|") || strings.Contains(line, f.srv.Host()) {
+		t.Fatalf("known_hosts = %q; want a hashed host name", line)
+	}
+	f.hc.StrictHostKeyChecking = "yes"
+	mustDial(t, f.hc, DialOptions{})
+}
+
+// TestDialNoUserKnownHostsFile: with UserKnownHostsFile none, an accepted
+// key is trusted for this connection only; the global file is never
+// written.
+func TestDialNoUserKnownHostsFile(t *testing.T) {
+	f := newFixture(t, sshtest.Options{})
+	global := filepath.Join(t.TempDir(), "ssh_known_hosts")
+	if err := os.WriteFile(global, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.hc.KnownHostsFiles = []string{global}
+	f.hc.NoUserKnownHosts = true
+	mustDial(t, f.hc, DialOptions{AcceptNew: true})
+	if data, _ := os.ReadFile(global); len(data) != 0 {
+		t.Errorf("the global known_hosts was written: %q", data)
+	}
+}

@@ -28,7 +28,28 @@ type Update struct {
 	OS string
 	// Ports is the merged snapshot, sorted by port.
 	Ports []RemotePort
+	// Added are ports that just became stable (see Tracker), and Removed
+	// are stable ports that went away.
+	Added   []RemotePort
+	Removed []uint16
 }
+
+// WatchOptions configures Watch.
+type WatchOptions struct {
+	// Interval is the polling interval (at least 500 ms).
+	Interval time.Duration
+	// Logger receives debug details; nil discards them.
+	Logger *slog.Logger
+	// Tracker decides when ports count as added. Pass the same tracker on
+	// every call for a host so its state survives restarts; nil means a
+	// new tracker with a debounce of 2.
+	Tracker *Tracker
+	// ProbeTimeout bounds the one-time probe; 0 means 10 s.
+	ProbeTimeout time.Duration
+}
+
+// defaultProbeTimeout bounds the probe command.
+const defaultProbeTimeout = 10 * time.Second
 
 // Frame markers around each snapshot in the loop output. \036 is the ASCII
 // record separator, which never appears in ss or /proc output.
@@ -50,11 +71,22 @@ const (
 // snapshot and after that only when the ports change. When the server has
 // no supported tool, it emits one Update with Strategy None and returns.
 // When the loop's stream ends, Watch restarts it after a backoff.
-func Watch(ctx context.Context, r Runner, interval time.Duration, log *slog.Logger, emit func(Update)) error {
+func Watch(ctx context.Context, r Runner, o WatchOptions, emit func(Update)) error {
+	log := o.Logger
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	out, err := r.Output(ctx, ShellCommand(ProbeScript))
+	tracker := o.Tracker
+	if tracker == nil {
+		tracker = NewTracker(2)
+	}
+	probeTimeout := o.ProbeTimeout
+	if probeTimeout <= 0 {
+		probeTimeout = defaultProbeTimeout
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	out, err := r.Output(probeCtx, ShellCommand(ProbeScript))
+	cancel()
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -72,7 +104,7 @@ func Watch(ctx context.Context, r Runner, interval time.Duration, log *slog.Logg
 	if strategy == Proc {
 		parse = ParseProcNetTCP
 	}
-	cmd := ShellCommand(LoopScript(strategy, interval))
+	cmd := ShellCommand(LoopScript(strategy, o.Interval))
 
 	var last []RemotePort
 	emitted := false
@@ -83,11 +115,12 @@ func Watch(ctx context.Context, r Runner, interval time.Duration, log *slog.Logg
 			err = readFrames(stream, parse, func(ports []RemotePort) {
 				backoff = minBackoff
 				merged := Merge(ports)
-				if emitted && equalPorts(merged, last) {
+				added, removed := tracker.Observe(merged)
+				if emitted && equalPorts(merged, last) && len(added) == 0 && len(removed) == 0 {
 					return
 				}
 				emitted, last = true, merged
-				emit(Update{Strategy: strategy, OS: probe.OS, Ports: slices.Clone(merged)})
+				emit(Update{Strategy: strategy, OS: probe.OS, Ports: slices.Clone(merged), Added: added, Removed: removed})
 			})
 			_ = stream.Close()
 		}

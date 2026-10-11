@@ -29,7 +29,8 @@ type fakeConn struct {
 	probe    string
 	probeErr error
 	frames   []string
-	dialErr  error // returned by DialContext when set
+	dialErr  error       // returned by DialContext when set
+	more     chan string // frames sent after the initial ones
 
 	once    sync.Once
 	gone    chan struct{}
@@ -37,7 +38,7 @@ type fakeConn struct {
 }
 
 func newFakeConn(frames ...string) *fakeConn {
-	return &fakeConn{probe: "Linux\nHAVE_SS\n", frames: frames, gone: make(chan struct{})}
+	return &fakeConn{more: make(chan string, 64), probe: "PFWD_OS Linux\nHAVE_SS\n", frames: frames, gone: make(chan struct{})}
 }
 
 func (c *fakeConn) Output(context.Context, string) ([]byte, error) {
@@ -47,16 +48,24 @@ func (c *fakeConn) Output(context.Context, string) ([]byte, error) {
 func (c *fakeConn) Start(ctx context.Context, _ string) (io.ReadCloser, error) {
 	pr, pw := io.Pipe()
 	go func() {
+		defer pw.Close()
 		for _, f := range c.frames {
 			if _, err := io.WriteString(pw, "\x1ePFWD\n"+f+"\x1ePFWD END\n"); err != nil {
 				return
 			}
 		}
-		select {
-		case <-ctx.Done():
-		case <-c.gone:
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-c.gone:
+				return
+			case f := <-c.more:
+				if _, err := io.WriteString(pw, "\x1ePFWD\n"+f+"\x1ePFWD END\n"); err != nil {
+					return
+				}
+			}
 		}
-		pw.Close()
 	}()
 	return pr, nil
 }
@@ -88,9 +97,23 @@ func (c *fakeConn) Wait() error {
 	return c.waitErr
 }
 
+// send queues one more snapshot frame.
+func (c *fakeConn) send(lines ...string) {
+	c.more <- strings.Join(lines, "")
+}
+
+// newEngine returns an engine with auto-forward off, so tests that stream
+// several frames don't forward by accident.
 func newEngine(t *testing.T, dial DialFunc) *Engine {
 	t.Helper()
-	e := New(Options{Dial: dial, Interval: time.Second})
+	return newEngineWith(t, Options{Dial: dial, Interval: time.Second, Settings: func(HostID) HostSettings {
+		return HostSettings{Auto: false, Filter: detect.DefaultFilter()}
+	}})
+}
+
+func newEngineWith(t *testing.T, o Options) *Engine {
+	t.Helper()
+	e := New(o)
 	t.Cleanup(func() {
 		if err := e.Close(); err != nil {
 			t.Errorf("Close: %v", err)

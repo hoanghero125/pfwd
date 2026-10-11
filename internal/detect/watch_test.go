@@ -145,7 +145,7 @@ func collect(t *testing.T, r Runner, n int) ([]Update, error) {
 	var got []Update
 	done := make(chan error, 1)
 	go func() {
-		done <- Watch(ctx, r, 2*time.Second, nil, func(u Update) {
+		done <- Watch(ctx, r, WatchOptions{Interval: 2 * time.Second}, func(u Update) {
 			mu.Lock()
 			got = append(got, u)
 			if len(got) == n {
@@ -173,15 +173,20 @@ func ports(u Update) []uint16 {
 
 func TestWatchEmitsOnChange(t *testing.T) {
 	r := &fakeRunner{
-		probe:   "Linux\nHAVE_SS\nHAVE_PROC\n",
+		probe:   "PFWD_OS Linux\nHAVE_SS\nHAVE_PROC\n",
 		streams: []string{ssFrame(ssA) + ssFrame(ssA) + ssFrame(ssA, ssB) + ssFrame(ssB, ssA)},
 	}
-	got, err := collect(t, r, 2)
+	// Frames: A (baseline), A (unchanged: no update), A+B (changed), A+B
+	// again (B is now stable: an update with Added), B+A (same: none).
+	got, err := collect(t, r, 3)
 	if err != nil {
 		t.Fatalf("Watch = %v, want nil after cancel", err)
 	}
-	if len(got) != 2 || !reflect.DeepEqual(ports(got[0]), []uint16{8123}) || !reflect.DeepEqual(ports(got[1]), []uint16{5173, 8123}) {
+	if len(got) != 3 || !reflect.DeepEqual(ports(got[0]), []uint16{8123}) || !reflect.DeepEqual(ports(got[1]), []uint16{5173, 8123}) {
 		t.Errorf("updates = %+v", got)
+	}
+	if len(got) == 3 && (len(got[2].Added) != 1 || got[2].Added[0].Port != 5173) {
+		t.Errorf("third update Added = %+v, want :5173", got[2].Added)
 	}
 	if got[0].Strategy != SS || got[0].OS != "Linux" || got[0].Ports[0].Process != "python3" {
 		t.Errorf("first update = %+v", got[0])
@@ -192,7 +197,7 @@ func TestWatchEmitsOnChange(t *testing.T) {
 }
 
 func TestWatchFirstSnapshotEmptyIsEmitted(t *testing.T) {
-	r := &fakeRunner{probe: "Linux\nHAVE_PROC\n", streams: []string{frame("")}}
+	r := &fakeRunner{probe: "PFWD_OS Linux\nHAVE_PROC\n", streams: []string{frame("")}}
 	got, _ := collect(t, r, 1)
 	if got[0].Strategy != Proc || len(got[0].Ports) != 0 {
 		t.Errorf("update = %+v, want an empty Proc snapshot", got[0])
@@ -200,9 +205,9 @@ func TestWatchFirstSnapshotEmptyIsEmitted(t *testing.T) {
 }
 
 func TestWatchNoStrategy(t *testing.T) {
-	r := &fakeRunner{probe: "Darwin\nHAVE_LSOF\n"}
+	r := &fakeRunner{probe: "PFWD_OS Darwin\nHAVE_LSOF\n"}
 	var got []Update
-	err := Watch(t.Context(), r, time.Second, nil, func(u Update) { got = append(got, u) })
+	err := Watch(t.Context(), r, WatchOptions{Interval: time.Second}, func(u Update) { got = append(got, u) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +218,7 @@ func TestWatchNoStrategy(t *testing.T) {
 
 func TestWatchProbeError(t *testing.T) {
 	r := &fakeRunner{probeErr: errors.New("exec disabled")}
-	err := Watch(t.Context(), r, time.Second, nil, func(Update) { t.Error("emit called") })
+	err := Watch(t.Context(), r, WatchOptions{Interval: time.Second}, func(Update) { t.Error("emit called") })
 	if err == nil || !strings.Contains(err.Error(), "exec disabled") {
 		t.Errorf("Watch = %v, want the probe error", err)
 	}
@@ -221,7 +226,7 @@ func TestWatchProbeError(t *testing.T) {
 
 func TestWatchRestartsLoop(t *testing.T) {
 	r := &fakeRunner{
-		probe:   "Linux\nHAVE_SS\n",
+		probe:   "PFWD_OS Linux\nHAVE_SS\n",
 		streams: []string{ssFrame(ssA), "", ssFrame(ssB)},
 	}
 	start := time.Now()
@@ -254,7 +259,7 @@ func TestWatchOverSSH(t *testing.T) {
 		Exec: func(ctx context.Context, cmd string, stdout io.Writer) int {
 			switch cmd {
 			case probeCmd:
-				_, _ = io.WriteString(stdout, "Linux\nHAVE_SS\nHAVE_PROC\n")
+				_, _ = io.WriteString(stdout, "PFWD_OS Linux\nHAVE_SS\nHAVE_PROC\n")
 			case loopCmd:
 				_, _ = io.WriteString(stdout, frame(string(ssOut)))
 				<-ctx.Done()
@@ -295,4 +300,45 @@ func TestWatchOverSSH(t *testing.T) {
 	if want := []uint16{5173, 6006, 8000, 8123}; !reflect.DeepEqual(ports(got[0]), want) {
 		t.Errorf("ports = %v, want %v", ports(got[0]), want)
 	}
+}
+
+func TestWatchReportsAddedAfterDebounce(t *testing.T) {
+	r := &fakeRunner{
+		probe:   "PFWD_OS Linux\nHAVE_SS\n",
+		streams: []string{ssFrame(ssA) + ssFrame(ssA, ssB) + ssFrame(ssA, ssB) + ssFrame(ssA)},
+	}
+	got, _ := collect(t, r, 4)
+	if len(got[0].Added) != 0 || len(got[1].Added) != 0 {
+		t.Errorf("baseline and first sighting must not be Added: %+v %+v", got[0].Added, got[1].Added)
+	}
+	if len(got[2].Added) != 1 || got[2].Added[0].Port != 5173 {
+		t.Errorf("third frame: Added = %+v, want :5173 after two consecutive frames", got[2].Added)
+	}
+	if len(got[3].Removed) != 1 || got[3].Removed[0] != 5173 {
+		t.Errorf("fourth frame: Removed = %v, want [5173]", got[3].Removed)
+	}
+}
+
+func TestWatchProbeTimesOut(t *testing.T) {
+	r := &slowProbeRunner{}
+	start := time.Now()
+	err := Watch(t.Context(), r, WatchOptions{Interval: time.Second, ProbeTimeout: 100 * time.Millisecond}, func(Update) {})
+	if err == nil {
+		t.Fatal("Watch returned nil after the probe hung")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("the probe timeout took %v", time.Since(start))
+	}
+}
+
+// slowProbeRunner never answers the probe until its context ends.
+type slowProbeRunner struct{}
+
+func (slowProbeRunner) Output(ctx context.Context, _ string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (slowProbeRunner) Start(context.Context, string) (io.ReadCloser, error) {
+	return nil, errors.New("not used")
 }

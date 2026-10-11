@@ -40,6 +40,12 @@ type HostConfig struct {
 	IdentityAgent string
 	// KnownHostsFiles lists the user files first, then the global ones.
 	KnownHostsFiles []string
+	// NoUserKnownHosts is set when no user known_hosts file is usable
+	// (UserKnownHostsFile none): an accepted key is then trusted for this
+	// connection only, and no global file is written.
+	NoUserKnownHosts bool
+	// HashKnownHosts saves new host keys under a hashed host name.
+	HashKnownHosts bool
 	// StrictHostKeyChecking is "yes", "no", "ask" or "accept-new".
 	StrictHostKeyChecking string
 	HostKeyAlias          string
@@ -236,7 +242,7 @@ func parseSSHG(r io.Reader) map[string][]string {
 var fileKeys = []string{
 	"hostname", "user", "port", "identitiesonly", "identityagent", "proxyjump",
 	"proxycommand", "stricthostkeychecking", "hostkeyalias", "connecttimeout",
-	"userknownhostsfile", "globalknownhostsfile",
+	"userknownhostsfile", "globalknownhostsfile", "hashknownhosts",
 }
 
 var defaultIdentityFiles = []string{
@@ -360,11 +366,20 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 
 	tok := tokens{alias: alias, host: hc.HostName, port: strconv.Itoa(hc.Port), remoteUser: hc.User}
 	seen := make(map[string]bool)
-	for _, p := range append(append([]string(nil), o.Identities...), opts["identityfile"]...) {
-		if p = expandPath(p, tok, env); p != "" && !seen[p] {
-			seen[p] = true
-			hc.IdentityFiles = append(hc.IdentityFiles, p)
+	for i, p := range append(append([]string(nil), o.Identities...), opts["identityfile"]...) {
+		p = expandPath(p, tok, env)
+		if p == "" || seen[p] {
+			continue
 		}
+		// ssh skips a missing IdentityFile, but a key named with -i is
+		// almost always a typo.
+		if i < len(o.Identities) {
+			if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("identity file %s does not exist; check the path given with -i", p)
+			}
+		}
+		seen[p] = true
+		hc.IdentityFiles = append(hc.IdentityFiles, p)
 	}
 	for _, p := range opts["certificatefile"] {
 		if p = expandPath(p, tok, env); p != "" {
@@ -372,6 +387,7 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 		}
 	}
 	hc.IdentitiesOnly = isYes(first("identitiesonly"))
+	hc.HashKnownHosts = isYes(first("hashknownhosts"))
 	switch agent := first("identityagent"); agent {
 	case "", "SSH_AUTH_SOCK":
 	case "none":
@@ -389,6 +405,9 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 					hc.KnownHostsFiles = append(hc.KnownHostsFiles, ep)
 				}
 			}
+		}
+		if key == "userknownhostsfile" {
+			hc.NoUserKnownHosts = len(hc.KnownHostsFiles) == 0
 		}
 	}
 	switch strings.ToLower(first("stricthostkeychecking")) {

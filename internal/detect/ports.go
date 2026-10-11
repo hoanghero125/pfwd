@@ -46,16 +46,17 @@ func Merge(ports []RemotePort) []RemotePort {
 }
 
 // Target returns the host to dial on the server for a port with these bind
-// addresses: 127.0.0.1 for wildcard and IPv4 loopback listeners, ::1 for
-// IPv6-loopback-only ones, and otherwise the specific address it listens on.
+// addresses: 127.0.0.1 for IPv4 and dual-stack listeners, ::1 for IPv6-only
+// ones (ss prints a dual-stack wildcard as "*" and an IPv6-only one as
+// "::"), and otherwise the specific address it listens on.
 func Target(addrs []string) string {
 	for _, a := range addrs {
 		switch a {
-		case "0.0.0.0", "::", "*", "127.0.0.1":
+		case "0.0.0.0", "*", "127.0.0.1":
 			return "127.0.0.1"
 		}
 	}
-	if slices.Contains(addrs, "::1") {
+	if slices.Contains(addrs, "::1") || slices.Contains(addrs, "::") {
 		return "::1"
 	}
 	if len(addrs) == 0 {

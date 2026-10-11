@@ -17,13 +17,14 @@ Thanks for helping. Before you change an area, read its package doc comment and 
 | `make build` | Builds `bin/pfwd` with version information |
 | `make test` | Runs `go test -race ./...` |
 | `make lint` | Banned-call check, golangci-lint (with staticcheck), govulncheck |
+| `make e2e` | End-to-end tests against a real sshd in Docker (needs Docker with Compose) |
 | `make snapshot` | GoReleaser build of every platform into `dist/` |
 
 ## Making a change
 
 1. Fork the repository and create a branch from `main` (maintainers can branch in the main repository).
 2. Write the failing test first. Every bug fix comes with a test that fails before the fix.
-3. Run `make lint test` until both pass. CI runs the same checks on Linux, macOS and Windows.
+3. Run `make lint test` until both pass. CI runs the same checks on Linux, macOS and Windows. If you change the SSH, detection, forwarding or engine code, run `make e2e` too; CI runs it on Linux.
 4. Open a pull request. Its title must follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) (`feat:`, `fix:`, `docs:`, …) because pull requests are squash-merged and the title becomes the commit message.
 
 ## Rules CI enforces

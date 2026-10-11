@@ -1,0 +1,40 @@
+ pfwd  devbox ● connected                                                                                                 auto: on   ? help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Event log, newest last
+  09:00:00  ✓ Connected to devbox
+  09:00:00  ✓ Forwarded :5173 to localhost:5173
+  09:00:00  ✓ Forwarded :8888 to localhost:8888
+  09:00:00  :5173 speaks http
+  09:00:00  :8888 speaks http
+  09:00:00  ✗ :8000: disconnected
+  09:00:00  New port :8080 (python3)
+  09:00:00  Port :6379 closed
+  09:00:00  Port :9090 closed
+  09:00:00  ✗ Couldn't auto-forward :8080: port 8080 is busy on this machine; something else on this computer listens on it
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ✗ Couldn't auto-forward :8080: port 8080 is busy on this machine; something else on this computer listens on it
+ ↑ ↓ scroll  g G first, last  L close

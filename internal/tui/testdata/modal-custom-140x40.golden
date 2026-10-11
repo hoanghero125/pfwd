@@ -1,7 +1,7 @@
  pfwd  devbox ● connected                                                                                                            ? help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  STATE    REMOTE  LOCAL            PROCESS                                 CONN  TRAFFIC
-▶ —        :5173   —                node                                    —     —
+  STATE   REMOTE  LOCAL           PROCESS                                 LABEL             CONN TRAFFIC
+▶ —       :5173   —               node                                                      —    —
 
 
 
@@ -37,4 +37,4 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- enter forward/stop  F other local port  x stop  ? help  q quit
+ enter forward  F other port  a auto  / filter  L log  ? help  q quit

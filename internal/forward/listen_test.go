@@ -125,3 +125,18 @@ func TestSuggestedPortIsFreeEverywhere(t *testing.T) {
 		t.Errorf("suggested %d, which is held on ::1", p+1)
 	}
 }
+
+func TestFreePort(t *testing.T) {
+	p, err := FreePort("127.0.0.1")
+	if err != nil || p == 0 {
+		t.Fatalf("FreePort = %d, %v", p, err)
+	}
+	ln, err := Listen("127.0.0.1", p)
+	if err != nil {
+		t.Fatalf("the free port %d is not free: %v", p, err)
+	}
+	ln.Close()
+	if _, err := FreePort("not an address"); err == nil {
+		t.Error("FreePort accepted a bad bind address")
+	}
+}

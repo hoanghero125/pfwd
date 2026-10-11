@@ -8,6 +8,13 @@ import (
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+	if m.tooSmall() {
+		// Nothing else is on screen to act on.
+		if k == "q" || k == "ctrl+c" {
+			return m.quitNow()
+		}
+		return m, nil
+	}
 	if k == "ctrl+c" && m.modal.kind != modalQuit {
 		var answer tea.Cmd
 		if m.modal.kind == modalHostKey {
@@ -17,8 +24,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		next, quit := m.requestQuit()
 		return next, tea.Batch(answer, quit)
 	}
-	if m.modal.kind != modalNone {
+	switch {
+	case m.modal.kind != modalNone:
 		return m.handleModalKey(k)
+	case m.filtering:
+		return m.handleFilterKey(msg)
+	case m.logOpen:
+		return m.handleLogKey(k)
 	}
 
 	switch k {
@@ -37,7 +49,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case r.fwd != nil:
 			return m, m.stopCmd(*r.fwd)
 		default:
-			return m, m.forwardCmd(specFor(*r.port))
+			return m, m.enterCmd(specFor(*r.port))
 		}
 	case "F":
 		r, ok := m.current()
@@ -57,6 +69,24 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		default:
 			m.setStatus(statusInfo, ":%d is not forwarded", r.port.Port)
 		}
+	case "o":
+		return m.openSelected()
+	case "y":
+		return m.copySelected()
+	case "a":
+		return m, m.setAutoCmd(!m.auto)
+	case "/":
+		m.filtering = true
+	case "esc":
+		if m.filter != "" {
+			m.filter = ""
+			m.rebuild()
+		}
+	case "h":
+		m.showHidden = !m.showHidden
+		m.rebuild()
+	case "L":
+		m.logOpen, m.logScroll = true, 0
 	case "?":
 		m.modal = modalState{kind: modalHelp}
 	case "q":
@@ -65,13 +95,68 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// selectedForward is the forward on the selected row; otherwise it sets a
+// status saying why there is none.
+func (m *Model) selectedForward() (engine.Forward, bool) {
+	r, ok := m.current()
+	switch {
+	case !ok:
+		return engine.Forward{}, false
+	case r.fwd == nil:
+		m.setStatus(statusInfo, ":%d is not forwarded; press enter first", r.port.Port)
+		return engine.Forward{}, false
+	}
+	return *r.fwd, true
+}
+
+func (m Model) openSelected() (tea.Model, tea.Cmd) {
+	f, ok := m.selectedForward()
+	if !ok {
+		return m, nil
+	}
+	url, isURL := target(f)
+	switch {
+	case !isURL:
+		m.setStatus(statusInfo, ":%d doesn't speak HTTP; y copies its address", f.Spec.RemotePort)
+		return m, nil
+	case m.opts.Open == nil:
+		m.setStatus(statusInfo, "Open %s in your browser", url)
+		return m, nil
+	}
+	m.setStatus(statusInfo, "Opening %s", url)
+	return m, m.openCmd(url)
+}
+
+func (m Model) copySelected() (tea.Model, tea.Cmd) {
+	f, ok := m.selectedForward()
+	if !ok {
+		return m, nil
+	}
+	text, _ := target(f)
+	if m.opts.Copy == nil {
+		m.setStatus(statusInfo, "Sent %s to the terminal's clipboard", text)
+		return m, tea.SetClipboard(text)
+	}
+	return m, tea.Batch(tea.SetClipboard(text), m.copyCmd(text))
+}
+
 // requestQuit quits, or asks first while forwards are active.
 func (m Model) requestQuit() (Model, tea.Cmd) {
-	if n := m.activeForwards(); n > 0 {
+	if n := m.activeForwards(); n > 0 && !m.opts.SkipQuitConfirm {
 		m.modal = modalState{kind: modalQuit, active: n}
 		return m, nil
 	}
 	return m, tea.Quit
+}
+
+// quitNow quits without asking, refusing an open host-key question.
+func (m Model) quitNow() (tea.Model, tea.Cmd) {
+	var answer tea.Cmd
+	if m.modal.kind == modalHostKey {
+		answer = answerCmd(m.modal.prompt, false)
+	}
+	m.modal = modalState{}
+	return m, tea.Batch(answer, tea.Quit)
 }
 
 func answerCmd(p engine.HostKeyPrompt, ok bool) tea.Cmd {
@@ -81,6 +166,8 @@ func answerCmd(p engine.HostKeyPrompt, ok bool) tea.Cmd {
 	}
 }
 
+// handleModalKey drives the open modal. In every modal, esc and q back
+// out; in the host-key modal that means "don't connect".
 func (m Model) handleModalKey(k string) (tea.Model, tea.Cmd) {
 	switch m.modal.kind {
 	case modalHelp:
@@ -93,7 +180,7 @@ func (m Model) handleModalKey(k string) (tea.Model, tea.Cmd) {
 			p := m.modal.prompt
 			m.modal = modalState{}
 			return m, answerCmd(p, true)
-		case "n", "esc":
+		case "n", "esc", "q":
 			p := m.modal.prompt
 			m.modal = modalState{}
 			return m, answerCmd(p, false)
@@ -116,7 +203,7 @@ func (m Model) handleModalKey(k string) (tea.Model, tea.Cmd) {
 			}
 		case "F":
 			m.modal = modalState{kind: modalPort, spec: m.modal.spec}
-		case "esc":
+		case "esc", "q":
 			m.modal = modalState{}
 		}
 	case modalPort:
@@ -127,7 +214,7 @@ func (m Model) handleModalKey(k string) (tea.Model, tea.Cmd) {
 
 func (m Model) handlePortKey(k string) (tea.Model, tea.Cmd) {
 	switch {
-	case k == "esc":
+	case k == "esc" || k == "q":
 		m.modal = modalState{}
 	case k == "enter":
 		port, ok := parsePort(m.modal.input)
@@ -151,6 +238,95 @@ func (m Model) handlePortKey(k string) (tea.Model, tea.Cmd) {
 		m.modal.inputErr = ""
 	}
 	return m, nil
+}
+
+// handleFilterKey edits the filter. Every printable key is text, q
+// included; enter keeps the filter and esc clears it.
+func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.filtering = false
+	case "esc":
+		m.filter, m.filtering = "", false
+		m.rebuild()
+	case "backspace":
+		if r := []rune(m.filter); len(r) > 0 {
+			m.filter = string(r[:len(r)-1])
+			m.rebuild()
+		}
+	case "up":
+		m.setCursor(m.cursor - 1)
+	case "down":
+		m.setCursor(m.cursor + 1)
+	default:
+		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 && len([]rune(m.filter)) < maxFilter {
+			m.filter += msg.Text
+			m.rebuild()
+		}
+	}
+	return m, nil
+}
+
+// handleLogKey scrolls the event log; L, esc and q close it.
+func (m Model) handleLogKey(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "up", "k":
+		m.logScroll = min(m.logScroll+1, m.maxLogScroll())
+	case "down", "j":
+		m.logScroll = max(m.logScroll-1, 0)
+	case "g", "home":
+		m.logScroll = m.maxLogScroll()
+	case "G", "end":
+		m.logScroll = 0
+	case "L", "esc", "q":
+		m.logOpen = false
+	case "?":
+		m.modal = modalState{kind: modalHelp}
+	}
+	return m, nil
+}
+
+// handleClick selects the table row under the pointer.
+func (m *Model) handleClick(p tea.Mouse) {
+	if p.Button != tea.MouseLeft || m.modal.kind != modalNone || m.logOpen || m.tooSmall() {
+		return
+	}
+	// The table starts under the host bar, the rule and the header.
+	line := p.Y - 3
+	if line < 0 || line >= m.visibleRows() {
+		return
+	}
+	line += m.offset
+	if sep := m.separatorAt(); sep >= 0 {
+		if line == sep {
+			return
+		}
+		if line > sep {
+			line--
+		}
+	}
+	if line < len(m.rows) {
+		m.setCursor(line)
+	}
+}
+
+// handleWheel moves the cursor, or scrolls the log, one line.
+func (m *Model) handleWheel(p tea.Mouse) {
+	if m.modal.kind != modalNone || m.tooSmall() {
+		return
+	}
+	step := 0
+	switch p.Button {
+	case tea.MouseWheelUp:
+		step = -1
+	case tea.MouseWheelDown:
+		step = 1
+	}
+	if m.logOpen {
+		m.logScroll = max(0, min(m.logScroll-step, m.maxLogScroll()))
+		return
+	}
+	m.setCursor(m.cursor + step)
 }
 
 func parsePort(s string) (uint16, bool) {
