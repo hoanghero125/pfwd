@@ -2,10 +2,12 @@ package forward
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -52,29 +54,42 @@ type ProbeOptions struct {
 // no response, or a 400 (what HTTPS servers send to plaintext), it tries a
 // TLS handshake with an empty root pool: a handshake that only fails to
 // verify the certificate still means https, so nothing is ever trusted and
-// no data follows the handshake. Each attempt stops on its own timeout,
-// without connection deadlines, because SSH channels have none.
+// no data follows the handshake, and an HTTP reply to the TLS hello means
+// http (a server too slow to answer HEAD in time still rejects the hello at
+// once). A server that answers neither attempt in time stays unknown. Each
+// attempt stops on its own timeout, without connection deadlines, because
+// SSH channels have none.
 func Probe(ctx context.Context, d Dialer, target string, o ProbeOptions) Scheme {
 	if o.Timeout <= 0 {
 		o.Timeout = time.Second
 	}
-	status, ok := probeHEAD(ctx, d, target, o)
+	head := probeHEAD(ctx, d, target, o)
 	if ctx.Err() != nil {
 		return SchemeUnknown
 	}
-	if ok && status != http.StatusBadRequest {
+	if head.ok && head.status != http.StatusBadRequest {
 		return SchemeHTTP
 	}
-	if probeTLS(ctx, d, target, o) {
-		return SchemeHTTPS
-	}
-	if ctx.Err() != nil {
+	tlsScheme := probeTLS(ctx, d, target, o)
+	switch {
+	case ctx.Err() != nil:
 		return SchemeUnknown
-	}
-	if ok {
+	case tlsScheme != SchemeNone:
+		return tlsScheme
+	case head.ok:
 		return SchemeHTTP // a plain HTTP server that answered 400
+	case head.silent:
+		return SchemeUnknown // maybe just slow
 	}
 	return SchemeNone
+}
+
+// headResult is what the HEAD attempt saw: an HTTP status, or silence
+// (connected, but not one byte before the timeout).
+type headResult struct {
+	status int
+	ok     bool
+	silent bool
 }
 
 // attempt dials target and closes the connection when the attempt's
@@ -94,7 +109,7 @@ func attempt(ctx context.Context, d Dialer, target string, timeout time.Duration
 	run(actx, c)
 }
 
-func probeHEAD(ctx context.Context, d Dialer, target string, o ProbeOptions) (status int, ok bool) {
+func probeHEAD(ctx context.Context, d Dialer, target string, o ProbeOptions) (r headResult) {
 	attempt(ctx, d, target, o.Timeout, func(actx context.Context, c net.Conn) {
 		req, err := http.NewRequestWithContext(actx, http.MethodHead, "http://"+o.Host+"/", nil)
 		if err != nil {
@@ -105,17 +120,35 @@ func probeHEAD(ctx context.Context, d Dialer, target string, o ProbeOptions) (st
 		if err := req.Write(c); err != nil {
 			return
 		}
-		resp, err := http.ReadResponse(bufio.NewReader(c), req)
+		cr := &countingReader{r: c}
+		resp, err := http.ReadResponse(bufio.NewReader(cr), req)
 		if err != nil {
+			r.silent = cr.n == 0 && actx.Err() != nil
 			return
 		}
 		_ = resp.Body.Close()
-		status, ok = resp.StatusCode, true
+		r.status, r.ok = resp.StatusCode, true
 	})
-	return status, ok
+	return r
 }
 
-func probeTLS(ctx context.Context, d Dialer, target string, o ProbeOptions) (https bool) {
+// countingReader counts the bytes read through it.
+type countingReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+// probeTLS returns SchemeHTTPS when the TLS handshake gets as far as the
+// certificate, SchemeHTTP when the server answers the hello with plain
+// HTTP, and SchemeNone otherwise.
+func probeTLS(ctx context.Context, d Dialer, target string, o ProbeOptions) (scheme Scheme) {
+	scheme = SchemeNone
 	name, _, err := net.SplitHostPort(o.Host)
 	if err != nil {
 		name = o.Host
@@ -128,7 +161,13 @@ func probeTLS(ctx context.Context, d Dialer, target string, o ProbeOptions) (htt
 		})
 		err := tc.HandshakeContext(actx)
 		var unverified *tls.CertificateVerificationError
-		https = err == nil || errors.As(err, &unverified)
+		var notTLS tls.RecordHeaderError
+		switch {
+		case err == nil || errors.As(err, &unverified):
+			scheme = SchemeHTTPS
+		case errors.As(err, &notTLS) && bytes.HasPrefix(notTLS.RecordHeader[:], []byte("HTTP/")):
+			scheme = SchemeHTTP
+		}
 	})
-	return https
+	return scheme
 }

@@ -104,11 +104,25 @@ func TestProbeServerThatSpeaksFirst(t *testing.T) {
 	}
 }
 
+// TestProbeSlowHTTPServer: a dev server compiling its first page answers
+// HEAD after the timeout, but its reply to the TLS hello is plain HTTP.
+func TestProbeSlowHTTPServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		time.Sleep(2 * probeOpts.Timeout)
+	}))
+	defer srv.Close()
+	if s := Probe(t.Context(), &net.Dialer{}, srv.Listener.Addr().String(), probeOpts); s != SchemeHTTP {
+		t.Errorf("Probe = %v, want http", s)
+	}
+}
+
+// TestProbeSilentServer: no answer at all is no proof of anything, so the
+// scheme stays unknown rather than "not HTTP".
 func TestProbeSilentServer(t *testing.T) {
 	addr := rawServer(t, func(c net.Conn) { _, _ = io.Copy(io.Discard, c) })
 	start := time.Now()
-	if s := Probe(t.Context(), &net.Dialer{}, addr, probeOpts); s != SchemeNone {
-		t.Errorf("Probe = %v, want none", s)
+	if s := Probe(t.Context(), &net.Dialer{}, addr, probeOpts); s != SchemeUnknown {
+		t.Errorf("Probe = %v, want unknown", s)
 	}
 	if d := time.Since(start); d > 3*time.Second {
 		t.Errorf("Probe took %v, want two timeouts at most", d)
@@ -161,8 +175,8 @@ func TestProbeWithoutDeadlines(t *testing.T) {
 		t.Errorf("Probe = %v, want http", s)
 	}
 	silent := rawServer(t, func(c net.Conn) { _, _ = io.Copy(io.Discard, c) })
-	if s := Probe(t.Context(), &noDeadlineDialer{}, silent, probeOpts); s != SchemeNone {
-		t.Errorf("Probe of a silent server without deadlines = %v, want none", s)
+	if s := Probe(t.Context(), &noDeadlineDialer{}, silent, probeOpts); s != SchemeUnknown {
+		t.Errorf("Probe of a silent server without deadlines = %v, want unknown", s)
 	}
 }
 
