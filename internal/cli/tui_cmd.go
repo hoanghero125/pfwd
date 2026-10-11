@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/pflag"
 	"golang.org/x/term"
 
+	"github.com/hoanghero125/pfwd/internal/config"
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/tui"
@@ -59,12 +60,23 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	level := f.logLevel
 	if level == "" {
 		level = os.Getenv("PFWD_LOG")
+		if _, err := parseLogLevel(level); err != nil {
+			return fmt.Errorf("invalid PFWD_LOG %q: use debug, info, warn or error, or unset it", level)
+		}
 	}
 	if _, err := parseLogLevel(level); err != nil {
-		return &usageError{err}
+		return &usageError{fmt.Errorf("invalid --log-level %q: use debug, info, warn or error", level)}
 	}
 	if f.port < 0 || f.port > 65535 {
 		return &usageError{fmt.Errorf("invalid port %d: use a number from 1 to 65535", f.port)}
+	}
+	cfgPath, err := configPath(cmd)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return err
 	}
 	in, out, ok := terminal(cmd.InOrStdin(), cmd.OutOrStdout())
 	if !ok {
@@ -86,7 +98,8 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("starting", "version", version.Get().Version, "host", hc.Alias, "hostname", hc.HostName, "port", hc.Port)
+	logger.Info("starting", "version", version.Get().Version, "host", hc.Alias, "hostname", hc.HostName, "port", hc.Port,
+		"config", cfgPath, "not_applied_yet", cfg.Unapplied())
 
 	eng := engine.New(engine.Options{
 		Logger: logger,

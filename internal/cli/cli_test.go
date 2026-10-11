@@ -113,7 +113,7 @@ func TestExitCodeMapping(t *testing.T) {
 
 func TestRootHelpShowsSSHFlags(t *testing.T) {
 	code, out, _ := run(t, "--help")
-	for _, flag := range []string{"--port", "--login", "--identity", "--ssh-config", "--accept-new", "--log-level"} {
+	for _, flag := range []string{"--port", "--login", "--identity", "--ssh-config", "--accept-new", "--log-level", "--config"} {
 		if code != 0 || !strings.Contains(out, flag) {
 			t.Errorf("pfwd --help lacks %s", flag)
 		}

@@ -38,9 +38,6 @@ func TestStubsAreNotImplementedYet(t *testing.T) {
 		{[]string{"attach"}, "pfwd attach"},
 		{[]string{"doctor"}, "pfwd doctor"},
 		{[]string{"doctor", "devbox"}, "pfwd doctor"},
-		{[]string{"config", "path"}, "pfwd config path"},
-		{[]string{"config", "edit"}, "pfwd config edit"},
-		{[]string{"config", "validate"}, "pfwd config validate"},
 		{[]string{"ui"}, "pfwd ui"},
 		{[]string{"ui", "devbox", "gpu-node"}, "pfwd ui"},
 	} {

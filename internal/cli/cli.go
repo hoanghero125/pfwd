@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/hoanghero125/pfwd/internal/config"
 	"github.com/hoanghero125/pfwd/internal/safetext"
 	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/version"
@@ -47,8 +49,18 @@ func Execute(args []string, stdout, stderr io.Writer) int {
 }
 
 // errorLine formats err for stderr. Errors can carry text from the server,
-// so it goes through safetext.Clean like everything the TUI draws.
+// so it goes through safetext.Clean like everything the TUI draws. Config
+// problems are listed one per line.
 func errorLine(err error) string {
+	var probs *config.Problems
+	if errors.As(err, &probs) {
+		var b strings.Builder
+		b.WriteString("Error: fix the config file, then check it with `pfwd config validate`:\n")
+		for _, line := range probs.Lines() {
+			b.WriteString("  " + safetext.Clean(line) + "\n")
+		}
+		return b.String()
+	}
 	return "Error: " + safetext.Clean(err.Error()) + "\n"
 }
 
@@ -97,7 +109,8 @@ user@host. The flags below override the ssh config.`,
 		return &usageError{err}
 	})
 	root.PersistentFlags().Bool("json", false, "print JSON instead of human-readable output")
-	root.AddCommand(newVersionCmd())
+	root.PersistentFlags().String("config", "", "config file to use (default from $PFWD_CONFIG or `pfwd config path`)")
+	root.AddCommand(newVersionCmd(), newConfigCmd())
 	root.AddCommand(stubCmds()...)
 	wireCompletion(root) // after SetOut: cobra captures the writer when it builds the shell commands
 	return root

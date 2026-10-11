@@ -27,11 +27,6 @@ func stubCmds() []*cobra.Command {
 		stub("attach", "Open the TUI on the running daemon", "v0.5.0", cobra.NoArgs, ""),
 		stub("doctor [host]", "Diagnose config, auth, detection and port binding for a host", "v0.5.0", cobra.MaximumNArgs(1),
 			"  pfwd doctor devbox"),
-		group("config", "Manage the config file",
-			stub("path", "Print the config file path", "v0.2.0", cobra.NoArgs, ""),
-			stub("edit", "Open the config file in your editor", "v0.2.0", cobra.NoArgs, ""),
-			stub("validate", "Check the config file for unknown keys and bad values", "v0.2.0", cobra.NoArgs, ""),
-		),
 		stub("ui [host...]", "Open the web UI in the browser", "v0.6.0", cobra.ArbitraryArgs,
 			"  pfwd ui devbox"),
 	}
