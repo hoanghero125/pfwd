@@ -37,6 +37,9 @@ func (m Model) tooSmall() bool {
 
 func (m Model) render() string {
 	w, h := m.width, m.height
+	if h <= 0 || w <= 0 {
+		return ""
+	}
 	if m.tooSmall() {
 		lines := make([]string, h)
 		size := "60×12"

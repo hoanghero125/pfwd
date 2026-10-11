@@ -598,3 +598,12 @@ func TestEnterFollowsOnConflict(t *testing.T) {
 		t.Errorf("a busy custom port did not ask; specs %+v", e.specs)
 	}
 }
+
+// TestZeroSizeWindowDoesNotPanic: some terminals report 0×0 before their
+// real size.
+func TestZeroSizeWindowDoesNotPanic(t *testing.T) {
+	m := sized(connectedWith(newModel(newFakeEngine()), rp(5173, "node")), 0, 0)
+	_ = m.View()
+	m = sized(m, 1, 1)
+	_ = m.View()
+}
