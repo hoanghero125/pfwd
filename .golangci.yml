@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+# golangci-lint v2. The tool version is pinned in the Makefile and .github/workflows/ci.yml.
+version: "2"
+
+run:
+  relative-path-mode: gomod
+  modules-download-mode: readonly # fail instead of silently editing go.mod/go.sum
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose   # unclosed HTTP response bodies
+    - copyloopvar # redundant `v := v` copies
+    - errorlint   # errors.Is/As instead of == and type switches
+    - gosec       # includes G106 (InsecureIgnoreHostKey) and G408 (PublicKeyCallback misuse)
+    - misspell
+    - nolintlint  # every //nolint names a linter and gives a reason
+    - revive      # doc comments on every package and exported identifier
+    - usetesting  # t.TempDir, t.Setenv, t.Context in tests
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable: # on top of the defaults, which already include hostport and stdversion
+        - nilness
+        - unusedwrite
+    gosec:
+      excludes:
+        - G104 # unchecked errors: errcheck covers it
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      # Keep revive's defaults (they include `exported` and `package-comments`);
+      # listing any rule below would otherwise switch them all off.
+      enable-default-rules: true
+      rules:
+        - name: unused-parameter # cobra callbacks routinely ignore cmd/args
+          disabled: true
+    usetesting:
+      context-background: true
+      context-todo: true
+  exclusions:
+    # Not the `comments` preset: it would hide the missing-doc-comment reports.
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      rewrite-rules:
+        - pattern: 'interface{}'
+          replacement: 'any'
+    goimports:
+      local-prefixes:
+        - github.com/hoanghero125/pfwd
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
