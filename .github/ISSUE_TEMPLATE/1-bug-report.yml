@@ -74,7 +74,7 @@ body:
     id: doctor-bundle
     attributes:
       label: Diagnostic bundle
-      description: Run `pfwd doctor --bundle` and attach the zip it writes. The bundle is redacted, but please open it and check it before uploading.
+      description: From v0.5.0, run `pfwd doctor --bundle` and attach the zip it writes. The bundle is redacted, but please open it and check it before uploading. Earlier versions don't have this command, so leave this empty.
     validations:
       required: false
       accept: ".zip"
