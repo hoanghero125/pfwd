@@ -1,0 +1,95 @@
+name: Bug report
+description: Report something in pfwd that is broken or behaves unexpectedly.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search [existing issues](https://github.com/hoanghero125/pfwd/issues?q=is%3Aissue) first.
+
+        **Security problems must not be reported here.** See [SECURITY.md](https://github.com/hoanghero125/pfwd/blob/main/SECURITY.md).
+  - type: input
+    id: pfwd-version
+    attributes:
+      label: pfwd version
+      description: Paste the output of `pfwd version`.
+      placeholder: "pfwd 0.1.0 (commit 1a2b3c4d5e6f, built 2026-10-11T09:12:00Z, go1.27.2 linux/amd64)"
+    validations:
+      required: true
+  - type: dropdown
+    id: local-os
+    attributes:
+      label: Local OS
+      description: The operating system pfwd runs on.
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - FreeBSD
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: local-os-details
+    attributes:
+      label: Local OS version, architecture and terminal
+      description: For example the output of `uname -a` or the Windows build, plus your terminal emulator.
+      placeholder: "Windows 11 24H2 amd64, Windows Terminal 1.22"
+    validations:
+      required: true
+  - type: input
+    id: remote-os
+    attributes:
+      label: Remote OS and SSH server
+      description: The host you forward ports from, and its SSH server version if known.
+      placeholder: "Ubuntu 24.04 arm64, OpenSSH_9.6p1"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or key presses that trigger the problem.
+      placeholder: |
+        1. Run `pfwd devbox`
+        2. Press `enter` on the row for port 5173
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead. Include error messages exactly as shown.
+    validations:
+      required: true
+  - type: upload
+    id: doctor-bundle
+    attributes:
+      label: Diagnostic bundle
+      description: Run `pfwd doctor --bundle` and attach the zip it writes. The bundle is redacted, but please open it and check it before uploading.
+    validations:
+      required: false
+      accept: ".zip"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Optional. Paste extra log lines here; they are formatted as code automatically.
+      render: text
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed hostnames, usernames and other private details I do not want to share publicly.
+          required: true

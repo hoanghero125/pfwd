@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/hoanghero125/pfwd/discussions
+    about: Ask usage questions and discuss ideas in GitHub Discussions.
+  - name: Report a security vulnerability
+    url: https://github.com/hoanghero125/pfwd/security/advisories/new
+    about: Report security problems privately. Do not open a public issue.
