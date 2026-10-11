@@ -13,13 +13,16 @@ func TestParseProbe(t *testing.T) {
 		want     Probe
 		strategy Strategy
 	}{
-		{"Linux\nHAVE_SS\nHAVE_NETSTAT\nHAVE_PROC\n", Probe{OS: "Linux", SS: true, Netstat: true, Proc: true}, SS},
-		{"Linux\nHAVE_NETSTAT\nHAVE_PROC\n", Probe{OS: "Linux", Netstat: true, Proc: true}, Proc},
-		{"Linux\r\nHAVE_PROC\r\n", Probe{OS: "Linux", Proc: true}, Proc},
-		{"Linux\n", Probe{OS: "Linux"}, None},
-		{"Darwin\nHAVE_NETSTAT\nHAVE_LSOF\n", Probe{OS: "Darwin", Netstat: true, Lsof: true}, None},
-		{"FreeBSD\nHAVE_SOCKSTAT\n", Probe{OS: "FreeBSD", Sockstat: true}, None},
+		{"PFWD_OS Linux\nHAVE_SS\nHAVE_NETSTAT\nHAVE_PROC\n", Probe{OS: "Linux", SS: true, Netstat: true, Proc: true}, SS},
+		{"PFWD_OS Linux\nHAVE_NETSTAT\nHAVE_PROC\n", Probe{OS: "Linux", Netstat: true, Proc: true}, Proc},
+		{"PFWD_OS Linux\r\nHAVE_PROC\r\n", Probe{OS: "Linux", Proc: true}, Proc},
+		{"PFWD_OS Linux\n", Probe{OS: "Linux"}, None},
+		{"PFWD_OS Darwin\nHAVE_NETSTAT\nHAVE_LSOF\n", Probe{OS: "Darwin", Netstat: true, Lsof: true}, None},
+		{"PFWD_OS FreeBSD\nHAVE_SOCKSTAT\n", Probe{OS: "FreeBSD", Sockstat: true}, None},
 		{"HAVE_SS\n", Probe{SS: true}, None},
+		// Output from shell startup files must not become the OS name.
+		{"Welcome to devbox!\nPFWD_OS Linux\nHAVE_SS\n", Probe{OS: "Linux", SS: true}, SS},
+		{"Last login: today\nHAVE_PROC\nPFWD_OS \n", Probe{Proc: true}, None},
 		{"", Probe{}, None},
 	}
 	for _, c := range cases {
@@ -42,7 +45,7 @@ func TestStrategyString(t *testing.T) {
 }
 
 func TestProbeScript(t *testing.T) {
-	for _, want := range []string{"uname -s", "ss -tln", "HAVE_SS", "command -v netstat", "command -v lsof", "command -v sockstat", "test -r /proc/net/tcp", "HAVE_PROC"} {
+	for _, want := range []string{"PFWD_OS", "uname -s", "ss -tln", "HAVE_SS", "command -v netstat", "command -v lsof", "command -v sockstat", "test -r /proc/net/tcp", "HAVE_PROC"} {
 		if !strings.Contains(ProbeScript, want) {
 			t.Errorf("ProbeScript lacks %q", want)
 		}

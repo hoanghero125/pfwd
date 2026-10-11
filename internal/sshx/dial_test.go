@@ -738,3 +738,23 @@ func TestFromOptionsCertificateFile(t *testing.T) {
 		t.Errorf("CertificateFiles = %q, want %q", hc.CertificateFiles, want)
 	}
 }
+
+func TestConnOutputIsCapped(t *testing.T) {
+	f := newFixture(t, sshtest.Options{Exec: func(_ context.Context, _ string, stdout io.Writer) int {
+		chunk := []byte(strings.Repeat("x", 4096))
+		for range 256 { // 1 MiB
+			if _, err := stdout.Write(chunk); err != nil {
+				return 1
+			}
+		}
+		return 0
+	}})
+	c := mustDial(t, f.hc, DialOptions{})
+	out, err := c.Output(t.Context(), "flood")
+	if err != nil {
+		t.Fatalf("Output: %v", err)
+	}
+	if len(out) != maxOutput {
+		t.Errorf("Output returned %d bytes, want the first %d", len(out), maxOutput)
+	}
+}

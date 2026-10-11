@@ -37,7 +37,7 @@ type fakeConn struct {
 }
 
 func newFakeConn(frames ...string) *fakeConn {
-	return &fakeConn{probe: "Linux\nHAVE_SS\n", frames: frames, gone: make(chan struct{})}
+	return &fakeConn{probe: "PFWD_OS Linux\nHAVE_SS\n", frames: frames, gone: make(chan struct{})}
 }
 
 func (c *fakeConn) Output(context.Context, string) ([]byte, error) {

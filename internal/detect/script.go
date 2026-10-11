@@ -32,10 +32,11 @@ func (s Strategy) String() string {
 }
 
 // ProbeScript finds out what the server is and which tools it has. It runs
-// once per connection. `ss -tln` is run rather than looked up, because ss
+// once per connection. The OS line is tagged, because shell startup files
+// can print text before it. `ss -tln` is run rather than looked up, because ss
 // can exist and still fail where netlink is blocked. It ends with `true` so
 // the exit status is 0 whatever the last test says.
-const ProbeScript = "uname -s 2>/dev/null; " +
+const ProbeScript = "echo \"PFWD_OS $(uname -s 2>/dev/null)\"; " +
 	"ss -tln >/dev/null 2>&1 && echo HAVE_SS; " +
 	"command -v netstat >/dev/null 2>&1 && echo HAVE_NETSTAT; " +
 	"command -v lsof >/dev/null 2>&1 && echo HAVE_LSOF; " +
@@ -67,8 +68,8 @@ func ParseProbe(out string) Probe {
 		case "HAVE_PROC":
 			p.Proc = true
 		default:
-			if p.OS == "" {
-				p.OS = line
+			if os, ok := strings.CutPrefix(line, "PFWD_OS"); ok && p.OS == "" {
+				p.OS = strings.TrimSpace(os)
 			}
 		}
 	}

@@ -160,7 +160,7 @@ func (e *Engine) runSession(host HostID, s *session) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := detect.Watch(sctx, conn, e.o.Interval, e.log, func(u detect.Update) {
+		err := detect.Watch(sctx, conn, detect.WatchOptions{Interval: e.o.Interval, Logger: e.log}, func(u detect.Update) {
 			e.emit(PortsChanged{Host: host, Strategy: u.Strategy, OS: u.OS, Ports: u.Ports})
 		})
 		if err != nil {

@@ -189,7 +189,9 @@ func TestTarget(t *testing.T) {
 		want  string
 	}{
 		{[]string{"0.0.0.0"}, "127.0.0.1"},
-		{[]string{"::"}, "127.0.0.1"},
+		{[]string{"::"}, "::1"}, // IPv6 only (ss shows dual-stack sockets as *)
+		{[]string{"0.0.0.0", "::"}, "127.0.0.1"},
+		{[]string{"::", "::1"}, "::1"},
 		{[]string{"*"}, "127.0.0.1"},
 		{[]string{"127.0.0.1"}, "127.0.0.1"},
 		{[]string{"127.0.0.1", "::1"}, "127.0.0.1"},

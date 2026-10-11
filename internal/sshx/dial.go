@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -211,11 +212,28 @@ func (c *Conn) Output(ctx context.Context, cmd string) ([]byte, error) {
 	defer s.Close()
 	stop := context.AfterFunc(ctx, func() { s.Close() })
 	defer stop()
-	out, err := s.Output(cmd)
+	var out cappedBuffer
+	s.Stdout = &out
+	err = s.Run(cmd)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	return out, err
+	return out.buf.Bytes(), err
+}
+
+// maxOutput caps what Output keeps. The probe prints a few lines; a server
+// that prints more must not make pfwd buffer without limit.
+const maxOutput = 64 << 10
+
+// cappedBuffer keeps the first maxOutput bytes and drains the rest, so the
+// remote command can still finish.
+type cappedBuffer struct{ buf bytes.Buffer }
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if room := maxOutput - b.buf.Len(); room > 0 {
+		b.buf.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
 }
 
 // Start runs cmd on the server and returns its stdout. Closing the reader,
