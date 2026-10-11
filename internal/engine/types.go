@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"time"
 
 	"github.com/hoanghero125/pfwd/internal/detect"
@@ -41,6 +42,10 @@ type ForwardSpec struct {
 	LocalPort  uint16
 	RemoteHost string
 	RemotePort uint16
+	// Label names the service; empty takes the detected port's label.
+	Label string
+	// Auto marks a forward the engine created on its own.
+	Auto bool
 }
 
 // ForwardState is where a forward is in its lifecycle.
@@ -80,6 +85,8 @@ type Forward struct {
 	Err       error
 	Stats     forward.Stats
 	StartedAt time.Time
+	// Scheme is what the HTTP probe found; SchemeUnknown until it ran.
+	Scheme forward.Scheme
 }
 
 // SessionState is where a host's connection is.
@@ -125,9 +132,67 @@ type PortsChanged struct {
 	Host     HostID
 	Strategy detect.Strategy
 	OS       string
-	Ports    []detect.RemotePort
-	Err      error
+	Ports    []Port
+	// Added are ports that just became stable and Removed are stable
+	// ports that went away (see detect.Tracker).
+	Added, Removed []uint16
+	Err            error
 }
+
+// Port is a detected port with what the engine knows about it.
+type Port struct {
+	detect.RemotePort
+	// Label names the service: the user's label, else a built-in one.
+	Label string
+	// Ignored ports are hidden unless the user shows them, and never
+	// auto-forwarded.
+	Ignored bool
+}
+
+// AutoChanged reports whether auto-forward is on for a host. It is sent
+// when a session starts and whenever SetAuto changes it.
+type AutoChanged struct {
+	Host HostID
+	On   bool
+}
+
+// AutoForwardFailed reports a new port that could not be auto-forwarded.
+// The port is declined: pfwd won't try it again on its own this run.
+type AutoForwardFailed struct {
+	Host HostID
+	Port uint16
+	Err  error
+}
+
+// HostSettings are a host's auto-forward settings.
+type HostSettings struct {
+	// Auto turns auto-forward on when the session starts.
+	Auto bool
+	// Filter holds the ignore lists and auto_ports.
+	Filter detect.Filter
+}
+
+// DefaultSettings is auto-forward on, with the default ignore lists.
+func DefaultSettings() HostSettings {
+	return HostSettings{Auto: true, Filter: detect.DefaultFilter()}
+}
+
+// Notifier shows a desktop notification.
+type Notifier interface {
+	Notify(ctx context.Context, title, body string) error
+}
+
+// What an auto-forward does when its local port is taken.
+const (
+	// ConflictNext (and ConflictAsk, since nobody can be asked) uses the
+	// free port Listen suggests.
+	ConflictNext = "next"
+	ConflictAsk  = "ask"
+	// ConflictRandom uses any free port.
+	ConflictRandom = "random"
+	// ConflictFail gives up on that port.
+	ConflictFail = "fail"
+)
 
 // ForwardChanged reports a forward that was created or changed state. A
 // forward in state Stopped has been removed.
@@ -157,7 +222,9 @@ func (p HostKeyPrompt) Answer(ok bool) {
 	}
 }
 
-func (SessionChanged) event() {}
-func (PortsChanged) event()   {}
-func (ForwardChanged) event() {}
-func (HostKeyPrompt) event()  {}
+func (SessionChanged) event()    {}
+func (PortsChanged) event()      {}
+func (ForwardChanged) event()    {}
+func (HostKeyPrompt) event()     {}
+func (AutoChanged) event()       {}
+func (AutoForwardFailed) event() {}

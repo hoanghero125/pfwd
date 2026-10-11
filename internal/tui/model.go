@@ -51,7 +51,7 @@ type rate struct{ in, out float64 }
 type row struct {
 	key  string
 	fwd  *engine.Forward
-	port *detect.RemotePort
+	port *engine.Port
 }
 
 // Model is the TUI state. Create it with New.
@@ -72,7 +72,7 @@ type Model struct {
 	strategy  detect.Strategy
 	remoteOS  string
 	detectErr error
-	ports     []detect.RemotePort
+	ports     []engine.Port
 
 	forwards map[string]engine.Forward
 	samples  map[string]sample
@@ -287,7 +287,7 @@ func portKey(p uint16) string { return "p:" + itoa(int(p)) }
 // are not forwarded, each sorted by port. The cursor stays on the selected
 // row's key, or on the same index when that row is gone.
 func (m *Model) rebuild() {
-	byPort := make(map[uint16]*detect.RemotePort, len(m.ports))
+	byPort := make(map[uint16]*engine.Port, len(m.ports))
 	for i := range m.ports {
 		byPort[m.ports[i].Port] = &m.ports[i]
 	}
@@ -379,7 +379,7 @@ func (m Model) stopCmd(f engine.Forward) tea.Cmd {
 
 // specFor is the forward for a detected port: same local port, dialing
 // the address the server listens on.
-func specFor(p detect.RemotePort) engine.ForwardSpec {
+func specFor(p engine.Port) engine.ForwardSpec {
 	return engine.ForwardSpec{RemotePort: p.Port, LocalPort: p.Port, RemoteHost: detect.Target(p.Addrs)}
 }
 

@@ -308,7 +308,7 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 	return line
 }
 
-func (m Model) processText(p detect.RemotePort) string {
+func (m Model) processText(p engine.Port) string {
 	if p.Process == "" {
 		return m.th.faint.Render("?")
 	}

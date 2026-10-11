@@ -38,6 +38,26 @@ type Options struct {
 	Logger *slog.Logger
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// Debounce is how many snapshots a new port must appear in before it
+	// is auto-forwarded; 0 means 2.
+	Debounce int
+	// Settings returns a host's auto-forward settings; nil means
+	// DefaultSettings for every host.
+	Settings func(HostID) HostSettings
+	// Labels are user labels by port; they win over the built-in ones.
+	Labels map[uint16]string
+	// HTTPProbe checks each new forward for HTTP or HTTPS.
+	HTTPProbe bool
+	// OnConflict is what auto-forward does when the local port is taken:
+	// ConflictNext or ConflictAsk (the default) use a free port nearby,
+	// ConflictRandom any free port, ConflictFail gives up.
+	OnConflict string
+	// BindAddr is the default local address; "" means 127.0.0.1.
+	BindAddr string
+	// MaxConns caps open connections per forward; 0 means 256.
+	MaxConns int
+	// Notifier, when set, is told about every auto-forward.
+	Notifier Notifier
 }
 
 // shutdownTimeout bounds Close.
@@ -56,6 +76,7 @@ type Engine struct {
 	mu       sync.Mutex
 	closed   bool
 	sessions map[HostID]*session
+	hosts    map[HostID]*hostState
 	forwards map[string]*fwd
 	nextID   int
 }
@@ -83,6 +104,12 @@ func New(o Options) *Engine {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	if o.Debounce <= 0 {
+		o.Debounce = 2
+	}
+	if o.BindAddr == "" {
+		o.BindAddr = "127.0.0.1"
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{
 		o:        o,
@@ -91,6 +118,7 @@ func New(o Options) *Engine {
 		cancel:   cancel,
 		events:   make(chan Event, 256),
 		sessions: make(map[HostID]*session),
+		hosts:    make(map[HostID]*hostState),
 		forwards: make(map[string]*fwd),
 	}
 }
@@ -125,8 +153,9 @@ func (e *Engine) Connect(host HostID) {
 	}
 	s := &session{state: Connecting}
 	e.sessions[host] = s
+	hs := e.hostLocked(host)
 	e.wg.Add(1)
-	go e.runSession(host, s)
+	go e.runSession(host, s, hs)
 }
 
 func (e *Engine) setSession(s *session, state SessionState, conn Conn) {
@@ -135,9 +164,13 @@ func (e *Engine) setSession(s *session, state SessionState, conn Conn) {
 	e.mu.Unlock()
 }
 
-func (e *Engine) runSession(host HostID, s *session) {
+func (e *Engine) runSession(host HostID, s *session, hs *hostState) {
 	defer e.wg.Done()
 	e.emit(SessionChanged{Host: host, State: Connecting})
+	e.mu.Lock()
+	auto := hs.auto
+	e.mu.Unlock()
+	e.emit(AutoChanged{Host: host, On: auto})
 	conn, err := e.o.Dial(e.ctx, host, prompter{e: e, host: host})
 	if e.ctx.Err() != nil {
 		if conn != nil {
@@ -160,9 +193,8 @@ func (e *Engine) runSession(host HostID, s *session) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := detect.Watch(sctx, conn, detect.WatchOptions{Interval: e.o.Interval, Logger: e.log}, func(u detect.Update) {
-			e.emit(PortsChanged{Host: host, Strategy: u.Strategy, OS: u.OS, Ports: u.Ports})
-		})
+		o := detect.WatchOptions{Interval: e.o.Interval, Logger: e.log, Tracker: hs.tracker}
+		err := detect.Watch(sctx, conn, o, func(u detect.Update) { e.portsUpdated(host, hs, u) })
 		if err != nil {
 			e.log.Info("detection failed", "host", host, "err", err)
 			e.emit(PortsChanged{Host: host, Strategy: detect.None, Err: err})
@@ -249,7 +281,7 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 		return Forward{}, errors.New("remote port 0 is not a port; choose a port from 1 to 65535")
 	}
 	if spec.BindAddr == "" {
-		spec.BindAddr = "127.0.0.1"
+		spec.BindAddr = e.o.BindAddr
 	}
 	if spec.LocalPort == 0 {
 		spec.LocalPort = spec.RemotePort
@@ -262,6 +294,13 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 	if err != nil {
 		return Forward{}, err
 	}
+	if spec.Label == "" {
+		e.mu.Lock()
+		if p, ok := e.hostLocked(host).ports[spec.RemotePort]; ok {
+			spec.Label = e.label(p)
+		}
+		e.mu.Unlock()
+	}
 	ln, err := forward.Listen(spec.BindAddr, spec.LocalPort)
 	if err != nil {
 		return Forward{}, err
@@ -271,6 +310,7 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 	var f *fwd
 	local := forward.NewLocal(ln, conn, target, forward.Options{
 		Logger:      e.log,
+		MaxConns:    e.o.MaxConns,
 		OnDialError: func(err error) { e.dialFailed(f, err) },
 	})
 
@@ -279,6 +319,15 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 		e.mu.Unlock()
 		_ = ln.Close()
 		return Forward{}, fmt.Errorf("the connection to %s ended; forward again after reconnecting", host)
+	}
+	hs := e.hostLocked(host)
+	if spec.Auto && e.hasForwardLocked(host, spec.RemotePort) {
+		e.mu.Unlock()
+		_ = ln.Close()
+		return Forward{}, errAlreadyForwarded
+	}
+	if !spec.Auto {
+		delete(hs.declined, spec.RemotePort) // forwarding by hand clears a stop
 	}
 	e.nextID++
 	ctx, cancel := context.WithCancel(e.ctx)
@@ -293,9 +342,11 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 	e.mu.Unlock()
 
 	go e.serve(ctx, f)
-	e.log.Info("forward started", "id", f.ID, "host", host, "local", spec.LocalPort, "target", target)
+	e.log.Info("forward started", "id", f.ID, "host", host, "local", spec.LocalPort, "target", target, "auto", spec.Auto)
 	snap := e.snapshot(f)
 	e.emit(ForwardChanged{Forward: snap})
+	// The probe starts after the first event, so its result comes later.
+	e.startProbe(ctx, f, conn, target)
 	return snap, nil
 }
 
@@ -356,6 +407,8 @@ func (e *Engine) Stop(id string) error {
 	f, ok := e.forwards[id]
 	if ok {
 		delete(e.forwards, id)
+		// A stopped port is not auto-forwarded again this run.
+		e.hostLocked(f.Host).declined[f.Spec.RemotePort] = true
 	}
 	e.mu.Unlock()
 	if !ok {
