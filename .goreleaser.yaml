@@ -38,9 +38,15 @@ archives:
       - goos: windows
         formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files:
-      - LICENSE
-      - README.md
+    files: # fixed mode and mtime so archive hashes depend only on the commit
+      - src: LICENSE
+        info:
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: README.md
+        info:
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: checksums.txt
