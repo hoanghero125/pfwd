@@ -22,6 +22,8 @@ import (
 type Conn interface {
 	detect.Runner
 	forward.Dialer
+	// Listen asks the server to listen and forward connections here (-R).
+	Listen(bind string, port uint16) (net.Listener, error)
 	Close() error
 	// Wait blocks until the connection ends.
 	Wait() error
@@ -78,6 +80,14 @@ type Options struct {
 	// State remembers forwards between runs and restores them on each
 	// host's first connection; nil remembers nothing.
 	State *state.Store
+	// PrivilegedOffset moves a local port below 1024 that this user can't
+	// bind to port+offset; 0 means 10000, and a negative value turns it off.
+	PrivilegedOffset int
+	// AllowLANSocks lets a SOCKS proxy listen on a non-loopback address.
+	AllowLANSocks bool
+
+	// listen replaces forward.Listen in tests.
+	listen forward.ListenFunc
 }
 
 // shutdownTimeout bounds Close.
@@ -114,6 +124,8 @@ type fwd struct {
 	// want is the local port state.json keeps for a restored forward that
 	// had to listen on another one this run; 0 means Spec.LocalPort.
 	want uint16
+	// base adds up the counters of a remote forward's earlier listeners.
+	base forward.Stats
 }
 
 // New returns an Engine. Call Close when done with it.
@@ -179,31 +191,20 @@ func (e *Engine) emit(ev Event) {
 	}
 }
 
-// Forward creates a forward on a connected host. It binds the local port
-// before returning, so a busy port comes back as a
-// *forward.PortInUseError.
+// Forward creates a forward on a connected host. Local and Dynamic ones
+// bind their local port before returning, so a busy port comes back as a
+// *forward.PortInUseError; a Remote one has the server listen first, so a
+// refusal comes back as an error.
 func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
-	if spec.Kind != Local {
-		return Forward{}, fmt.Errorf("%s forwards are not supported yet (planned for v0.4.0)", spec.Kind)
+	spec, err := e.normalize(spec)
+	if err != nil {
+		return Forward{}, err
 	}
-	if spec.RemotePort == 0 {
-		return Forward{}, errors.New("remote port 0 is not a port; choose a port from 1 to 65535")
-	}
-	if spec.BindAddr == "" {
-		spec.BindAddr = e.o.BindAddr
-	}
-	if spec.LocalPort == 0 {
-		spec.LocalPort = spec.RemotePort
-	}
-	if spec.RemoteHost == "" {
-		spec.RemoteHost = "127.0.0.1"
-	}
-
 	conn, err := e.connOf(host)
 	if err != nil {
 		return Forward{}, err
 	}
-	if spec.Label == "" {
+	if spec.Label == "" && spec.Kind == Local {
 		e.mu.Lock()
 		if p, ok := e.hostLocked(host).ports[spec.RemotePort]; ok {
 			spec.Label = e.label(p)
@@ -216,23 +217,22 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 	if f := e.sameForward(host, spec); f != nil {
 		return e.snapshot(f), nil
 	}
-	ln, err := forward.Listen(spec.BindAddr, spec.LocalPort)
+	ln, port, err := e.listener(conn, spec)
 	if err != nil {
 		if f := e.sameForward(host, spec); f != nil {
 			return e.snapshot(f), nil
 		}
 		return Forward{}, err
 	}
-	target := net.JoinHostPort(spec.RemoteHost, itoa(spec.RemotePort))
+	var mapped uint16
+	if spec.Kind != Remote && port != spec.LocalPort {
+		mapped, spec.LocalPort = spec.LocalPort, port
+	}
 	// f is set below, before Serve starts, so the dialer and the callback
 	// always see it.
 	var f *fwd
 	dialer := &fwdDialer{e: e}
-	local := forward.NewLocal(ln, dialer, target, forward.Options{
-		Logger:      e.log,
-		MaxConns:    e.o.MaxConns,
-		OnDialError: func(err error) { e.dialFailed(f, err) },
-	})
+	local := e.newLocal(spec, ln, dialer, func(err error) { e.dialFailed(f, err) })
 
 	e.mu.Lock()
 	if e.closed || e.sessions[host] == nil || e.sessions[host].conn != conn {
@@ -246,32 +246,39 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 		_ = ln.Close()
 		return Forward{}, errAlreadyForwarded
 	}
-	if !spec.Auto {
+	if !spec.Auto && spec.Kind == Local {
 		delete(hs.declined, spec.RemotePort) // forwarding by hand clears a stop
 	}
 	e.nextID++
 	ctx, cancel := context.WithCancel(e.ctx)
 	f = &fwd{
-		Forward: Forward{ID: strconv.Itoa(e.nextID), Host: host, Spec: spec, State: Active, StartedAt: e.o.Now()},
+		Forward: Forward{ID: strconv.Itoa(e.nextID), Host: host, Spec: spec, State: Active, StartedAt: e.o.Now(), MappedFrom: mapped},
 		local:   local,
 		cancel:  cancel,
 		done:    make(chan struct{}),
+		want:    mapped, // remembered as the port asked for, not the one it moved to
 	}
-	if detect.SkipHTTPProbe(spec.RemotePort, hs.ports[spec.RemotePort].Process) {
-		f.Scheme = forward.SchemeNone // a database: never opened as a web page
+	if spec.Kind != Local || detect.SkipHTTPProbe(spec.RemotePort, hs.ports[spec.RemotePort].Process) {
+		f.Scheme = forward.SchemeNone // a database, a SOCKS proxy or a reverse forward: never opened as a page
 	}
 	dialer.f = f
 	e.forwards[f.ID] = f
 	e.wg.Add(1)
 	e.mu.Unlock()
 
-	go e.serve(ctx, f)
-	e.log.Info("forward started", "id", f.ID, "host", host, "local", spec.LocalPort, "target", target, "auto", spec.Auto)
+	if spec.Kind == Remote {
+		go e.serveRemote(ctx, f)
+	} else {
+		go e.serve(ctx, f)
+	}
+	e.log.Info("forward started", "id", f.ID, "host", host, "kind", spec.Kind, "bind", spec.BindAddr, "local", spec.LocalPort, "remote", spec.RemotePort, "auto", spec.Auto)
 	snap := e.snapshot(f)
 	e.emit(ForwardChanged{Forward: snap})
 	e.persist(host)
-	// The probe starts after the first event, so its result comes later.
-	e.startProbe(ctx, f, conn, target)
+	if spec.Kind == Local {
+		// The probe starts after the first event, so its result comes later.
+		e.startProbe(ctx, f, conn, net.JoinHostPort(spec.RemoteHost, itoa(spec.RemotePort)))
+	}
 	return snap, nil
 }
 
@@ -316,6 +323,12 @@ func (e *Engine) dialFailed(f *fwd, err error) {
 	case f.State != Active:
 		e.mu.Unlock()
 		return
+	case f.Spec.Kind == Dynamic:
+		// One SOCKS destination failing, even refused by the server's
+		// PermitOpen, says nothing about the others; the client got its
+		// reply code.
+		e.mu.Unlock()
+		return
 	case errors.Is(err, sshx.ErrForwardingRefused):
 		f.State, f.Err = Failed, err
 		f.cancel()
@@ -356,8 +369,9 @@ func (e *Engine) Stop(id string) error {
 func (e *Engine) snapshot(f *fwd) Forward {
 	e.mu.Lock()
 	snap := f.Forward
+	local, base := f.local, f.base
 	e.mu.Unlock()
-	snap.Stats = f.local.Stats()
+	snap.Stats = addStats(local.Stats(), base)
 	return snap
 }
 
@@ -368,7 +382,7 @@ func (e *Engine) Forwards() []Forward {
 	out := make([]Forward, 0, len(e.forwards))
 	for _, f := range e.forwards {
 		snap := f.Forward
-		snap.Stats = f.local.Stats()
+		snap.Stats = addStats(f.local.Stats(), f.base)
 		out = append(out, snap)
 	}
 	e.mu.Unlock()

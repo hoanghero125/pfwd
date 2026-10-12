@@ -26,15 +26,49 @@ func TestMain(m *testing.M) {
 // then blocks, dials targets directly on this machine, and ends Wait when
 // it is closed or dropped.
 type fakeConn struct {
-	probe    string
-	probeErr error
-	frames   []string
-	dialErr  error       // returned by DialContext when set
-	more     chan string // frames sent after the initial ones
+	probe     string
+	probeErr  error
+	frames    []string
+	dialErr   error       // returned by DialContext when set
+	listenErr error       // returned by Listen when set
+	more      chan string // frames sent after the initial ones
 
 	once    sync.Once
 	gone    chan struct{}
 	waitErr error
+
+	// listeners stand in for the server's listeners; they close with the
+	// connection.
+	lmu       sync.Mutex
+	listeners []net.Listener
+	// refuse is how many Listen calls are refused before one succeeds, as
+	// while an old session still holds the port.
+	refuse int
+}
+
+// Listen listens on this machine in place of the server, until the
+// connection ends.
+func (c *fakeConn) Listen(bind string, port uint16) (net.Listener, error) {
+	if c.listenErr != nil {
+		return nil, c.listenErr
+	}
+	c.lmu.Lock()
+	defer c.lmu.Unlock()
+	select {
+	case <-c.gone:
+		return nil, errors.New("connection closed")
+	default:
+	}
+	if c.refuse > 0 {
+		c.refuse--
+		return nil, &sshx.Error{Kind: sshx.ErrForwardingRefused, Msg: "refused to listen"}
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", itoa(port)))
+	if err != nil {
+		return nil, err
+	}
+	c.listeners = append(c.listeners, ln)
+	return ln, nil
 }
 
 func newFakeConn(frames ...string) *fakeConn {
@@ -87,6 +121,11 @@ func (c *fakeConn) end(err error) {
 	c.once.Do(func() {
 		c.waitErr = err
 		close(c.gone)
+		c.lmu.Lock()
+		for _, ln := range c.listeners {
+			ln.Close()
+		}
+		c.lmu.Unlock()
 	})
 }
 
@@ -349,13 +388,11 @@ func TestForwardNotConnected(t *testing.T) {
 	}
 }
 
-func TestForwardUnsupportedKind(t *testing.T) {
+func TestForwardUnknownKind(t *testing.T) {
 	e := newEngine(t, dialTo(newFakeConn()))
 	connected(t, e, "devbox")
-	for _, k := range []ForwardKind{Remote, Dynamic} {
-		if _, err := e.Forward("devbox", ForwardSpec{Kind: k, RemotePort: 80, LocalPort: freePort(t)}); err == nil {
-			t.Errorf("Forward(%v) succeeded", k)
-		}
+	if _, err := e.Forward("devbox", ForwardSpec{Kind: ForwardKind(9), RemotePort: 80, LocalPort: freePort(t)}); err == nil {
+		t.Error("Forward of an unknown kind succeeded")
 	}
 }
 

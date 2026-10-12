@@ -72,6 +72,8 @@ type Forward struct {
 	AutoExpire       time.Duration
 	MaxConns         int
 	Restore          bool
+	// AllowLANSocks lets a SOCKS proxy listen on a non-loopback address.
+	AllowLANSocks bool
 }
 
 // SSH configures connections.
@@ -168,29 +170,11 @@ func (c Config) FilterFor(alias string) detect.Filter {
 }
 
 // Unapplied lists settings that are set but only take effect in a later
-// version, so `pfwd config validate` can say so.
+// version, so `pfwd config validate` can say so. Since v0.4.0 every
+// setting applies, so it lists nothing; it stays for the settings later
+// versions add.
 func (c Config) Unapplied() []string {
-	d := Default()
-	var notes []string
-	note := func(key, version string) {
-		notes = append(notes, fmt.Sprintf("%s is accepted but applies from %s", key, version))
-	}
-	if c.Forward.PrivilegedOffset != d.Forward.PrivilegedOffset {
-		note("forward.privileged_offset", "v0.4.0")
-	}
-	aliases := make([]string, 0, len(c.Hosts))
-	for a := range c.Hosts {
-		aliases = append(aliases, a)
-	}
-	slices.Sort(aliases)
-	for _, a := range aliases {
-		for _, r := range c.Hosts[a].Forwards {
-			if r.Kind != "local" {
-				note(fmt.Sprintf("hosts.%s.forwards entry %q", quoteKey(a), r.Raw), "v0.4.0")
-			}
-		}
-	}
-	return notes
+	return nil
 }
 
 // quoteKey quotes a TOML key part that isn't a bare key.

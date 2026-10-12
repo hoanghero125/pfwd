@@ -161,6 +161,11 @@ func (e *Engine) serveConn(ctx context.Context, host HostID, s *session, hs *hos
 	e.mu.Lock()
 	s.state, s.conn = Connected, conn
 	close(s.ready)
+	select {
+	case <-hs.ready:
+	default:
+		close(hs.ready)
+	}
 	e.mu.Unlock()
 	e.log.Info("connected", "host", host)
 	e.emit(SessionChanged{Host: host, State: Connected})
@@ -213,6 +218,7 @@ func (e *Engine) serveConn(ctx context.Context, host HostID, s *session, hs *hos
 
 	e.mu.Lock()
 	s.conn = nil
+	hs.ready = make(chan struct{})
 	if ctx.Err() == nil {
 		s.state = Reconnecting
 		s.ready = make(chan struct{})
@@ -286,12 +292,13 @@ func (e *Engine) pauseForwards(host HostID, reason PauseReason) {
 }
 
 // resumeForwards makes host's forwards that paused for the lost connection
-// active again.
+// active again. Remote forwards resume once the server listens again; see
+// serveRemote.
 func (e *Engine) resumeForwards(host HostID) {
 	e.mu.Lock()
 	var changed []*fwd
 	for _, f := range e.forwards {
-		if f.Host == host && f.State == Paused && f.Pause == Disconnected {
+		if f.Host == host && f.State == Paused && f.Pause == Disconnected && f.Spec.Kind != Remote {
 			f.State, f.Pause, f.PausedAt, f.Err = Active, NotPaused, time.Time{}, nil
 			changed = append(changed, f)
 		}

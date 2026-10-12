@@ -1,0 +1,40 @@
+ pfwd  devbox ● connected                                                                                                            ? help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  This machine's listening ports. enter exposes one on devbox.
+
+  list this machine's listening ports: lsof: executable file not found in $PATH; install lsof or check that it runs
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ enter expose  F other server port  ↑ ↓ move  esc back

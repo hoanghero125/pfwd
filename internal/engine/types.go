@@ -35,7 +35,10 @@ func (k ForwardKind) String() string {
 }
 
 // ForwardSpec describes a forward. Zero values get defaults: BindAddr
-// 127.0.0.1, LocalPort = RemotePort, RemoteHost 127.0.0.1.
+// 127.0.0.1, LocalPort = RemotePort, RemoteHost 127.0.0.1. For a Remote
+// forward, BindAddr and RemotePort are where the server listens, and
+// RemoteHost and LocalPort the target as this machine sees it; a Dynamic
+// one is a SOCKS5 proxy on BindAddr:LocalPort.
 type ForwardSpec struct {
 	Kind       ForwardKind
 	BindAddr   string
@@ -94,6 +97,10 @@ const (
 	// Disconnected: the connection to the host is down. New connections
 	// wait for the reconnect.
 	Disconnected
+	// ServerPortBusy: after a reconnect the server refuses a remote
+	// forward's port, usually while the old connection's session still
+	// holds it. The forward keeps asking until the port is free.
+	ServerPortBusy
 )
 
 // String describes the reason in a few words.
@@ -103,6 +110,8 @@ func (r PauseReason) String() string {
 		return "port closed"
 	case Disconnected:
 		return "disconnected"
+	case ServerPortBusy:
+		return "port busy"
 	default:
 		return ""
 	}
@@ -122,6 +131,9 @@ type Forward struct {
 	// Pause and PausedAt say why and since when the forward is Paused.
 	Pause    PauseReason
 	PausedAt time.Time
+	// MappedFrom is the local port asked for when it needed privileges
+	// this user lacks; Spec.LocalPort is then the port used instead.
+	MappedFrom uint16
 }
 
 // SessionState is where a host's connection is.

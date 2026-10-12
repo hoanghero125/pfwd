@@ -1,0 +1,8 @@
+USER     COMMAND    PID   FD  PROTO  LOCAL ADDRESS         FOREIGN ADDRESS
+www      nginx      1204  6   tcp4   *:80                  *:*
+www      nginx      1204  7   tcp6   *:80                  *:*
+alice    node       2210  21  tcp4   127.0.0.1:3000        *:*
+alice    python3.11 2301  3   tcp6   ::1:8888              *:*
+root     sshd       812   4   tcp6   *:22                  *:*
+root     sshd       812   5   tcp4   *:22                  *:*
+?        ?          ?     ?   tcp4   10.0.0.5:5432         *:*

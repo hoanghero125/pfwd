@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -319,6 +320,29 @@ func (c *Conn) DialContext(ctx context.Context, network, addr string) (net.Conn,
 	return nil, fmt.Errorf("%s could not connect to %s: %w; check that something still listens there", c.alias, addr, err)
 }
 
+// Listen asks the server to listen on bind:port and forward the
+// connections it accepts here, like ssh -R. Port 0 lets the server pick;
+// the listener's address says which. Closing the listener cancels the
+// forward. A refusal says what to check in the server's sshd_config.
+func (c *Conn) Listen(bind string, port uint16) (net.Listener, error) {
+	addr := net.JoinHostPort(bind, strconv.Itoa(int(port)))
+	ln, err := c.client.Listen("tcp", addr)
+	switch {
+	case err == nil:
+		return ln, nil
+	case !strings.Contains(err.Error(), "request denied by peer"):
+		// x/crypto's words for the server saying no; anything else is the
+		// connection or the address.
+		return nil, fmt.Errorf("%s could not listen on %s: %w", c.alias, addr, err)
+	}
+	hint := "the port may be taken there, or AllowTcpForwarding may be off in its sshd_config"
+	if ip, perr := netip.ParseAddr(bind); bind != "localhost" && (perr != nil || !ip.IsLoopback()) {
+		hint = "listening on a non-loopback address needs GatewayPorts yes (or clientspecified) in its sshd_config, and the port must be free"
+	}
+	return nil, &Error{Kind: ErrForwardingRefused, Err: err, Msg: fmt.Sprintf(
+		"%s refused to listen on %s: %v; %s", c.alias, addr, err, hint)}
+}
+
 // Output runs cmd on the server and returns its stdout. A non-zero exit
 // status is returned as an *ssh.ExitError together with the output.
 func (c *Conn) Output(ctx context.Context, cmd string) ([]byte, error) {
@@ -365,22 +389,31 @@ func (c *Conn) Start(ctx context.Context, cmd string) (io.ReadCloser, error) {
 		s.Close()
 		return nil, fmt.Errorf("session stdout: %w", err)
 	}
+	// stdin stays open and unwritten, so the command sees it end only when
+	// the channel goes; the Windows loop exits on that.
+	stdin, err := s.StdinPipe()
+	if err != nil {
+		s.Close()
+		return nil, fmt.Errorf("session stdin: %w", err)
+	}
 	if err := s.Start(cmd); err != nil {
 		s.Close()
 		return nil, fmt.Errorf("start remote command: %w", err)
 	}
 	stop := context.AfterFunc(ctx, func() { s.Close() })
-	return &sessionReader{Reader: stdout, session: s, stop: stop}, nil
+	return &sessionReader{Reader: stdout, stdin: stdin, session: s, stop: stop}, nil
 }
 
 type sessionReader struct {
 	io.Reader
+	stdin   io.Closer
 	session *ssh.Session
 	stop    func() bool
 }
 
 func (r *sessionReader) Close() error {
 	r.stop()
+	_ = r.stdin.Close()
 	if err := r.session.Close(); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}

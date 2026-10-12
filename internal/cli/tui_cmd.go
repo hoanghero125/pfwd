@@ -34,10 +34,11 @@ type rootFlags struct {
 	acceptNew  bool
 	logLevel   string
 	// These override the config file.
-	auto, noAuto bool
-	bind         string
-	interval     time.Duration
-	noColor      bool
+	auto, noAuto  bool
+	bind          string
+	interval      time.Duration
+	noColor       bool
+	allowLANSocks bool
 }
 
 func (f *rootFlags) register(fs *pflag.FlagSet) {
@@ -53,6 +54,7 @@ func (f *rootFlags) register(fs *pflag.FlagSet) {
 	fs.StringVar(&f.bind, "bind", "", "local address forwards listen on, instead of forward.bind (127.0.0.1)")
 	fs.DurationVar(&f.interval, "interval", 0, "how often to list the server's ports, instead of detect.interval (2s)")
 	fs.BoolVar(&f.noColor, "no-color", false, "draw without colors, like NO_COLOR")
+	fs.BoolVar(&f.allowLANSocks, "allow-lan-socks", false, "let a SOCKS proxy listen on a non-loopback --bind, instead of forward.allow_lan_socks")
 }
 
 // hostArgs accepts exactly one host, as "alias" or "user@alias".
@@ -122,6 +124,7 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 		notifier = notify.New("pfwd")
 	}
 	o := engineOptions(cfg, auto, notifier)
+	addSSHForwards(&o, engine.HostID(hc.Alias), hc, func(msg string) { logger.Warn(msg) })
 	o.Logger = logger
 	o.State = stateStore(cfg, logger)
 	// Decrypted keys and the password live as long as this run, so

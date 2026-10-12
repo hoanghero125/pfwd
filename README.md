@@ -9,7 +9,7 @@ The VS Code Ports panel for any terminal. Agentless, one binary, every OS.
 
 `pfwd devbox` connects to a host from your `~/.ssh/config` and shows a live table of the TCP ports listening on it. Start `npm run dev` on the server and, a few seconds later, `localhost:5173` on your laptop reaches it. You don't press anything.
 
-> **Status: v0.3.0, early.** One host at a time, Linux servers, local forwards. `-R`/`-D` forwards, macOS/BSD/Windows servers, scripting commands and a web UI come in later releases.
+> **Status: v0.4.0, early.** One host at a time. Scripting commands, several hosts in one window and a web UI come in later releases.
 
 ## Install
 
@@ -60,6 +60,8 @@ The first time you connect to a server, pfwd shows its host key fingerprint and 
 | `/` | filter rows by port, process or label; `esc` clears the filter |
 | `h` | show or hide ignored ports |
 | `L` | event log |
+| `r` | list this machine's ports, to expose one on the server |
+| `d` | start or stop a SOCKS proxy on port 1080 |
 | `c` | reconnect now |
 | `?` | help |
 | `q` or `ctrl+c` | quit (asks first while forwards are active) |
@@ -88,7 +90,15 @@ A forward whose server stops listening pauses too, and resumes when the port is 
 
 `p` pins the selected forward. pfwd keeps its forwards in `state.json`, next to its log. While it runs it saves all of them, so they come back after a crash; when you quit it keeps only the pinned ones. The next time you connect to that host, they come back on the same local ports, before any new port is detected. `forward.restore = false` turns this off.
 
-Forwards listed under `[hosts.<alias>]` in the config file are always on, like pinned ones, and show `cfg` instead of `pin`.
+Forwards listed under `[hosts.<alias>]` in the config file are always on, like pinned ones, and show `cfg` instead of `pin`. So are the `LocalForward`, `RemoteForward` and `DynamicForward` lines of your ssh config for that host. pfwd skips Unix-socket forwards and notes each one it skips in its log.
+
+## Remote forwards and SOCKS
+
+`r` lists the ports listening on the machine running pfwd. `enter` exposes the selected one on the server under the same port number, and `F` under another. The row shows `rev`, and a program on the server reaches your port at `localhost:<port>`. The server's sshd has to allow it (`AllowTcpForwarding yes`, the default); to listen on an address other than loopback there, it also needs `GatewayPorts`. In the config, `"-R 9000:3000"` exposes local port 3000 as port 9000 on the server. After a dropped connection, the server can hold the port for the old session a while longer; the row says `port busy` and pfwd keeps asking until the port is free. `ClientAliveInterval` in the server's sshd_config shortens that wait.
+
+`d` starts a SOCKS5 proxy on `localhost:1080` that makes its connections from the server, so a browser set to use it reaches what the server reaches. `d` again stops it. In the config, it is `"-D 1080"`. A SOCKS proxy only listens on loopback: on any other address, anyone on your network could reach everything the server can. `forward.allow_lan_socks = true` or `--allow-lan-socks` allows it anyway.
+
+On Linux, a local port below 1024, such as 80, needs root. When pfwd isn't allowed to listen on one, it uses that port plus 10000 instead (`localhost:10080`), and the LOCAL column shows the port it used. `forward.privileged_offset` changes the 10000; 0 turns this off.
 
 ## Configuration
 
@@ -116,20 +126,18 @@ notifications = true       # desktop notification when a port is auto-forwarded
 
 [hosts.devbox]             # overrides for one host, by ssh config alias
 auto = false
-forwards = ["5432", "15432:db.internal:5432"]   # always on, in ssh's -L syntax
+forwards = ["5432", "15432:db.internal:5432", "-R 9000:3000", "-D 1080"]   # always on
 ```
 
-`forward.privileged_offset`, and `-R` and `-D` entries in `forwards`, are accepted now but take effect in v0.4.0. `pfwd config validate` says so when you set one.
-
-These flags override the file for one run: `--auto` and `--no-auto`, `--bind`, `--interval` and `--no-color`. pfwd also honors `NO_COLOR`, and draws ASCII instead of Unicode symbols in the old Windows console (`ui.glyphs` changes that).
+These flags override the file for one run: `--auto` and `--no-auto`, `--bind`, `--interval`, `--allow-lan-socks` and `--no-color`. pfwd also honors `NO_COLOR`, and draws ASCII instead of Unicode symbols in the old Windows console (`ui.glyphs` changes that).
 
 ## How it works
 
 pfwd resolves the host with `ssh -G`, so `Match`, `Include` and every default work exactly as they do for `ssh`; without OpenSSH it reads `~/.ssh/config` itself. It follows `ProxyJump` and `ProxyCommand`, checks `known_hosts` for every hop, and always refuses a changed host key.
 
-It logs in with ssh-agent (including the Windows OpenSSH agent) and your `IdentityFile` keys, and asks in the terminal for what the server wants beyond that: the passphrase of an encrypted key, a password, or a one-time code. Passphrases, and passwords the server asks for with SSH's password method, stay in memory for the session, so a reconnect doesn't ask again. Answers to keyboard-interactive prompts, which is how servers ask for one-time codes (and some for passwords), are asked for every time. Nothing typed is written to disk or to the log.
+It logs in with ssh-agent (on Windows, the OpenSSH agent or Pageant) and your `IdentityFile` keys, and asks in the terminal for what the server wants beyond that: the passphrase of an encrypted key, a password, or a one-time code. Passphrases, and passwords the server asks for with SSH's password method, stay in memory for the session, so a reconnect doesn't ask again. Answers to keyboard-interactive prompts, which is how servers ask for one-time codes (and some for passwords), are asked for every time. Nothing typed is written to disk or to the log.
 
-Nothing gets installed on the server. pfwd runs one probe, then a small `sh` loop on a single SSH channel that lists listening sockets with `ss` every 2 seconds, or reads `/proc/net/tcp` on busybox systems. It writes no files there and uploads no binary.
+Nothing gets installed on the server. pfwd runs one probe to learn the server's OS, then a small loop on a single SSH channel that lists the listening sockets every 2 seconds: with `ss` on Linux, or by reading `/proc/net/tcp` on busybox systems; with `lsof` on macOS; with `sockstat` on FreeBSD and `netstat` on the other BSDs; and with `netstat` and `tasklist` in PowerShell on Windows servers running OpenSSH. It writes no files there and uploads no binary.
 
 Forwards listen on `127.0.0.1` unless you change `forward.bind` or pass `--bind`, so your network can't reach them. When they listen on another address, the top bar says so.
 
@@ -137,8 +145,8 @@ Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux,
 
 ## Not supported yet
 
-- macOS, BSD and Windows servers (v0.4.0). The machine running pfwd can be macOS, Linux or Windows today.
-- Remote (`-R`) and SOCKS (`-D`) forwards, and the `LocalForward`, `RemoteForward` and `DynamicForward` lines of your ssh config (v0.4.0).
+- Several hosts in one window, and the scripting commands `pfwd ls` and `pfwd fwd` (v0.5.0).
+- Unix-socket forwards, and a SOCKS proxy on the server side (`ssh -R` with only a port).
 
 ## Why pfwd
 

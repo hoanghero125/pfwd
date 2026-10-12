@@ -98,7 +98,12 @@ func (m Model) modalLines() []string {
 		)
 	case modalPort:
 		title = "Forward :" + itoa(int(md.spec.RemotePort)) + " to another local port"
-		field := "Local port  " + md.input + th.accent.Render(th.g.block)
+		label := "Local port"
+		if md.spec.Kind == engine.Remote {
+			title = "Expose localhost:" + itoa(int(md.spec.LocalPort)) + " on another server port"
+			label = "Server port"
+		}
+		field := label + "  " + md.input + th.accent.Render(th.g.block)
 		errLine := ""
 		if md.inputErr != "" {
 			errLine = th.bad.Render(md.inputErr)
@@ -157,6 +162,8 @@ func helpKeys(th theme) [][2]string {
 		{"/", "filter by port, process or label"},
 		{"h", "show or hide ignored ports"},
 		{"L", "event log"},
+		{"r", "expose a local port on the server"},
+		{"d", "start or stop a SOCKS proxy (1080)"},
 		{"c", "reconnect now"},
 		{"x", "stop retrying, while reconnecting"},
 		{"?  esc", "close this help"},

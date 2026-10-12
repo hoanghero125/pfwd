@@ -52,6 +52,10 @@ type Options struct {
 	// IgnoreKeepalive leaves keepalive@openssh.com requests unanswered,
 	// like a server behind a dead network path.
 	IgnoreKeepalive bool
+	// AllowRemoteForward accepts tcpip-forward requests (ssh -R): the
+	// server listens on 127.0.0.1 and forwards connections to the client.
+	// Without it they are refused.
+	AllowRemoteForward bool
 }
 
 // Server is a running test server. It stops, and waits for all of its
@@ -247,14 +251,20 @@ func (s *Server) serveConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	}
 	defer sconn.Close()
 
+	fwds := &remoteForwards{lns: map[uint32]net.Listener{}}
+	defer fwds.closeAll()
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer fwds.closeAll()
 		for req := range reqs {
-			if req.Type == "keepalive@openssh.com" && s.ignoreKeepalive.Load() {
-				continue
-			}
-			if req.WantReply {
+			switch {
+			case req.Type == "keepalive@openssh.com" && s.ignoreKeepalive.Load():
+			case req.Type == "tcpip-forward":
+				s.handleRemoteForward(sconn, req, fwds)
+			case req.Type == "cancel-tcpip-forward":
+				cancelRemoteForward(req, fwds)
+			case req.WantReply:
 				_ = req.Reply(req.Type == "keepalive@openssh.com", nil)
 			}
 		}

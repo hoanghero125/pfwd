@@ -18,10 +18,11 @@ auto = true                # forward new ports automatically
 auto_ports = []            # if not empty, only auto-forward these, e.g. ["3000-3999", 5173, 8888]
 bind = "127.0.0.1"         # local address; anything else exposes forwards to your network
 on_conflict = "ask"        # when a local port is taken: ask, next, random or fail
-privileged_offset = 10000  # remote 80 becomes local 10080 (from v0.4.0)
+privileged_offset = 10000  # a local port below 1024 you can't bind moves up: 80 becomes 10080 (0 turns it off)
 auto_expire = "10m"        # drop auto-forwards whose port has been gone this long, unless pinned
 max_conns = 256            # open connections per forward
 restore = true             # remember forwards in state.json and restore them on connect
+allow_lan_socks = false    # let a SOCKS proxy listen on a non-loopback address
 
 [ssh]
 use_openssh_config = true  # resolve hosts with "ssh -G" when OpenSSH is installed

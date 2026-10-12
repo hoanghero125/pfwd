@@ -32,6 +32,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	case m.logOpen:
 		return m.handleLogKey(k)
+	case m.reverseOpen:
+		return m.handleReverseKey(k)
 	}
 
 	switch k {
@@ -107,6 +109,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.rebuild()
 	case "L":
 		m.logOpen, m.logScroll = true, 0
+	case "r":
+		if m.session == engine.Connected {
+			return m.openReverse()
+		}
+	case "d":
+		for _, f := range m.forwards {
+			if f.Host == m.host && f.Spec.Kind == engine.Dynamic {
+				return m, m.stopCmd(f)
+			}
+		}
+		if m.session == engine.Connected {
+			return m, m.enterCmd(engine.ForwardSpec{Kind: engine.Dynamic, LocalPort: socksPort})
+		}
 	case "?":
 		m.modal = modalState{kind: modalHelp}
 	case "q":
@@ -323,7 +338,11 @@ func (m Model) handlePortKey(k string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		spec := m.modal.spec
-		spec.LocalPort = port
+		if spec.Kind == engine.Remote {
+			spec.RemotePort = port
+		} else {
+			spec.LocalPort = port
+		}
 		m.modal = modalState{}
 		return m, m.forwardCmd(spec)
 	case k == "backspace":

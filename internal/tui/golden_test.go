@@ -160,6 +160,34 @@ func goldenCases() map[string]func(*testing.T) Model {
 			return apply(lostScreen(t), engine.SessionChanged{Host: "devbox", State: engine.SessionFailed, Err: &sshx.Error{
 				Kind: sshx.ErrConnect, Msg: "stopped reconnecting to devbox; reconnect once the host is reachable"}})
 		},
+		"kinds": func(t *testing.T) Model {
+			return apply(mainScreen(t), engine.ForwardChanged{Forward: remoteFwd}, engine.ForwardChanged{Forward: socksFwd})
+		},
+		"reverse": func(t *testing.T) Model {
+			m := connectedWith(newModelWith(newFakeEngine(), Options{LocalPorts: localPortsFake(localSample, nil)}), rp(5173, "node"))
+			m, _ = press(t, m, "r", "down")
+			return m
+		},
+		"reverse-loading": func(t *testing.T) Model {
+			m, _ := connectedWith(newModelWith(newFakeEngine(), Options{LocalPorts: localPortsFake(localSample, nil)})).openReverse()
+			return m
+		},
+		"reverse-error": func(t *testing.T) Model {
+			m := connectedWith(newModelWith(newFakeEngine(), Options{LocalPorts: localPortsFake(nil,
+				errors.New("list this machine's listening ports: lsof: executable file not found in $PATH; install lsof or check that it runs"))}))
+			m, _ = press(t, m, "r")
+			return m
+		},
+		"reverse-empty": func(t *testing.T) Model {
+			m := connectedWith(newModelWith(newFakeEngine(), Options{LocalPorts: localPortsFake(nil, nil)}))
+			m, _ = press(t, m, "r")
+			return m
+		},
+		"modal-expose": func(t *testing.T) Model {
+			m := connectedWith(newModelWith(newFakeEngine(), Options{LocalPorts: localPortsFake(localSample, nil)}))
+			m, _ = press(t, m, "r", "F", "9", "0")
+			return m
+		},
 		"modal-passphrase": func(t *testing.T) Model {
 			p, _ := credPrompt(sshx.Passphrase, "/home/alice/.ssh/id_ed25519")
 			m, _ := press(t, apply(connecting(t), p), "a", "b", "c")

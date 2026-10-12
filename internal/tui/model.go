@@ -56,7 +56,13 @@ type Options struct {
 	// uses the free port nearby, "random" any free port, "fail" reports
 	// the error, and anything else ("ask") opens the conflict modal.
 	OnConflict string
+	// LocalPorts lists this machine's listening ports for the Reverse tab
+	// (r); nil leaves the tab empty with a note.
+	LocalPorts func(ctx context.Context) ([]detect.RemotePort, error)
 }
+
+// socksPort is the port d starts a SOCKS proxy on.
+const socksPort = 1080
 
 // statusFor is how long the status line shows the last event.
 const statusFor = 5 * time.Second
@@ -129,7 +135,6 @@ type Model struct {
 
 	scanned   bool
 	strategy  detect.Strategy
-	remoteOS  string
 	detectErr error
 	ports     []engine.Port
 
@@ -153,6 +158,14 @@ type Model struct {
 	// total counts the rows before the filter; hidden counts the ignored
 	// ports left out.
 	total, hidden int
+
+	// reverseOpen shows the Reverse tab: this machine's listening ports
+	// (local), to expose one on the server.
+	reverseOpen  bool
+	local        []detect.RemotePort
+	localErr     error
+	localLoading bool
+	revCursor    int
 
 	log     []logEntry
 	logOpen bool
@@ -296,6 +309,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus(statusInfo, "Sent %s to the terminal's clipboard", msg.text)
 			m.addLog(statusInfo, "The system clipboard didn't take it: "+msg.err.Error())
 		}
+	case localPortsMsg:
+		m.applyLocalPorts(msg)
 	case pinResultMsg:
 		switch {
 		case msg.err != nil:
@@ -405,7 +420,7 @@ func (m *Model) applyEvent(ev engine.Event) {
 			return
 		}
 		m.scanned = true
-		m.strategy, m.remoteOS, m.detectErr, m.ports = ev.Strategy, ev.OS, ev.Err, ev.Ports
+		m.strategy, m.detectErr, m.ports = ev.Strategy, ev.Err, ev.Ports
 		for _, port := range ev.Added {
 			text := "New port :" + itoa(int(port))
 			if i := slices.IndexFunc(ev.Ports, func(p engine.Port) bool { return p.Port == port }); i >= 0 && ev.Ports[i].Process != "" {
@@ -429,10 +444,14 @@ func (m *Model) applyEvent(ev engine.Event) {
 	case engine.RestoreFailed:
 		switch {
 		case ev.Host != m.host:
-		case ev.Spec.RemotePort != 0:
-			m.event(statusErr, "Couldn't restore :%d: %s", ev.Spec.RemotePort, ev.Err.Error())
-		default:
+		case ev.Spec == (engine.ForwardSpec{}):
 			m.event(statusErr, "Couldn't read the remembered forwards: %s", ev.Err.Error())
+		case ev.Spec.Kind == engine.Dynamic:
+			m.event(statusErr, "Couldn't start the SOCKS proxy on %s: %s", localAddr(ev.Spec), ev.Err.Error())
+		case ev.Spec.Kind == engine.Remote:
+			m.event(statusErr, "Couldn't expose %s on :%d: %s", localAddr(ev.Spec), ev.Spec.RemotePort, ev.Err.Error())
+		default:
+			m.event(statusErr, "Couldn't restore :%d: %s", ev.Spec.RemotePort, ev.Err.Error())
 		}
 	}
 	m.rebuild()
@@ -483,11 +502,13 @@ func (m *Model) applyForwardChanged(f engine.Forward) {
 	if !had && f.State != engine.Failed {
 		m.forwardStarted(f)
 	}
-	if had && prev.State != f.State {
+	if had && (prev.State != f.State || prev.Pause != f.Pause) {
 		switch {
 		case f.State == engine.Paused && f.Pause == engine.PortGone:
 			m.addLog(statusInfo, fmt.Sprintf("Paused :%d: the port closed on %s", port, safetext.Clean(string(m.host))))
-		case f.State == engine.Active && prev.State == engine.Paused && prev.Pause == engine.PortGone:
+		case f.State == engine.Paused && f.Pause == engine.ServerPortBusy:
+			m.addLog(statusInfo, fmt.Sprintf("Waiting for :%d on %s: the old connection still holds it", port, safetext.Clean(string(m.host))))
+		case f.State == engine.Active && prev.State == engine.Paused && (prev.Pause == engine.PortGone || prev.Pause == engine.ServerPortBusy):
 			m.addLog(statusOK, fmt.Sprintf("Resumed :%d", port))
 		}
 	}
@@ -501,16 +522,31 @@ func (m *Model) applyForwardChanged(f engine.Forward) {
 	}
 }
 
+// describe says what a forward does, in the words the status line uses.
+func describe(f engine.Forward, host string) string {
+	switch f.Spec.Kind {
+	case engine.Remote:
+		return fmt.Sprintf("Exposed %s on :%d of %s", localAddr(f.Spec), f.Spec.RemotePort, host)
+	case engine.Dynamic:
+		return "SOCKS proxy on " + localAddr(f.Spec)
+	}
+	text := fmt.Sprintf("Forwarded :%d to %s", f.Spec.RemotePort, localAddr(f.Spec))
+	if f.MappedFrom != 0 {
+		text += fmt.Sprintf(" (%d needs privileges here; using %d)", f.MappedFrom, f.Spec.LocalPort)
+	}
+	return text
+}
+
 // forwardStarted logs a forward the first time the model sees it. An
 // auto-forward also goes to the status line; a manual one gets its status
 // from the forward's result.
 func (m *Model) forwardStarted(f engine.Forward) {
-	text := fmt.Sprintf("Forwarded :%d to %s", f.Spec.RemotePort, localAddr(f.Spec))
+	text := describe(f, safetext.Clean(string(m.host)))
 	if !f.Spec.Auto {
 		m.addLog(statusOK, text)
 		return
 	}
-	if f.Spec.LocalPort != f.Spec.RemotePort {
+	if f.Spec.LocalPort != f.Spec.RemotePort && f.MappedFrom == 0 {
 		m.event(statusOK, "%s (auto; %d was busy)", text, f.Spec.RemotePort)
 		return
 	}
@@ -564,7 +600,7 @@ func (m *Model) applyForwardResult(msg forwardResultMsg) tea.Cmd {
 		m.forwardStarted(msg.fwd)
 	}
 	m.selected = "f:" + msg.fwd.ID
-	m.setStatus(statusOK, "Forwarded :%d to %s", msg.fwd.Spec.RemotePort, localAddr(msg.fwd.Spec))
+	m.setStatus(statusOK, "%s", describe(msg.fwd, safetext.Clean(string(m.host))))
 	m.rebuild()
 	return nil
 }
@@ -593,12 +629,16 @@ func (m *Model) applyStopResult(msg stopResultMsg) {
 		m.event(statusErr, "%s", msg.err.Error())
 		return
 	}
+	what := ":" + itoa(int(msg.remote))
+	if msg.remote == 0 {
+		what = "the SOCKS proxy"
+	}
 	if _, had := m.forwards[msg.id]; had {
 		m.dropForward(msg.id)
-		m.addLog(statusOK, "Stopped :"+itoa(int(msg.remote)))
+		m.addLog(statusOK, "Stopped "+what)
 	}
 	m.selected = portKey(msg.remote)
-	m.setStatus(statusOK, "Stopped :%d", msg.remote)
+	m.setStatus(statusOK, "Stopped %s", what)
 	m.rebuild()
 }
 
@@ -626,19 +666,28 @@ func (m *Model) rebuild() {
 
 	m.total, m.hidden = 0, 0
 	rows := make([]row, 0, len(fwds)+len(m.ports))
-	forwarded := make(map[uint16]bool)
+	// forwarded are server ports a local forward covers; own are the
+	// server-side listeners of remote forwards, which are pfwd's.
+	forwarded, own := make(map[uint16]bool), make(map[uint16]bool)
 	for i := range fwds {
 		f := &fwds[i]
-		forwarded[f.Spec.RemotePort] = true
+		r := row{key: "f:" + f.ID, fwd: f}
+		switch f.Spec.Kind {
+		case engine.Local:
+			forwarded[f.Spec.RemotePort] = true
+			r.port = byPort[f.Spec.RemotePort]
+		case engine.Remote:
+			own[f.Spec.RemotePort] = true
+		}
 		m.total++
-		if r := (row{key: "f:" + f.ID, fwd: f, port: byPort[f.Spec.RemotePort]}); m.matches(r) {
+		if m.matches(r) {
 			rows = append(rows, r)
 		}
 	}
 	for i := range m.ports {
 		p := &m.ports[i]
 		switch {
-		case forwarded[p.Port]:
+		case forwarded[p.Port], own[p.Port]:
 			continue
 		case p.Ignored && !m.showHidden:
 			m.hidden++
@@ -691,6 +740,9 @@ func (m Model) matches(r row) bool {
 func rowLabel(r row) string {
 	if r.fwd != nil && r.fwd.Spec.Label != "" {
 		return r.fwd.Spec.Label
+	}
+	if r.fwd != nil && r.fwd.Spec.Kind == engine.Dynamic {
+		return "SOCKS"
 	}
 	if r.port != nil {
 		return r.port.Label
@@ -882,13 +934,17 @@ func isLoopback(bind string) bool {
 	return false
 }
 
-// localAddr is how a forward's local end is shown: localhost:PORT on
-// loopback, bind:PORT otherwise.
+// localAddr is a forward's address on this machine: where a local or SOCKS
+// forward listens, or where a remote forward delivers.
 func localAddr(s engine.ForwardSpec) string {
-	if isLoopback(s.BindAddr) {
+	host := s.BindAddr
+	if s.Kind == engine.Remote {
+		host = s.RemoteHost
+	}
+	if host == "" || isLoopback(host) {
 		return "localhost:" + itoa(int(s.LocalPort))
 	}
-	return net.JoinHostPort(s.BindAddr, itoa(int(s.LocalPort)))
+	return net.JoinHostPort(host, itoa(int(s.LocalPort)))
 }
 
 // target is what o opens and y copies: an http or https URL, or just
@@ -901,6 +957,12 @@ func target(f engine.Forward) (s string, ok bool) {
 		host = b
 	}
 	addr := net.JoinHostPort(host, itoa(int(f.Spec.LocalPort)))
+	switch f.Spec.Kind {
+	case engine.Dynamic:
+		return "socks5h://" + addr, false
+	case engine.Remote:
+		return localAddr(f.Spec), false
+	}
 	switch f.Scheme {
 	case forward.SchemeNone:
 		return addr, false
