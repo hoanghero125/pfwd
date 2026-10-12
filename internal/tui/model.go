@@ -135,7 +135,6 @@ type Model struct {
 
 	scanned   bool
 	strategy  detect.Strategy
-	remoteOS  string
 	detectErr error
 	ports     []engine.Port
 
@@ -421,7 +420,7 @@ func (m *Model) applyEvent(ev engine.Event) {
 			return
 		}
 		m.scanned = true
-		m.strategy, m.remoteOS, m.detectErr, m.ports = ev.Strategy, ev.OS, ev.Err, ev.Ports
+		m.strategy, m.detectErr, m.ports = ev.Strategy, ev.Err, ev.Ports
 		for _, port := range ev.Added {
 			text := "New port :" + itoa(int(port))
 			if i := slices.IndexFunc(ev.Ports, func(p engine.Port) bool { return p.Port == port }); i >= 0 && ev.Ports[i].Process != "" {
@@ -935,8 +934,6 @@ func isLoopback(bind string) bool {
 	return false
 }
 
-// localAddr is how a forward's local end is shown: localhost:PORT on
-// loopback, bind:PORT otherwise.
 // localAddr is a forward's address on this machine: where a local or SOCKS
 // forward listens, or where a remote forward delivers.
 func localAddr(s engine.ForwardSpec) string {
