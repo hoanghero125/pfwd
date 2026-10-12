@@ -642,16 +642,16 @@ func TestDialPasswordOnlyServer(t *testing.T) {
 		t.Fatalf("err = %v, want ErrAuth", err)
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "password") || !strings.Contains(msg, "v0.3.0") || strings.Contains(msg, "ssh-add") {
-		t.Errorf("message should say the server wants a password and when pfwd supports it, not suggest ssh-add: %v", err)
+	if !strings.Contains(msg, "password") || strings.Contains(msg, "v0.3.0") || strings.Contains(msg, "ssh-add") {
+		t.Errorf("message should say the server wants a password, without a version promise or ssh-add: %v", err)
 	}
 }
 
 func TestDialOneTimeCodeServer(t *testing.T) {
 	hc := startKeylessServer(t, sshtest.Options{OneTimeCode: "123456"})
 	_, err := Dial(t.Context(), hc, DialOptions{dialAgent: noAgent})
-	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "one-time code") || !strings.Contains(err.Error(), "v0.3.0") {
-		t.Errorf("err = %v, want ErrAuth naming the one-time code and v0.3.0", err)
+	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "one-time code") || strings.Contains(err.Error(), "v0.3.0") {
+		t.Errorf("err = %v, want ErrAuth naming the one-time code, without a version promise", err)
 	}
 }
 
