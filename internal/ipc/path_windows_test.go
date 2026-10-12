@@ -5,6 +5,7 @@ package ipc
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net"
 	"strings"
 	"testing"
 )
@@ -27,5 +28,16 @@ func TestDefaultPipeNamesTheUser(t *testing.T) {
 	}
 	if p := DefaultPath(); !strings.HasPrefix(p, `\\.\pipe\pfwd-`) || !strings.HasSuffix(p, sid) {
 		t.Errorf("DefaultPath = %q, want the pipe for %s", p, sid)
+	}
+}
+
+// TestVerifyServerNeedsAPipe: a connection whose server can't be checked
+// is refused.
+func TestVerifyServerNeedsAPipe(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	if err := verifyServer(a); err == nil {
+		t.Error("verifyServer accepted a connection it can't check")
 	}
 }

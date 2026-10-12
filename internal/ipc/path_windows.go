@@ -53,6 +53,9 @@ func userSID() (string, error) {
 	return u.User.Sid.String(), nil
 }
 
+// dial connects to the daemon at path, and checks that the pipe's server
+// runs as this user: pipe names are global, so another user could create
+// ours first to read the passwords pfwd passes on.
 func dial(ctx context.Context, path string) (net.Conn, error) {
 	c, err := winio.DialPipeContext(ctx, path)
 	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, os.ErrNotExist) {
@@ -61,7 +64,54 @@ func dial(ctx context.Context, path string) (net.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to the pfwd daemon at %s: %w", path, err)
 	}
+	if err := verifyServer(c); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("refusing the pipe %s: %w", path, err)
+	}
 	return c, nil
+}
+
+// verifyServer checks that the process serving the pipe runs as this user.
+func verifyServer(c net.Conn) error {
+	f, ok := c.(interface{ Fd() uintptr })
+	if !ok {
+		return errors.New("can't tell who serves it")
+	}
+	var pid uint32
+	if err := windows.GetNamedPipeServerProcessId(windows.Handle(f.Fd()), &pid); err != nil {
+		return fmt.Errorf("can't tell who serves it: %w", err)
+	}
+	theirs, err := processSID(pid)
+	if err != nil {
+		return fmt.Errorf("process %d serves it, and it can't be checked: %w", pid, err)
+	}
+	mine, err := userSID()
+	if err != nil {
+		return err
+	}
+	if theirs != mine {
+		return fmt.Errorf("another user's process (%d) serves it; end that process, or set PFWD_SOCKET to another pipe name", pid)
+	}
+	return nil
+}
+
+// processSID is the SID of the user process pid runs as.
+func processSID(pid uint32) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return "", err
+	}
+	defer func() { _ = tok.Close() }()
+	u, err := tok.GetTokenUser()
+	if err != nil {
+		return "", err
+	}
+	return u.User.Sid.String(), nil
 }
 
 // checkPeer accepts every peer: the pipe's DACL already lets only this

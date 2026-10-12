@@ -3,6 +3,7 @@
 package ipc
 
 import (
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -69,5 +70,23 @@ func TestOpenDirectoryRefused(t *testing.T) {
 	if ln, err := Listen(path); err == nil {
 		_ = ln.Close()
 		t.Error("Listen in a directory others can open succeeded")
+	}
+}
+
+// TestDialRefusesOpenDirectory: a client doesn't talk to a socket in a
+// directory other users can enter: another user may have made it, to read
+// what pfwd sends.
+func TestDialRefusesOpenDirectory(t *testing.T) {
+	path := serve(t, &fakeHandler{})
+	if err := os.Chmod(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Dial(t.Context(), path)
+	if err == nil {
+		_ = c.Close()
+		t.Fatal("Dial talked to a socket in a directory others can open")
+	}
+	if errors.Is(err, ErrNotRunning) {
+		t.Errorf("Dial = %v; want a refusal, not 'not running'", err)
 	}
 }
