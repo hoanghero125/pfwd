@@ -121,6 +121,17 @@ func (e *Engine) hasForwardLocked(host HostID, remotePort uint16) bool {
 	return false
 }
 
+// ownListenerLocked reports whether a port on the server is pfwd's own: the
+// listener of one of the host's remote forwards. e.mu must be held.
+func (e *Engine) ownListenerLocked(host HostID, port uint16) bool {
+	for _, f := range e.forwards {
+		if f.Host == host && f.Spec.Kind == Remote && f.Spec.RemotePort == port {
+			return true
+		}
+	}
+	return false
+}
+
 // sameForward returns host's forward of spec's remote port on the same
 // local address, for a manual spec; nil otherwise.
 func (e *Engine) sameForward(host HostID, spec ForwardSpec) *fwd {
@@ -144,7 +155,7 @@ func (e *Engine) sameForward(host HostID, spec ForwardSpec) *fwd {
 // flapping port can't loop.
 func (e *Engine) autoForward(host HostID, hs *hostState, p detect.RemotePort) {
 	e.mu.Lock()
-	skip := !hs.auto || hs.declined[p.Port] || !hs.settings.Filter.AutoForward(p) || e.hasForwardLocked(host, p.Port)
+	skip := !hs.auto || hs.declined[p.Port] || !hs.settings.Filter.AutoForward(p) || e.hasForwardLocked(host, p.Port) || e.ownListenerLocked(host, p.Port)
 	e.mu.Unlock()
 	if skip {
 		return

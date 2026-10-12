@@ -189,3 +189,19 @@ func TestAllKindsAreRemembered(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnRemoteListenerIsNotAutoForwarded(t *testing.T) {
+	server := freePort(t)
+	c := newFakeConn("")
+	e := newEngineWith(t, autoOptions(dialTo(c)))
+	connected(t, e, "devbox")
+	if _, err := e.Forward("devbox", ForwardSpec{Kind: Remote, RemotePort: server, LocalPort: 3000}); err != nil {
+		t.Fatal(err)
+	}
+	// The server now lists pfwd's own -R listener as a new port, without
+	// a process name, as ss shows root's sockets to other users.
+	line := fmt.Sprintf("LISTEN 0 128 127.0.0.1:%d 0.0.0.0:*\n", server)
+	c.send(line)
+	c.send(line)
+	noEvent(t, e, 300*time.Millisecond, isAutoForwardOf(server))
+}
