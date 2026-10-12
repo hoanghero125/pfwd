@@ -24,7 +24,7 @@ Thanks for helping. Before you change an area, read its package doc comment and 
 ## Making a change
 
 1. Fork the repository and create a branch from `main` (maintainers can branch in the main repository).
-2. Write the failing test first. Every bug fix comes with a test that fails before the fix.
+2. Write the failing test first. Every bug fix comes with a test that fails before the fix. A change to how pfwd reads a server's ports comes with real command output in `internal/detect/testdata`; its README says where each sample came from.
 3. Run `make lint test` until both pass. CI runs the same checks on Linux, macOS and Windows. If you change the SSH, detection, forwarding or engine code, run `make e2e` too; CI runs it on Linux.
 4. Open a pull request. Its title must follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) (`feat:`, `fix:`, `docs:`, …) because pull requests are squash-merged and the title becomes the commit message.
 
