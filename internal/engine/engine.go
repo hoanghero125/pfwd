@@ -14,6 +14,7 @@ import (
 	"github.com/hoanghero125/pfwd/internal/detect"
 	"github.com/hoanghero125/pfwd/internal/forward"
 	"github.com/hoanghero125/pfwd/internal/sshx"
+	"github.com/hoanghero125/pfwd/internal/state"
 )
 
 // Conn is an established connection to a host: it runs the detector's
@@ -67,6 +68,12 @@ type Options struct {
 	// ConnWait is how long a connection accepted while reconnecting waits
 	// for the host; 0 means 10 s.
 	ConnWait time.Duration
+	// AutoExpire removes an auto-forward whose port has been gone this long,
+	// unless it is pinned; 0 means 10 minutes.
+	AutoExpire time.Duration
+	// State remembers forwards between runs and restores them on each
+	// host's first connection; nil remembers nothing.
+	State *state.Store
 }
 
 // shutdownTimeout bounds Close.
@@ -88,6 +95,9 @@ type Engine struct {
 	hosts    map[HostID]*hostState
 	forwards map[string]*fwd
 	nextID   int
+
+	// persistMu orders writes of state.json.
+	persistMu sync.Mutex
 }
 
 type fwd struct {
@@ -122,6 +132,9 @@ func New(o Options) *Engine {
 	}
 	if o.ConnWait <= 0 {
 		o.ConnWait = 10 * time.Second
+	}
+	if o.AutoExpire <= 0 {
+		o.AutoExpire = 10 * time.Minute
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{
@@ -243,6 +256,7 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 	e.log.Info("forward started", "id", f.ID, "host", host, "local", spec.LocalPort, "target", target, "auto", spec.Auto)
 	snap := e.snapshot(f)
 	e.emit(ForwardChanged{Forward: snap})
+	e.persist(host)
 	// The probe starts after the first event, so its result comes later.
 	e.startProbe(ctx, f, conn, target)
 	return snap, nil
@@ -322,6 +336,7 @@ func (e *Engine) Stop(id string) error {
 	e.mu.Unlock()
 	e.log.Info("forward stopped", "id", id)
 	e.emit(ForwardChanged{Forward: e.snapshot(f)})
+	e.persist(f.Host)
 	return nil
 }
 
@@ -365,6 +380,10 @@ func (e *Engine) Close() error {
 		return nil
 	}
 	e.closed = true
+	hosts := make([]HostID, 0, len(e.hosts))
+	for h := range e.hosts {
+		hosts = append(hosts, h)
+	}
 	e.mu.Unlock()
 	e.cancel()
 
@@ -373,13 +392,18 @@ func (e *Engine) Close() error {
 		e.wg.Wait()
 		close(done)
 	}()
+	var err error
 	select {
 	case <-done:
 		close(e.events)
-		return nil
 	case <-time.After(shutdownTimeout):
-		return errors.New("shutdown took longer than 3s; some connections may not have closed cleanly")
+		err = errors.New("shutdown took longer than 3s; some connections may not have closed cleanly")
 	}
+	// Quitting forgets what isn't pinned.
+	for _, h := range hosts {
+		e.persistOnly(h, true)
+	}
+	return err
 }
 
 func itoa(p uint16) string {

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -24,6 +23,10 @@ type hostState struct {
 	// declined ports are never auto-forwarded again this run: the user
 	// stopped them, or auto-forwarding them failed.
 	declined map[uint16]bool
+	// restored is set once the host's config and remembered forwards were
+	// created this run; loaded once state.json was read for it, which must
+	// happen before pfwd writes the host's entry.
+	restored, loaded bool
 }
 
 // errAlreadyForwarded tells autoForward that a forward appeared meanwhile.
@@ -90,6 +93,9 @@ func (e *Engine) portsUpdated(host HostID, hs *hostState, u detect.Update) {
 		added[i] = p.Port
 	}
 	e.emit(PortsChanged{Host: host, Strategy: u.Strategy, OS: u.OS, Ports: ports, Added: added, Removed: u.Removed})
+	if u.Strategy != detect.None {
+		e.applyPorts(host, hs)
+	}
 	for _, p := range u.Added {
 		e.autoForward(host, hs, p)
 	}
@@ -135,24 +141,7 @@ func (e *Engine) autoForward(host HostID, hs *hostState, p detect.RemotePort) {
 		return
 	}
 	spec := ForwardSpec{RemotePort: p.Port, LocalPort: p.Port, RemoteHost: detect.Target(p.Addrs), Label: e.label(p), Auto: true}
-	f, err := e.Forward(host, spec)
-	var inUse *forward.PortInUseError
-	if errors.As(err, &inUse) {
-		var retry bool
-		switch e.o.OnConflict {
-		case ConflictFail:
-			retry = false
-		case ConflictRandom:
-			spec.LocalPort, err = forward.FreePort(cmp.Or(spec.BindAddr, e.o.BindAddr))
-			retry = err == nil
-		default:
-			spec.LocalPort = inUse.Suggested
-			retry = inUse.Suggested != 0
-		}
-		if retry {
-			f, err = e.Forward(host, spec)
-		}
-	}
+	f, err := e.forwardFollowingConflict(host, spec)
 	switch {
 	case errors.Is(err, errAlreadyForwarded):
 		return

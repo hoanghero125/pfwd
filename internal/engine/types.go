@@ -46,6 +46,12 @@ type ForwardSpec struct {
 	Label string
 	// Auto marks a forward the engine created on its own.
 	Auto bool
+	// Pinned forwards are remembered when pfwd quits, restored on the next
+	// connection, and never expire.
+	Pinned bool
+	// Config marks a forward from config.toml's hosts.<alias>.forwards. It
+	// is always pinned, and never written to state.json.
+	Config bool
 }
 
 // ForwardState is where a forward is in its lifecycle.
@@ -211,6 +217,9 @@ type HostSettings struct {
 	Auto bool
 	// Filter holds the ignore lists and auto_ports.
 	Filter detect.Filter
+	// Forwards are the host's always-on forwards from config.toml, created
+	// on its first connection of a run.
+	Forwards []ForwardSpec
 }
 
 // DefaultSettings is auto-forward on, with the default ignore lists.
@@ -234,6 +243,15 @@ const (
 	// ConflictFail gives up on that port.
 	ConflictFail = "fail"
 )
+
+// RestoreFailed reports a remembered or configured forward that could not
+// be created on connect, or (with a zero Spec) a state file that could not
+// be read.
+type RestoreFailed struct {
+	Host HostID
+	Spec ForwardSpec
+	Err  error
+}
 
 // ForwardChanged reports a forward that was created or changed state. A
 // forward in state Stopped has been removed.
@@ -316,3 +334,4 @@ func (HostKeyPrompt) event()     {}
 func (AutoChanged) event()       {}
 func (AutoForwardFailed) event() {}
 func (CredentialPrompt) event()  {}
+func (RestoreFailed) event()     {}

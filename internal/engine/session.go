@@ -151,12 +151,23 @@ func (e *Engine) runSession(ctx context.Context, host HostID, s *session, hs *ho
 // closed when it returns.
 func (e *Engine) serveConn(ctx context.Context, host HostID, s *session, hs *hostState, conn Conn) error {
 	e.mu.Lock()
+	first := !hs.restored
+	hs.restored = true
+	e.mu.Unlock()
+	var restore []ForwardSpec
+	if first {
+		restore = e.remembered(host, hs)
+	}
+	e.mu.Lock()
 	s.state, s.conn = Connected, conn
 	close(s.ready)
 	e.mu.Unlock()
 	e.log.Info("connected", "host", host)
 	e.emit(SessionChanged{Host: host, State: Connected})
 	e.resumeForwards(host)
+	if first {
+		e.restore(host, restore)
+	}
 
 	cctx, stop := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -168,6 +179,20 @@ func (e *Engine) serveConn(ctx context.Context, host HostID, s *session, hs *hos
 		if err != nil && cctx.Err() == nil {
 			e.log.Info("detection failed", "host", host, "err", err)
 			e.emit(PortsChanged{Host: host, Strategy: detect.None, Err: err})
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(e.o.Interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-cctx.Done():
+				return
+			case <-t.C:
+				e.expireForwards(host)
+			}
 		}
 	}()
 	waited := make(chan error, 1)
