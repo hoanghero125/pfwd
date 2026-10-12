@@ -162,6 +162,11 @@ func (c *hostKeyChecker) algorithms() []string {
 
 func (c *hostKeyChecker) callback(ctx context.Context) ssh.HostKeyCallback {
 	return func(_ string, remote net.Addr, key ssh.PublicKey) error {
+		if _, ok := remote.(*net.TCPAddr); !ok {
+			// A ProxyCommand has no remote address. x/crypto checks only the
+			// host name when it has one, but still parses the address.
+			remote = &net.TCPAddr{IP: net.IPv4zero}
+		}
 		err := c.db.HostKeyCallback()(c.lookup, remote, key)
 		switch {
 		case err == nil:

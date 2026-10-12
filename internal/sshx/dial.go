@@ -35,6 +35,10 @@ type DialOptions struct {
 	// connection when they go unanswered; the zero value turns it off.
 	Keepalive Keepalive
 
+	// Resolve looks up a ProxyJump hop ("host" or "user@host") in the ssh
+	// config. Without it, a host with ProxyJump can't be reached.
+	Resolve func(ctx context.Context, target string) (*HostConfig, error)
+
 	// dialAgent replaces openAgent in tests.
 	dialAgent func(*HostConfig) (io.ReadWriteCloser, error)
 }
@@ -50,20 +54,30 @@ type Conn struct {
 	kaWG     sync.WaitGroup
 	// reason says why pfwd dropped the connection, for Wait.
 	reason atomic.Pointer[error]
+	// under are the jump host connections this one runs through.
+	under []io.Closer
 }
 
-// Dial connects to the host, verifies its host key and authenticates.
+// Dial connects to the host, verifies its host key and authenticates. It
+// goes through the host's ProxyJump hops or ProxyCommand when it has them.
 func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
-	if hc.ProxyJump != "" {
-		return nil, unsupported(hc.Alias, "ProxyJump")
+	if o.Logger == nil {
+		o.Logger = slog.New(slog.DiscardHandler)
 	}
-	if hc.ProxyCommand != "" {
-		return nil, unsupported(hc.Alias, "ProxyCommand")
+	hops := 0
+	return dialHost(ctx, hc, o, &hops, nil)
+}
+
+// dialHost connects to hc over its transport (a channel through via when
+// via is set) and runs the SSH handshake. hops counts the connections this
+// Dial has made.
+func dialHost(ctx context.Context, hc *HostConfig, o DialOptions, hops *int, via *Conn) (*Conn, error) {
+	*hops++
+	if *hops > maxHops {
+		return nil, &Error{Kind: ErrConnect, Msg: fmt.Sprintf(
+			"reaching %s takes more than %d hops; check ProxyJump in ~/.ssh/config for a loop", hc.Alias, maxHops)}
 	}
 	log := o.Logger
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
 	timeout := hc.ConnectTimeout
 	if timeout <= 0 {
 		timeout = defaultConnectTimeout
@@ -98,23 +112,15 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 	log.Debug("offering keys", "host", hc.Alias, "agent_keys", len(agentKeys), "key_files", len(files), "offered", len(signers))
 
 	addr := net.JoinHostPort(hc.HostName, strconv.Itoa(hc.Port))
-	var d net.Dialer
-	dialCtx, cancel := context.WithTimeout(ctx, timeout)
-	nc, err := d.DialContext(dialCtx, "tcp", addr)
-	cancel()
+	nc, under, err := transport(ctx, hc, o, hops, via, timeout)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, &Error{Kind: ErrConnect, Err: err, Msg: fmt.Sprintf(
-			"cannot reach %s (%s): %v; check the host name and port, and that `ssh %s` works", hc.Alias, addr, err, hc.Alias)}
+		return nil, err
 	}
 
-	// The handshake deadline pauses while the user reads the host key prompt.
-	resetDeadline := func() { _ = nc.SetDeadline(time.Now().Add(timeout)) }
-	resetDeadline()
-	checker.beforePrompt = func() { _ = nc.SetDeadline(time.Time{}) }
-	checker.afterPrompt = resetDeadline
+	// The handshake clock pauses while the user reads the host key prompt.
+	clock := startClock(nc, timeout)
+	checker.beforePrompt = clock.pause
+	checker.afterPrompt = clock.resume
 	stop := context.AfterFunc(ctx, func() { nc.Close() })
 
 	cfg := &ssh.ClientConfig{
@@ -140,19 +146,25 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 		HostKeyAlgorithms: checker.algorithms(),
 	}
 	sc, chans, reqs, err := ssh.NewClientConn(nc, addr, cfg)
+	clock.stop()
 	if !stop() {
 		// ctx was canceled and closed the connection.
 		if err == nil {
 			sc.Close()
 		}
+		closeAll(under)
 		return nil, ctx.Err()
 	}
 	if err != nil {
 		nc.Close()
-		return nil, handshakeError(hc, addr, err, len(signers), notes)
+		closeAll(under)
+		err = handshakeError(hc, addr, err, len(signers), notes)
+		if pc, ok := nc.(*procConn); ok {
+			err = withProxyOutput(err, pc.said())
+		}
+		return nil, err
 	}
-	_ = nc.SetDeadline(time.Time{})
-	c := &Conn{client: ssh.NewClient(sc, chans, reqs), alias: hc.Alias, log: log}
+	c := &Conn{client: ssh.NewClient(sc, chans, reqs), alias: hc.Alias, log: log, under: under}
 	if o.Keepalive.Interval > 0 {
 		var kctx context.Context
 		kctx, c.kaCancel = context.WithCancel(context.Background())
@@ -162,10 +174,53 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 	return c, nil
 }
 
-func unsupported(alias, option string) error {
-	return &Error{Kind: ErrUnsupported, Msg: fmt.Sprintf(
-		"%s uses %s, which pfwd does not support yet (planned for v0.3.0); connect to a host without it for now", alias, option)}
+// withProxyOutput adds what the ProxyCommand printed to a handshake error.
+func withProxyOutput(err error, said string) error {
+	if said == "" {
+		return err
+	}
+	var e *Error
+	if errors.As(err, &e) {
+		return &Error{Kind: e.Kind, Err: e.Err, Msg: e.Msg + ". The ProxyCommand said: " + said}
+	}
+	return fmt.Errorf("%w; the ProxyCommand said: %s", err, said)
 }
+
+// handshakeClock bounds the SSH handshake: with a deadline on conns that
+// take one, else with a timer that closes the conn (SSH channels and
+// Windows pipes have no deadlines). It pauses while the user answers a
+// prompt.
+type handshakeClock struct {
+	nc      net.Conn
+	timeout time.Duration
+	timer   *time.Timer // nil when nc takes deadlines
+}
+
+func startClock(nc net.Conn, timeout time.Duration) *handshakeClock {
+	c := &handshakeClock{nc: nc, timeout: timeout}
+	if nc.SetDeadline(time.Now().Add(timeout)) != nil {
+		c.timer = time.AfterFunc(timeout, func() { _ = nc.Close() })
+	}
+	return c
+}
+
+func (c *handshakeClock) pause() {
+	if c.timer != nil {
+		c.timer.Stop()
+		return
+	}
+	_ = c.nc.SetDeadline(time.Time{})
+}
+
+func (c *handshakeClock) resume() {
+	if c.timer != nil {
+		c.timer.Reset(c.timeout)
+		return
+	}
+	_ = c.nc.SetDeadline(time.Now().Add(c.timeout))
+}
+
+func (c *handshakeClock) stop() { c.pause() }
 
 // Marker errors from the password and keyboard-interactive callbacks.
 var (
@@ -296,6 +351,7 @@ func (c *Conn) Close() error {
 		c.kaCancel()
 	}
 	c.kaWG.Wait()
+	closeAll(c.under)
 	return err
 }
 

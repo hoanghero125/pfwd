@@ -30,6 +30,7 @@ type rootFlags struct {
 	login      string
 	identities []string
 	sshConfig  string
+	jump       string
 	acceptNew  bool
 	logLevel   string
 	// These override the config file.
@@ -44,6 +45,7 @@ func (f *rootFlags) register(fs *pflag.FlagSet) {
 	fs.StringVarP(&f.login, "login", "l", "", "SSH user, instead of the one in the ssh config")
 	fs.StringArrayVarP(&f.identities, "identity", "i", nil, "private key file to try before the ssh config's keys (repeatable)")
 	fs.StringVarP(&f.sshConfig, "ssh-config", "F", "", "ssh config file to read instead of ~/.ssh/config")
+	fs.StringVarP(&f.jump, "jump", "J", "", "jump hosts to connect through, like ssh -J ([user@]host[:port], comma-separated)")
 	fs.BoolVar(&f.acceptNew, "accept-new", false, "trust an unknown host key without asking; a changed key is still refused")
 	fs.StringVar(&f.logLevel, "log-level", "", "how much goes into pfwd.log: debug, info, warn or error (default info, or $PFWD_LOG)")
 	fs.BoolVar(&f.auto, "auto", false, "forward new ports automatically, whatever the config says")
@@ -106,7 +108,7 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 
 	ctx := cmd.Context()
 	hc, err := sshx.Resolve(ctx, target, sshx.Overrides{
-		User: f.login, Port: f.port, Identities: f.identities, ConfigFile: f.sshConfig,
+		User: f.login, Port: f.port, Identities: f.identities, ConfigFile: f.sshConfig, Jump: f.jump,
 	}, sshEnv(cfg))
 	if err != nil {
 		return err
@@ -122,7 +124,18 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	o := engineOptions(cfg, auto, notifier)
 	o.Logger = logger
 	o.Dial = func(ctx context.Context, _ engine.HostID, p sshx.HostKeyPrompter) (engine.Conn, error) {
-		c, err := sshx.Dial(ctx, hc, sshx.DialOptions{Prompter: p, AcceptNew: f.acceptNew, Logger: logger})
+		c, err := sshx.Dial(ctx, hc, sshx.DialOptions{
+			Prompter: p, AcceptNew: f.acceptNew, Logger: logger,
+			// Jump hosts resolve from the same ssh config, without the -p, -l
+			// and -i that apply to the target.
+			Resolve: func(ctx context.Context, target string) (*sshx.HostConfig, error) {
+				hop, err := sshx.Resolve(ctx, target, sshx.Overrides{ConfigFile: f.sshConfig}, sshEnv(cfg))
+				if err == nil {
+					applySSHConfig(hop, cfg)
+				}
+				return hop, err
+			},
+		})
 		if err != nil {
 			return nil, err
 		}

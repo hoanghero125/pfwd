@@ -501,18 +501,6 @@ func TestDialHandshakeTimeout(t *testing.T) {
 	}
 }
 
-func TestDialProxyUnsupported(t *testing.T) {
-	for _, hc := range []*HostConfig{
-		{Alias: "a", HostName: "a", Port: 22, ProxyJump: "bastion"},
-		{Alias: "a", HostName: "a", Port: 22, ProxyCommand: "nc %h %p"},
-	} {
-		_, err := Dial(t.Context(), hc, DialOptions{dialAgent: noAgent})
-		if !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "v0.3.0") {
-			t.Errorf("err = %v, want ErrUnsupported naming v0.3.0", err)
-		}
-	}
-}
-
 func TestConnStartStreams(t *testing.T) {
 	ended := make(chan struct{})
 	f := newFixture(t, sshtest.Options{Exec: func(ctx context.Context, _ string, stdout io.Writer) int {

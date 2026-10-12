@@ -72,6 +72,8 @@ type Server struct {
 
 	mu    sync.Mutex
 	conns map[net.Conn]struct{}
+	// forwarded lists the addresses direct-tcpip channels asked for.
+	forwarded []string
 }
 
 // Start starts a server on 127.0.0.1 with a random port.
@@ -184,6 +186,14 @@ func (s *Server) KnownHostsLine() string {
 // SetIgnoreKeepalive changes IgnoreKeepalive while the server runs.
 func (s *Server) SetIgnoreKeepalive(ignore bool) {
 	s.ignoreKeepalive.Store(ignore)
+}
+
+// Forwarded returns the host:port of every direct-tcpip channel clients
+// asked for, in order, including refused ones.
+func (s *Server) Forwarded() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.forwarded...)
 }
 
 // DropConns closes every client connection, as a network failure would.
@@ -319,8 +329,12 @@ func (s *Server) handleDirectTCPIP(nch ssh.NewChannel) {
 		_ = nch.Reject(ssh.ConnectionFailed, "bad direct-tcpip payload")
 		return
 	}
+	addr := net.JoinHostPort(p.Host, strconv.Itoa(int(p.Port)))
+	s.mu.Lock()
+	s.forwarded = append(s.forwarded, addr)
+	s.mu.Unlock()
 	var d net.Dialer
-	target, err := d.DialContext(s.ctx, "tcp", net.JoinHostPort(p.Host, strconv.Itoa(int(p.Port))))
+	target, err := d.DialContext(s.ctx, "tcp", addr)
 	if err != nil {
 		_ = nch.Reject(ssh.ConnectionFailed, err.Error())
 		return

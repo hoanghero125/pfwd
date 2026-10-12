@@ -183,6 +183,18 @@ func TestFromOptionsOverrides(t *testing.T) {
 	}
 }
 
+func TestFromOptionsJumpOverride(t *testing.T) {
+	env := testEnv(t)
+	opts := map[string][]string{"proxycommand": {"nc %h %p"}, "proxyjump": {"old"}}
+	hc, err := fromOptions("devbox", opts, Overrides{Jump: "bastion,inner"}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hc.ProxyJump != "bastion,inner" || hc.ProxyCommand != "" {
+		t.Errorf("ProxyJump/ProxyCommand = %q/%q, want -J to replace both", hc.ProxyJump, hc.ProxyCommand)
+	}
+}
+
 // TestFromOptionsMissingIdentity: a key named with -i must exist, unlike
 // the IdentityFile defaults, which ssh skips when absent.
 func TestFromOptionsMissingIdentity(t *testing.T) {

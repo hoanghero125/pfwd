@@ -68,6 +68,8 @@ type Overrides struct {
 	Identities []string
 	// ConfigFile replaces ~/.ssh/config, like ssh -F.
 	ConfigFile string
+	// Jump replaces ProxyJump (and turns ProxyCommand off), like ssh -J.
+	Jump string
 }
 
 // Env holds what config resolution needs from the machine, so tests can
@@ -437,6 +439,9 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 	}
 	hc.ProxyJump = noneToEmpty(first("proxyjump"))
 	hc.ProxyCommand = noneToEmpty(first("proxycommand"))
+	if o.Jump != "" {
+		hc.ProxyJump, hc.ProxyCommand = o.Jump, ""
+	}
 	return hc, nil
 }
 
