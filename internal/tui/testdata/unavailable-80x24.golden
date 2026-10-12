@@ -1,9 +1,9 @@
  pfwd  devbox ● connected                                                ? help
 ────────────────────────────────────────────────────────────────────────────────
 
-  Can't list ports on devbox yet: it runs Darwin, and pfwd reads Linux servers
-  today.
-  macOS, BSD and Windows servers come in v0.4.0.
+  Can't list ports on devbox: it has none of ss, /proc/net/tcp, netstat, lsof
+  or sockstat (or PowerShell, on Windows). You can still forward ports by
+  hand.
 
 
 

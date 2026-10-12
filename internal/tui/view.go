@@ -56,6 +56,8 @@ func (m Model) render() string {
 	lines = append(lines, m.hostBar(w), m.rule(w))
 	if m.logOpen {
 		lines = append(lines, m.logPane(w, h-5)...)
+	} else if m.reverseOpen {
+		lines = append(lines, m.reversePane(w, h-5)...)
 	} else {
 		lines = append(lines, m.body(w, h-5)...)
 	}
@@ -208,6 +210,8 @@ func (m Model) hintItems() []hintItem {
 		return []hintItem{{"enter", "keep", 0}, {"esc", "clear", 0}, {m.th.g.upDown, "move", 1}}
 	case m.logOpen:
 		return []hintItem{{m.th.g.upDown, "scroll", 0}, {"g G", "first, last", 1}, {"L", "close", 0}}
+	case m.reverseOpen:
+		return []hintItem{{"enter", "expose", 0}, {"F", "other server port", 2}, {m.th.g.upDown, "move", 1}, {"esc", "back", 0}}
 	case m.session == engine.Reconnecting:
 		return []hintItem{{"c", "reconnect now", 0}, {"x", "stop retrying", 3}, log, help, quit}
 	case m.session == engine.SessionFailed:
@@ -322,13 +326,8 @@ func (m Model) unavailable() []string {
 	switch {
 	case m.detectErr != nil:
 		return []string{"Can't list ports on " + host + ": " + safetext.Clean(m.detectErr.Error())}
-	case m.remoteOS != "" && m.remoteOS != "Linux":
-		return []string{
-			"Can't list ports on " + host + " yet: it runs " + safetext.Clean(m.remoteOS) + ", and pfwd reads Linux servers today.",
-			"macOS, BSD and Windows servers come in v0.4.0.",
-		}
 	default:
-		return []string{"Can't list ports on " + host + ": it has neither ss nor a readable /proc/net/tcp."}
+		return []string{"Can't list ports on " + host + ": it has none of ss, /proc/net/tcp, netstat, lsof or sockstat (or PowerShell, on Windows). You can still forward ports by hand."}
 	}
 }
 
@@ -414,9 +413,14 @@ func (m Model) separator(w int) string {
 func remoteText(r row) string {
 	var host string
 	var port uint16
-	if r.fwd != nil {
+	switch {
+	case r.fwd != nil && r.fwd.Spec.Kind == engine.Dynamic:
+		return "any"
+	case r.fwd != nil && r.fwd.Spec.Kind == engine.Remote:
+		host, port = r.fwd.Spec.BindAddr, r.fwd.Spec.RemotePort
+	case r.fwd != nil:
 		host, port = r.fwd.Spec.RemoteHost, r.fwd.Spec.RemotePort
-	} else {
+	default:
 		host, port = detect.Target(r.port.Addrs), r.port.Port
 	}
 	switch host {
@@ -446,9 +450,16 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 
 	var state, local, process, conn, traffic string
 	if f := r.fwd; f != nil {
+		word := "fwd"
+		switch f.Spec.Kind {
+		case engine.Remote:
+			word = "rev"
+		case engine.Dynamic:
+			word = "socks"
+		}
 		switch f.State {
 		case engine.Active:
-			state = th.ok.Render(g.active) + " fwd"
+			state = th.ok.Render(g.active) + " " + word
 			local = th.bold.Render(localAddr(f.Spec))
 		case engine.Failed:
 			state = th.bad.Render(g.failed) + " fail"
@@ -465,6 +476,10 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 			process = th.faint.Render(safetext.Clean(f.Err.Error()))
 		case f.State == engine.Paused && f.Pause != engine.NotPaused:
 			process = th.faint.Render(f.Pause.String())
+		case f.Spec.Kind == engine.Remote:
+			process = th.faint.Render("this machine")
+		case f.Spec.Kind == engine.Dynamic:
+			process = th.faint.Render("SOCKS proxy")
 		case r.port == nil:
 			process = th.faint.Render("not listening")
 		default:

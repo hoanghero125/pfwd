@@ -1,0 +1,24 @@
+ pfwd  devbox ● connected                                     auto: on   ? help
+────────────────────────────────────────────────────────────────────────────────
+  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
+  ● socks any     localhost:1080  SOCKS proxy  SOCKS        0    ↓0 ↑0
+▶ ● fwd   :5173   localhost:5173  node         Vite http    2    ↓12K/s ↑1.0K/s
+  ◌ pause :8000   localhost:8000  port closed               0    —
+  ● fwd   :8888   localhost:8888  jupyter-lab  Jupyter pin  0    ↓0 ↑0
+  ● rev   :9000   localhost:3000  this machine              0    ↓0 ↑0
+  ───────────────────────── detected, not forwarded ──────────────────────────
+  —       :6379   —               redis-server Redis        —    —
+  —       :9090   —               ?            Prometheus   —    —
+
+
+
+
+
+
+
+
+
+
+─ 1 ignored hidden, h shows ────────────────────────────────────────────────────
+ ✓ Forwarded :5173 to localhost:5173
+ enter stop  o open  y copy  p pin  a auto  / filter  L log  ? help  q quit

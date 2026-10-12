@@ -7,7 +7,6 @@
   ─────────────────────────────────────────────────────── detected, not forwarded ────────────────────────────────────────────────────────
   —       :6379   —               redis-server                            Redis             —    —
   —       :9090   —               ?                                       Prometheus        —    —
-
                                           ╭──────────────────────────────────────────────────────╮
                                           │ Keys                                                 │
                                           │                                                      │
@@ -23,12 +22,13 @@
                                           │ /            filter by port, process or label        │
                                           │ h            show or hide ignored ports              │
                                           │ L            event log                               │
+                                          │ r            expose a local port on the server       │
+                                          │ d            start or stop a SOCKS proxy (1080)      │
                                           │ c            reconnect now                           │
                                           │ x            stop retrying, while reconnecting       │
                                           │ ?  esc       close this help                         │
                                           │ q  ctrl+c    quit                                    │
                                           ╰──────────────────────────────────────────────────────╯
-
 
 
 
