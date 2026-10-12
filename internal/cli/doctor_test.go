@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hoanghero125/pfwd/internal/config"
 	"github.com/hoanghero125/pfwd/internal/sshx/sshtest"
 )
 
@@ -91,11 +92,14 @@ func TestDoctorJSON(t *testing.T) {
 
 func TestDoctorBundle(t *testing.T) {
 	headlessEnv(t)
+	statePath, err := config.StatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	statePath := tempState(t)
 	logPath := filepath.Join(filepath.Dir(statePath), "pfwd.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		t.Fatal(err)

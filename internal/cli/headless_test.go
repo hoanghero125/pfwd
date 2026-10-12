@@ -112,6 +112,9 @@ func headlessEnv(t *testing.T) {
 	writeConfig(t, "[ssh]\nuse_openssh_config = false\n\n[ui]\nnotifications = false\n")
 	tempState(t)
 	t.Setenv("PFWD_LOG", "")
+	// Unicode marks in doctor's report, as in Windows Terminal; the old
+	// console's ASCII ones are tested on their own.
+	t.Setenv("WT_SESSION", "test")
 }
 
 func TestLsOneShot(t *testing.T) {
