@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hoanghero125/pfwd/internal/forward"
+	"github.com/hoanghero125/pfwd/internal/sshx"
 )
 
 // defaultPrivilegedOffset moves a local port below 1024 that this user
@@ -103,8 +104,8 @@ func (e *Engine) newLocal(spec ForwardSpec, ln net.Listener, d *fwdDialer, onDia
 
 // serveRemote runs a remote forward. The server's listener goes away with
 // the connection; after a reconnect the forward listens again on the new
-// one, keeping its ID and adding up its counters. A server that refuses
-// the new listen fails the forward.
+// one, keeping its ID and adding up its counters. It stays Paused until
+// the server listens again.
 func (e *Engine) serveRemote(ctx context.Context, f *fwd) {
 	defer e.wg.Done()
 	defer close(f.done)
@@ -117,24 +118,58 @@ func (e *Engine) serveRemote(ctx context.Context, f *fwd) {
 			return
 		}
 		e.log.Info("remote forward's listener ended", "id", f.ID, "err", err)
-		conn, err := e.waitConnected(ctx, f.Host)
-		if err != nil {
-			return
-		}
-		ln, _, err := e.listener(conn, f.Spec)
-		if err != nil {
-			e.log.Info("remote forward failed to listen again", "id", f.ID, "err", err)
-			e.mu.Lock()
-			f.State, f.Err = Failed, err
-			e.mu.Unlock()
-			e.emit(ForwardChanged{Forward: e.snapshot(f)})
+		ln, ok := e.relisten(ctx, f)
+		if !ok {
 			return
 		}
 		next := e.newLocal(f.Spec, ln, nil, func(err error) { e.dialFailed(f, err) })
 		e.mu.Lock()
 		f.base = addStats(f.base, f.local.Stats())
 		f.local = next
+		f.State, f.Pause, f.PausedAt, f.Err = Active, NotPaused, time.Time{}, nil
 		e.mu.Unlock()
+		e.log.Info("remote forward listening again", "id", f.ID)
+		e.emit(ForwardChanged{Forward: e.snapshot(f)})
+	}
+}
+
+// relisten opens a remote forward's listener on the host's connection once
+// it is up, retrying with the reconnect backoff until that works or ctx
+// ends. The server refuses while the old connection's session still holds
+// the port, which can last until that session times out; the forward then
+// shows ServerPortBusy.
+func (e *Engine) relisten(ctx context.Context, f *fwd) (net.Listener, bool) {
+	for attempt := 1; ; attempt++ {
+		conn, err := e.waitConnected(ctx, f.Host)
+		if err != nil {
+			return nil, false
+		}
+		ln, _, err := e.listener(conn, f.Spec)
+		if err == nil {
+			return ln, true
+		}
+		e.log.Info("remote forward could not listen again", "id", f.ID, "attempt", attempt, "err", err)
+		if errors.Is(err, sshx.ErrForwardingRefused) {
+			e.mu.Lock()
+			changed := f.Pause != ServerPortBusy
+			if changed {
+				f.State, f.Pause = Paused, ServerPortBusy
+				if f.PausedAt.IsZero() {
+					f.PausedAt = e.o.Now()
+				}
+			}
+			e.mu.Unlock()
+			if changed {
+				e.emit(ForwardChanged{Forward: e.snapshot(f)})
+			}
+		}
+		t := time.NewTimer(e.o.Backoff(attempt))
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			t.Stop()
+			return nil, false
+		}
 	}
 }
 

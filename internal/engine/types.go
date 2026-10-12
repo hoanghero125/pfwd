@@ -97,6 +97,10 @@ const (
 	// Disconnected: the connection to the host is down. New connections
 	// wait for the reconnect.
 	Disconnected
+	// ServerPortBusy: after a reconnect the server refuses a remote
+	// forward's port, usually while the old connection's session still
+	// holds it. The forward keeps asking until the port is free.
+	ServerPortBusy
 )
 
 // String describes the reason in a few words.
@@ -106,6 +110,8 @@ func (r PauseReason) String() string {
 		return "port closed"
 	case Disconnected:
 		return "disconnected"
+	case ServerPortBusy:
+		return "port busy"
 	default:
 		return ""
 	}

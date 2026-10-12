@@ -77,6 +77,59 @@ func TestRemoteForwardListensAgainAfterReconnect(t *testing.T) {
 	echoVia(t, addr, "after the reconnect")
 }
 
+// TestRemoteForwardWaitsForServerPort: after a reconnect the server
+// refuses the port while the old connection's session still holds it. The
+// forward waits, paused, and listens again once the port is free.
+func TestRemoteForwardWaitsForServerPort(t *testing.T) {
+	echo := echoServer(t)
+	c1, c2 := newFakeConn(), newFakeConn()
+	c2.refuse = 2
+	d := &dialPlan{steps: []any{c1, c2}}
+	e := reconnectEngine(t, d, 10*time.Millisecond)
+	connected(t, e, "devbox")
+	server := freePort(t)
+	f, err := e.Forward("devbox", ForwardSpec{Kind: Remote, RemotePort: server, LocalPort: echo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1.end(errors.New("broken pipe"))
+	busy := next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.Pause == ServerPortBusy })
+	if busy.Forward.State != Paused {
+		t.Errorf("state while the port is busy = %v, want Paused", busy.Forward.State)
+	}
+	back := next(t, e, func(ch ForwardChanged) bool {
+		return ch.Forward.ID == f.ID && (ch.Forward.State == Active || ch.Forward.State == Failed)
+	})
+	if back.Forward.State != Active {
+		t.Fatalf("forward = %+v, want Active once the port is free", back.Forward)
+	}
+	echoVia(t, net.JoinHostPort("127.0.0.1", itoa(server)), "after the wait")
+}
+
+// TestRemoteForwardPausedUntilListening: after a reconnect a remote forward
+// shows Active only once the server listens again.
+func TestRemoteForwardPausedUntilListening(t *testing.T) {
+	echo := echoServer(t)
+	c1, c2 := newFakeConn(), newFakeConn()
+	c2.refuse = 1
+	d := &dialPlan{steps: []any{c1, c2}}
+	e := reconnectEngine(t, d, 200*time.Millisecond)
+	connected(t, e, "devbox")
+	server := freePort(t)
+	f, err := e.Forward("devbox", ForwardSpec{Kind: Remote, RemotePort: server, LocalPort: echo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1.end(errors.New("broken pipe"))
+	next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.State == Paused })
+	next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.State == Active })
+	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", itoa(server)), time.Second)
+	if err != nil {
+		t.Fatalf("the forward is Active but the server does not listen: %v", err)
+	}
+	c.Close()
+}
+
 func TestRemoteForwardRefused(t *testing.T) {
 	c := newFakeConn()
 	c.listenErr = &sshx.Error{Kind: sshx.ErrForwardingRefused, Msg: "devbox refused to listen on 127.0.0.1:9000; AllowTcpForwarding may be off"}

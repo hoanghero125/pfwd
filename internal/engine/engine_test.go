@@ -41,20 +41,33 @@ type fakeConn struct {
 	// connection.
 	lmu       sync.Mutex
 	listeners []net.Listener
+	// refuse is how many Listen calls are refused before one succeeds, as
+	// while an old session still holds the port.
+	refuse int
 }
 
-// Listen listens on this machine in place of the server.
+// Listen listens on this machine in place of the server, until the
+// connection ends.
 func (c *fakeConn) Listen(bind string, port uint16) (net.Listener, error) {
 	if c.listenErr != nil {
 		return nil, c.listenErr
+	}
+	c.lmu.Lock()
+	defer c.lmu.Unlock()
+	select {
+	case <-c.gone:
+		return nil, errors.New("connection closed")
+	default:
+	}
+	if c.refuse > 0 {
+		c.refuse--
+		return nil, &sshx.Error{Kind: sshx.ErrForwardingRefused, Msg: "refused to listen"}
 	}
 	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", itoa(port)))
 	if err != nil {
 		return nil, err
 	}
-	c.lmu.Lock()
 	c.listeners = append(c.listeners, ln)
-	c.lmu.Unlock()
 	return ln, nil
 }
 

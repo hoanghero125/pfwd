@@ -113,6 +113,28 @@ func TestSOCKSToggle(t *testing.T) {
 	}
 }
 
+func TestRemoteForwardWaitsForServerPort(t *testing.T) {
+	m := apply(connectedWith(newModel(newFakeEngine()), rp(5173, "node")), engine.ForwardChanged{Forward: remoteFwd})
+	disconnected, busy := remoteFwd, remoteFwd
+	disconnected.State, disconnected.Pause = engine.Paused, engine.Disconnected
+	busy.State, busy.Pause = engine.Paused, engine.ServerPortBusy
+	m = apply(m, engine.ForwardChanged{Forward: disconnected}, engine.ForwardChanged{Forward: busy})
+	if v := view(m); !strings.Contains(v, "port busy") {
+		t.Errorf("the row lacks its reason:\n%s", v)
+	}
+	m = apply(m, engine.ForwardChanged{Forward: remoteFwd})
+	var lines []string
+	for _, e := range m.log {
+		lines = append(lines, e.text)
+	}
+	log := strings.Join(lines, "\n")
+	for _, want := range []string{"Waiting for :9000 on devbox", "Resumed :9000"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("event log lacks %q:\n%s", want, log)
+		}
+	}
+}
+
 func TestMappedPortIsExplained(t *testing.T) {
 	f := engine.Forward{ID: "30", Host: "devbox", State: engine.Active, MappedFrom: 80,
 		Spec: engine.ForwardSpec{Kind: engine.Local, BindAddr: "127.0.0.1", LocalPort: 10080, RemoteHost: "127.0.0.1", RemotePort: 80, Auto: true}}

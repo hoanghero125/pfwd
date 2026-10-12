@@ -499,11 +499,13 @@ func (m *Model) applyForwardChanged(f engine.Forward) {
 	if !had && f.State != engine.Failed {
 		m.forwardStarted(f)
 	}
-	if had && prev.State != f.State {
+	if had && (prev.State != f.State || prev.Pause != f.Pause) {
 		switch {
 		case f.State == engine.Paused && f.Pause == engine.PortGone:
 			m.addLog(statusInfo, fmt.Sprintf("Paused :%d: the port closed on %s", port, safetext.Clean(string(m.host))))
-		case f.State == engine.Active && prev.State == engine.Paused && prev.Pause == engine.PortGone:
+		case f.State == engine.Paused && f.Pause == engine.ServerPortBusy:
+			m.addLog(statusInfo, fmt.Sprintf("Waiting for :%d on %s: the old connection still holds it", port, safetext.Clean(string(m.host))))
+		case f.State == engine.Active && prev.State == engine.Paused && (prev.Pause == engine.PortGone || prev.Pause == engine.ServerPortBusy):
 			m.addLog(statusOK, fmt.Sprintf("Resumed :%d", port))
 		}
 	}
