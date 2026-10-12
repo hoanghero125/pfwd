@@ -1,0 +1,7 @@
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      395/systemd-resolve 
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      1/init              
+tcp        0      0 0.0.0.0:8123            0.0.0.0:*               LISTEN      1974/python3        
+tcp        0      0 127.0.0.54:53           0.0.0.0:*               LISTEN      395/systemd-resolve 
+tcp6       0      0 :::22                   :::*                    LISTEN      1/init              
