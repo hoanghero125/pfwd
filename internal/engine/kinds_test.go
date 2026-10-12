@@ -191,16 +191,20 @@ func TestLANSOCKSNeedsOptIn(t *testing.T) {
 	}
 }
 
+// privilegedListen refuses ports below 1024 as a non-root Linux user is
+// refused, and binds any free port for the others.
+func privilegedListen(bind string, port uint16) (net.Listener, error) {
+	if port < 1024 {
+		return nil, fmt.Errorf("local port %d needs root: %w", port, os.ErrPermission)
+	}
+	return net.Listen("tcp", net.JoinHostPort(bind, "0"))
+}
+
 func TestPrivilegedPortIsMapped(t *testing.T) {
 	echo := echoServer(t)
 	o := manualOptions(newFakeConn())
 	o.PrivilegedOffset = 10000
-	o.listen = func(bind string, port uint16) (net.Listener, error) {
-		if port < 1024 {
-			return nil, fmt.Errorf("local port %d needs root: %w", port, os.ErrPermission)
-		}
-		return net.Listen("tcp", net.JoinHostPort(bind, "0"))
-	}
+	o.listen = privilegedListen
 	e := newEngineWith(t, o)
 	connected(t, e, "devbox")
 	f, err := e.Forward("devbox", ForwardSpec{LocalPort: 80, RemotePort: echo})
@@ -257,4 +261,128 @@ func TestOwnRemoteListenerIsNotAutoForwarded(t *testing.T) {
 	c.send(line)
 	c.send(line)
 	noEvent(t, e, 300*time.Millisecond, isAutoForwardOf(server))
+}
+
+// socksCode sends one CONNECT request for host:port through a SOCKS5
+// proxy and returns the reply code.
+func socksCode(t *testing.T, proxy, host string, port uint16) byte {
+	t.Helper()
+	c, err := net.DialTimeout("tcp", proxy, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	req := append([]byte{5, 1, 0, 5, 1, 0, 3, byte(len(host))}, host...)
+	req = binary.BigEndian.AppendUint16(req, port)
+	if _, err := c.Write(req); err != nil {
+		t.Fatal(err)
+	}
+	reply := make([]byte, 12)
+	if _, err := io.ReadFull(c, reply); err != nil {
+		t.Fatalf("SOCKS reply = %v, %v", reply, err)
+	}
+	return reply[3]
+}
+
+// TestSOCKSRefusedDestinationKeepsProxy: a server that forbids one
+// destination (PermitOpen) refuses that dial; the proxy keeps serving the
+// others.
+func TestSOCKSRefusedDestinationKeepsProxy(t *testing.T) {
+	c := newFakeConn()
+	c.dialErr = &sshx.Error{Kind: sshx.ErrForwardingRefused, Msg: "devbox refuses TCP forwarding"}
+	e := newEngine(t, dialTo(c))
+	connected(t, e, "devbox")
+	f, err := e.Forward("devbox", ForwardSpec{Kind: Dynamic, LocalPort: freePort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := socksCode(t, net.JoinHostPort("127.0.0.1", itoa(f.Spec.LocalPort)), "blocked.internal", 80); code == 0 {
+		t.Fatal("a refused destination got a success reply")
+	}
+	noEvent(t, e, 300*time.Millisecond, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.State != Active })
+}
+
+// TestPinWhileRemoteForwardListensAgain: pinning a remote forward while it
+// waits for its server port races with nothing (run with -race).
+func TestPinWhileRemoteForwardListensAgain(t *testing.T) {
+	echo := echoServer(t)
+	c1, c2 := newFakeConn(), newFakeConn()
+	c2.refuse = 30
+	d := &dialPlan{steps: []any{c1, c2}}
+	e := reconnectEngine(t, d, time.Millisecond)
+	connected(t, e, "devbox")
+	f, err := e.Forward("devbox", ForwardSpec{Kind: Remote, RemotePort: freePort(t), LocalPort: echo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1.end(errors.New("broken pipe"))
+	next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.Pause == ServerPortBusy })
+	for i := range 30 {
+		if err := e.SetPinned(f.ID, i%2 == 0); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.State == Active })
+}
+
+// TestMappedForwardIsNotDuplicated: forwarding port 80 again, after it
+// moved to 10080, returns the forward that exists.
+func TestMappedForwardIsNotDuplicated(t *testing.T) {
+	echo := echoServer(t)
+	o := manualOptions(newFakeConn())
+	o.listen = privilegedListen
+	e := newEngineWith(t, o)
+	connected(t, e, "devbox")
+	first, err := e.Forward("devbox", ForwardSpec{LocalPort: 80, RemotePort: echo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.Forward("devbox", ForwardSpec{LocalPort: 80, RemotePort: echo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID || len(e.Forwards()) != 1 {
+		t.Errorf("forwards = %+v, want the first one only", e.Forwards())
+	}
+}
+
+// TestMappedForwardIsSavedByAskedPort: a pinned forward of port 80 that
+// runs on 10080 is remembered as 80, so the next run asks for 80 again.
+func TestMappedForwardIsSavedByAskedPort(t *testing.T) {
+	echo := echoServer(t)
+	dir := t.TempDir()
+	o := manualOptions(newFakeConn())
+	o.listen = privilegedListen
+	o.State = storeAt(dir)
+	e := newEngineWith(t, o)
+	connected(t, e, "devbox")
+	f, err := e.Forward("devbox", ForwardSpec{LocalPort: 80, RemotePort: echo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SetPinned(f.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := storeAt(dir).Load("devbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 || saved[0].Local != 80 {
+		t.Errorf("saved = %+v, want local port 80", saved)
+	}
+}
+
+// TestSOCKSDefaultsToLoopback: with forward.bind on every address and no
+// opt-in, a SOCKS proxy listens on loopback, as ssh -D does.
+func TestSOCKSDefaultsToLoopback(t *testing.T) {
+	o := manualOptions(newFakeConn())
+	o.BindAddr = "0.0.0.0"
+	e := newEngineWith(t, o)
+	connected(t, e, "devbox")
+	f, err := e.Forward("devbox", ForwardSpec{Kind: Dynamic, LocalPort: freePort(t)})
+	if err != nil || f.Spec.BindAddr != "127.0.0.1" {
+		t.Errorf("SOCKS proxy = %+v, %v; want it on 127.0.0.1", f.Spec, err)
+	}
 }

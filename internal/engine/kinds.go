@@ -44,7 +44,12 @@ func (e *Engine) normalize(spec ForwardSpec) (ForwardSpec, error) {
 		if spec.LocalPort == 0 {
 			return spec, errors.New("a SOCKS proxy needs a local port, such as 1080")
 		}
-		spec.BindAddr = cmp.Or(spec.BindAddr, e.o.BindAddr)
+		if spec.BindAddr == "" {
+			spec.BindAddr = e.o.BindAddr
+			if !isLoopback(spec.BindAddr) && !e.o.AllowLANSocks {
+				spec.BindAddr = "127.0.0.1" // like ssh -D, whatever forward.bind says
+			}
+		}
 		if !isLoopback(spec.BindAddr) && !e.o.AllowLANSocks {
 			return spec, fmt.Errorf("a SOCKS proxy on %s would let your network reach anything the server can; bind it to 127.0.0.1, or pass --allow-lan-socks", spec.BindAddr)
 		}
@@ -122,7 +127,10 @@ func (e *Engine) serveRemote(ctx context.Context, f *fwd) {
 		if !ok {
 			return
 		}
-		next := e.newLocal(f.Spec, ln, nil, func(err error) { e.dialFailed(f, err) })
+		e.mu.Lock()
+		spec := f.Spec // SetPinned writes f.Spec under e.mu
+		e.mu.Unlock()
+		next := e.newLocal(spec, ln, nil, func(err error) { e.dialFailed(f, err) })
 		e.mu.Lock()
 		f.base = addStats(f.base, f.local.Stats())
 		f.local = next
@@ -144,7 +152,10 @@ func (e *Engine) relisten(ctx context.Context, f *fwd) (net.Listener, bool) {
 		if err != nil {
 			return nil, false
 		}
-		ln, _, err := e.listener(conn, f.Spec)
+		e.mu.Lock()
+		spec := f.Spec
+		e.mu.Unlock()
+		ln, _, err := e.listener(conn, spec)
 		if err == nil {
 			return ln, true
 		}

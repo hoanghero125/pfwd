@@ -142,7 +142,8 @@ func (e *Engine) sameForward(host HostID, spec ForwardSpec) *fwd {
 	defer e.mu.Unlock()
 	for _, f := range e.forwards {
 		s := f.Spec
-		if f.Host == host && s.Kind == spec.Kind && s.RemotePort == spec.RemotePort && s.LocalPort == spec.LocalPort && s.BindAddr == spec.BindAddr {
+		samePort := s.LocalPort == spec.LocalPort || f.MappedFrom != 0 && f.MappedFrom == spec.LocalPort
+		if f.Host == host && s.Kind == spec.Kind && s.RemotePort == spec.RemotePort && samePort && s.BindAddr == spec.BindAddr {
 			return f
 		}
 	}

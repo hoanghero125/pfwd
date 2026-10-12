@@ -256,6 +256,7 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 		local:   local,
 		cancel:  cancel,
 		done:    make(chan struct{}),
+		want:    mapped, // remembered as the port asked for, not the one it moved to
 	}
 	if spec.Kind != Local || detect.SkipHTTPProbe(spec.RemotePort, hs.ports[spec.RemotePort].Process) {
 		f.Scheme = forward.SchemeNone // a database, a SOCKS proxy or a reverse forward: never opened as a page
@@ -322,13 +323,15 @@ func (e *Engine) dialFailed(f *fwd, err error) {
 	case f.State != Active:
 		e.mu.Unlock()
 		return
+	case f.Spec.Kind == Dynamic:
+		// One SOCKS destination failing, even refused by the server's
+		// PermitOpen, says nothing about the others; the client got its
+		// reply code.
+		e.mu.Unlock()
+		return
 	case errors.Is(err, sshx.ErrForwardingRefused):
 		f.State, f.Err = Failed, err
 		f.cancel()
-	case f.Spec.Kind == Dynamic:
-		// One SOCKS destination failing says nothing about the proxy.
-		e.mu.Unlock()
-		return
 	case f.Err != nil && f.Err.Error() == err.Error():
 		e.mu.Unlock()
 		return
