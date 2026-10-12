@@ -59,4 +59,20 @@ func TestConnListenRefused(t *testing.T) {
 	if !errors.Is(err, ErrForwardingRefused) || !strings.Contains(err.Error(), "GatewayPorts") {
 		t.Errorf("err = %v, want a GatewayPorts hint for a non-loopback bind", err)
 	}
+	_, err = c.Listen("localhost", 9000)
+	if !errors.Is(err, ErrForwardingRefused) || strings.Contains(err.Error(), "GatewayPorts") {
+		t.Errorf("err = %v, want the loopback hint for localhost", err)
+	}
+}
+
+// TestConnListenAfterCloseIsNotARefusal: Listen on a connection that just
+// ended fails without blaming the server's configuration.
+func TestConnListenAfterCloseIsNotARefusal(t *testing.T) {
+	f := newFixture(t, sshtest.Options{AllowRemoteForward: true})
+	c := mustDial(t, f.hc, DialOptions{})
+	_ = c.Close()
+	_, err := c.Listen("127.0.0.1", 9000)
+	if err == nil || errors.Is(err, ErrForwardingRefused) {
+		t.Errorf("err = %v, want a connection error, not a refusal", err)
+	}
 }
