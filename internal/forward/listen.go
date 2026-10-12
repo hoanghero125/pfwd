@@ -1,9 +1,11 @@
 package forward
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
 )
 
@@ -24,6 +26,31 @@ func (e *PortInUseError) Error() string {
 		return fmt.Sprintf("local port %d is already in use on %s, and so are the next %d; free it or choose another port", e.Port, e.Addr, suggestRange)
 	}
 	return fmt.Sprintf("local port %d is already in use on %s; forward to port %d instead, or free it", e.Port, e.Addr, e.Suggested)
+}
+
+// ListenFunc listens on a local address; Listen is the usual one.
+type ListenFunc func(bind string, port uint16) (net.Listener, error)
+
+// ListenPrivileged listens like listen (nil means Listen), but when a port
+// below 1024 needs privileges this user lacks, it listens on port+offset
+// instead, and returns the port it bound. offset 0 turns the mapping off.
+func ListenPrivileged(bind string, port uint16, offset int, listen ListenFunc) (net.Listener, uint16, error) {
+	if listen == nil {
+		listen = Listen
+	}
+	ln, err := listen(bind, port)
+	if err == nil {
+		return ln, port, nil
+	}
+	if port >= 1024 || offset <= 0 || int(port)+offset > 65535 || !errors.Is(err, os.ErrPermission) {
+		return nil, 0, err
+	}
+	mapped := port + uint16(offset) //nolint:gosec // checked above to stay below 65536
+	ln, err = listen(bind, mapped)
+	if err != nil {
+		return nil, 0, err
+	}
+	return ln, mapped, nil
 }
 
 // Listen binds a local TCP port; bind defaults to 127.0.0.1. A busy port

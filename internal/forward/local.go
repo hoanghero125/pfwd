@@ -33,7 +33,15 @@ type Options struct {
 	// OnDialError, if set, is called with every failed dial to the target,
 	// from the goroutine serving that connection. It must not block.
 	OnDialError func(error)
+	// Handshake, if set, decides each connection's target (SOCKS5) instead
+	// of the forward's fixed one.
+	Handshake Handshake
+	// HandshakeTimeout bounds a Handshake; 0 means 10 s.
+	HandshakeTimeout time.Duration
 }
+
+// defaultHandshakeTimeout bounds a client that connects and stalls.
+const defaultHandshakeTimeout = 10 * time.Second
 
 // Stats are a forward's counters. BytesIn flows from the server to local
 // clients, BytesOut from local clients to the server.
@@ -56,6 +64,9 @@ type Local struct {
 	log    *slog.Logger
 	onFail func(error)
 
+	handshake        Handshake
+	handshakeTimeout time.Duration
+
 	conns, total, in, out, last atomic.Int64
 
 	mu   sync.Mutex
@@ -71,14 +82,19 @@ func NewLocal(ln net.Listener, d Dialer, target string, o Options) *Local {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
 	}
+	if o.HandshakeTimeout <= 0 {
+		o.HandshakeTimeout = defaultHandshakeTimeout
+	}
 	return &Local{
-		ln:     ln,
-		dialer: d,
-		target: target,
-		sem:    make(chan struct{}, o.MaxConns),
-		log:    o.Logger,
-		onFail: o.OnDialError,
-		open:   make(map[net.Conn]struct{}),
+		handshake:        o.Handshake,
+		handshakeTimeout: o.HandshakeTimeout,
+		ln:               ln,
+		dialer:           d,
+		target:           target,
+		sem:              make(chan struct{}, o.MaxConns),
+		log:              o.Logger,
+		onFail:           o.OnDialError,
+		open:             make(map[net.Conn]struct{}),
 	}
 }
 
@@ -153,11 +169,30 @@ func (l *Local) handle(ctx context.Context, client net.Conn) {
 	l.total.Add(1)
 	defer l.conns.Add(-1)
 
+	target := l.target
+	var reply func(error) error
+	if l.handshake != nil {
+		_ = client.SetDeadline(time.Now().Add(l.handshakeTimeout))
+		t, r, err := l.handshake(client)
+		if err != nil {
+			l.log.Debug("forward handshake failed", "err", err)
+			return
+		}
+		target, reply = t, r
+	}
+
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
-	remote, err := l.dialer.DialContext(dialCtx, "tcp", l.target)
+	remote, err := l.dialer.DialContext(dialCtx, "tcp", target)
 	cancel()
+	if reply != nil {
+		if rerr := reply(err); rerr != nil && err == nil {
+			_ = remote.Close()
+			return
+		}
+		_ = client.SetDeadline(time.Time{})
+	}
 	if err != nil {
-		l.log.Info("forward dial failed", "target", l.target, "err", err)
+		l.log.Info("forward dial failed", "target", target, "err", err)
 		if l.onFail != nil {
 			l.onFail(err)
 		}
