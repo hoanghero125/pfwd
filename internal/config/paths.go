@@ -15,6 +15,16 @@ func StateDir() (string, error) {
 	return stateDir(runtime.GOOS, os.Getenv, os.UserHomeDir)
 }
 
+// StatePath returns the path of state.json, where pfwd remembers forwards
+// between runs: in StateDir, next to the log.
+func StatePath() (string, error) {
+	dir, err := StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "state.json"), nil
+}
+
 func stateDir(goos string, getenv func(string) string, home func() (string, error)) (string, error) {
 	if goos == "windows" {
 		if appData := getenv("APPDATA"); appData != "" {
