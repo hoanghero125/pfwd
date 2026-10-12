@@ -33,7 +33,8 @@ func Listen(path string) (net.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find the current user's SID: %w", err)
 	}
-	ln, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: "D:P(A;;GA;;;" + sid + ")"})
+	// This user owns the pipe, and only this user may open it.
+	ln, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: "O:" + sid + "D:P(A;;GA;;;" + sid + ")"})
 	if err != nil {
 		if c, derr := dial(context.Background(), path); derr == nil {
 			_ = c.Close()
@@ -71,47 +72,34 @@ func dial(ctx context.Context, path string) (net.Conn, error) {
 	return c, nil
 }
 
-// verifyServer checks that the process serving the pipe runs as this user.
+// verifyServer checks that the pipe belongs to this user. The daemon makes
+// itself the owner of its pipe, and another user can't make a pipe owned
+// by this one; the owner is a property of the pipe itself, so unlike the
+// server's process ID it can't change between the check and the use.
 func verifyServer(c net.Conn) error {
 	f, ok := c.(interface{ Fd() uintptr })
 	if !ok {
-		return errors.New("can't tell who serves it")
+		return errors.New("can't tell who owns it")
 	}
-	var pid uint32
-	if err := windows.GetNamedPipeServerProcessId(windows.Handle(f.Fd()), &pid); err != nil {
-		return fmt.Errorf("can't tell who serves it: %w", err)
-	}
-	theirs, err := processSID(pid)
+	sd, err := windows.GetSecurityInfo(windows.Handle(f.Fd()), windows.SE_KERNEL_OBJECT, windows.OWNER_SECURITY_INFORMATION)
 	if err != nil {
-		return fmt.Errorf("process %d serves it, and it can't be checked: %w", pid, err)
+		return fmt.Errorf("can't tell who owns it: %w", err)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return fmt.Errorf("can't tell who owns it: %w", err)
+	}
+	if owner == nil {
+		return errors.New("it has no owner")
 	}
 	mine, err := userSID()
 	if err != nil {
 		return err
 	}
-	if theirs != mine {
-		return fmt.Errorf("another user's process (%d) serves it; end that process, or set PFWD_SOCKET to another pipe name", pid)
+	if owner.String() != mine {
+		return fmt.Errorf("another user (%s) owns it; end the process that made it, or set PFWD_SOCKET to another pipe name", owner)
 	}
 	return nil
-}
-
-// processSID is the SID of the user process pid runs as.
-func processSID(pid uint32) (string, error) {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = windows.CloseHandle(h) }()
-	var tok windows.Token
-	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
-		return "", err
-	}
-	defer func() { _ = tok.Close() }()
-	u, err := tok.GetTokenUser()
-	if err != nil {
-		return "", err
-	}
-	return u.User.Sid.String(), nil
 }
 
 // checkPeer accepts every peer: the pipe's DACL already lets only this
