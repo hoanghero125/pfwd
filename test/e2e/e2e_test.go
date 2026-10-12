@@ -233,7 +233,7 @@ func newHost(t *testing.T, service string) *sshx.HostConfig {
 
 // dialer dials hc for the engine.
 func dialer(hc *sshx.HostConfig) engine.DialFunc {
-	return func(ctx context.Context, _ engine.HostID, p sshx.HostKeyPrompter) (engine.Conn, error) {
+	return func(ctx context.Context, _ engine.HostID, p engine.Prompts) (engine.Conn, error) {
 		c, err := sshx.Dial(ctx, hc, sshx.DialOptions{Prompter: p})
 		if err != nil {
 			return nil, err

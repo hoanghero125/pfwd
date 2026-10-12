@@ -123,9 +123,15 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	}
 	o := engineOptions(cfg, auto, notifier)
 	o.Logger = logger
-	o.Dial = func(ctx context.Context, _ engine.HostID, p sshx.HostKeyPrompter) (engine.Conn, error) {
+	// Decrypted keys and the password live as long as this run, so
+	// reconnects don't ask again.
+	keys := sshx.NewKeyCache()
+	defer keys.Clear()
+	keepalive := hc.KeepaliveOr(sshx.Keepalive{Interval: cfg.SSH.KeepaliveInterval, CountMax: cfg.SSH.KeepaliveCountMax})
+	o.Dial = func(ctx context.Context, _ engine.HostID, p engine.Prompts) (engine.Conn, error) {
 		c, err := sshx.Dial(ctx, hc, sshx.DialOptions{
-			Prompter: p, AcceptNew: f.acceptNew, Logger: logger,
+			Prompter: p, Credentials: p, Keys: keys, Keepalive: keepalive,
+			AcceptNew: f.acceptNew, Logger: logger,
 			// Jump hosts resolve from the same ssh config, without the -p, -l
 			// and -i that apply to the target.
 			Resolve: func(ctx context.Context, target string) (*sshx.HostConfig, error) {

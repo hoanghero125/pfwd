@@ -26,8 +26,9 @@ type Conn interface {
 	Wait() error
 }
 
-// DialFunc connects to a host, asking p about unknown host keys.
-type DialFunc func(ctx context.Context, host HostID, p sshx.HostKeyPrompter) (Conn, error)
+// DialFunc connects to a host, asking p about unknown host keys and for
+// credentials.
+type DialFunc func(ctx context.Context, host HostID, p Prompts) (Conn, error)
 
 // Options configures an Engine.
 type Options struct {
@@ -58,6 +59,14 @@ type Options struct {
 	MaxConns int
 	// Notifier, when set, is told about every auto-forward.
 	Notifier Notifier
+	// MaxBackoff caps the wait between reconnect attempts; 0 means 30 s.
+	MaxBackoff time.Duration
+	// Backoff returns the wait before reconnect attempt n (from 1); nil
+	// means 0.5 s doubling up to MaxBackoff, with jitter.
+	Backoff func(attempt int) time.Duration
+	// ConnWait is how long a connection accepted while reconnecting waits
+	// for the host; 0 means 10 s.
+	ConnWait time.Duration
 }
 
 // shutdownTimeout bounds Close.
@@ -79,11 +88,6 @@ type Engine struct {
 	hosts    map[HostID]*hostState
 	forwards map[string]*fwd
 	nextID   int
-}
-
-type session struct {
-	state SessionState
-	conn  Conn
 }
 
 type fwd struct {
@@ -109,6 +113,15 @@ func New(o Options) *Engine {
 	}
 	if o.BindAddr == "" {
 		o.BindAddr = "127.0.0.1"
+	}
+	if o.MaxBackoff <= 0 {
+		o.MaxBackoff = 30 * time.Second
+	}
+	if o.Backoff == nil {
+		o.Backoff = defaultBackoff(o.MaxBackoff, jitter)
+	}
+	if o.ConnWait <= 0 {
+		o.ConnWait = 10 * time.Second
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{
@@ -137,136 +150,6 @@ func (e *Engine) emit(ev Event) {
 	select {
 	case e.events <- ev:
 	case <-e.ctx.Done():
-	}
-}
-
-// Connect starts connecting to host in the background; events report the
-// progress. It does nothing if the host is connecting or connected.
-func (e *Engine) Connect(host HostID) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed {
-		return
-	}
-	if s, ok := e.sessions[host]; ok && (s.state == Connecting || s.state == Connected) {
-		return
-	}
-	s := &session{state: Connecting}
-	e.sessions[host] = s
-	hs := e.hostLocked(host)
-	e.wg.Add(1)
-	go e.runSession(host, s, hs)
-}
-
-func (e *Engine) setSession(s *session, state SessionState, conn Conn) {
-	e.mu.Lock()
-	s.state, s.conn = state, conn
-	e.mu.Unlock()
-}
-
-func (e *Engine) runSession(host HostID, s *session, hs *hostState) {
-	defer e.wg.Done()
-	e.emit(SessionChanged{Host: host, State: Connecting})
-	e.mu.Lock()
-	auto := hs.auto
-	e.mu.Unlock()
-	e.emit(AutoChanged{Host: host, On: auto})
-	conn, err := e.o.Dial(e.ctx, host, prompter{e: e, host: host})
-	if e.ctx.Err() != nil {
-		if conn != nil {
-			_ = conn.Close()
-		}
-		return
-	}
-	if err != nil {
-		e.log.Info("connect failed", "host", host, "err", err)
-		e.setSession(s, SessionFailed, nil)
-		e.emit(SessionChanged{Host: host, State: SessionFailed, Err: err})
-		return
-	}
-	e.log.Info("connected", "host", host)
-	e.setSession(s, Connected, conn)
-	e.emit(SessionChanged{Host: host, State: Connected})
-
-	sctx, stop := context.WithCancel(e.ctx)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		o := detect.WatchOptions{Interval: e.o.Interval, Logger: e.log, Tracker: hs.tracker}
-		err := detect.Watch(sctx, conn, o, func(u detect.Update) { e.portsUpdated(host, hs, u) })
-		if err != nil {
-			e.log.Info("detection failed", "host", host, "err", err)
-			e.emit(PortsChanged{Host: host, Strategy: detect.None, Err: err})
-		}
-	}()
-	waited := make(chan error, 1)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		waited <- conn.Wait()
-	}()
-
-	select {
-	case <-e.ctx.Done():
-		stop()
-		_ = conn.Close()
-		wg.Wait()
-	case werr := <-waited:
-		stop()
-		wg.Wait()
-		if e.ctx.Err() != nil {
-			return
-		}
-		lost := &sshx.Error{Kind: sshx.ErrConnect, Err: werr, Msg: fmt.Sprintf(
-			"connection to %s was lost (%v); pfwd reconnects on its own from v0.3.0, so restart it for now", host, describe(werr))}
-		e.log.Info("connection lost", "host", host, "err", werr)
-		e.setSession(s, SessionFailed, nil)
-		e.emit(SessionChanged{Host: host, State: SessionFailed, Err: lost})
-		e.failForwards(host, errors.New("disconnected"))
-	}
-}
-
-func describe(err error) string {
-	if err == nil {
-		return "closed by the server"
-	}
-	return err.Error()
-}
-
-// failForwards marks the host's active forwards Failed and closes their
-// listeners. They stay listed until the user stops them.
-func (e *Engine) failForwards(host HostID, reason error) {
-	e.mu.Lock()
-	var failed []*fwd
-	for _, f := range e.forwards {
-		if f.Host == host && f.State == Active {
-			f.State, f.Err = Failed, reason
-			f.cancel()
-			failed = append(failed, f)
-		}
-	}
-	e.mu.Unlock()
-	for _, f := range failed {
-		<-f.done
-		e.emit(ForwardChanged{Forward: e.snapshot(f)})
-	}
-}
-
-// prompter turns host key questions into HostKeyPrompt events.
-type prompter struct {
-	e    *Engine
-	host HostID
-}
-
-func (p prompter) ConfirmHostKey(ctx context.Context, q sshx.HostKeyQuestion) (bool, error) {
-	reply := make(chan bool, 1)
-	p.e.emit(NewHostKeyPrompt(p.host, q, reply))
-	select {
-	case ok := <-reply:
-		return ok, nil
-	case <-ctx.Done():
-		return false, ctx.Err()
 	}
 }
 
@@ -315,9 +198,11 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 		return Forward{}, err
 	}
 	target := net.JoinHostPort(spec.RemoteHost, itoa(spec.RemotePort))
-	// f is set below, before Serve starts, so the callback always sees it.
+	// f is set below, before Serve starts, so the dialer and the callback
+	// always see it.
 	var f *fwd
-	local := forward.NewLocal(ln, conn, target, forward.Options{
+	dialer := &fwdDialer{e: e}
+	local := forward.NewLocal(ln, dialer, target, forward.Options{
 		Logger:      e.log,
 		MaxConns:    e.o.MaxConns,
 		OnDialError: func(err error) { e.dialFailed(f, err) },
@@ -349,6 +234,7 @@ func (e *Engine) Forward(host HostID, spec ForwardSpec) (Forward, error) {
 	if detect.SkipHTTPProbe(spec.RemotePort, hs.ports[spec.RemotePort].Process) {
 		f.Scheme = forward.SchemeNone // a database: never opened as a web page
 	}
+	dialer.f = f
 	e.forwards[f.ID] = f
 	e.wg.Add(1)
 	e.mu.Unlock()
@@ -369,8 +255,11 @@ func (e *Engine) connOf(host HostID) (Conn, error) {
 		return nil, errors.New("pfwd is shutting down")
 	}
 	s, ok := e.sessions[host]
-	if !ok || s.state != Connected {
-		return nil, fmt.Errorf("not connected to %s; wait for the connection, or fix the error shown and restart pfwd", host)
+	switch {
+	case ok && s.state == Reconnecting:
+		return nil, fmt.Errorf("%s is reconnecting; forward the port once it is back", host)
+	case !ok || s.state != Connected || s.conn == nil:
+		return nil, fmt.Errorf("not connected to %s; wait for the connection, or fix the error shown and reconnect", host)
 	}
 	return s.conn, nil
 }

@@ -15,7 +15,6 @@ import (
 
 	"github.com/hoanghero125/pfwd/internal/detect"
 	"github.com/hoanghero125/pfwd/internal/forward"
-	"github.com/hoanghero125/pfwd/internal/sshx"
 )
 
 // listen formats one ss line for a port owned by process.
@@ -261,7 +260,7 @@ func TestProbeSkipsDatabases(t *testing.T) {
 	var mu sync.Mutex
 	dialed := 0
 	c := newFakeConn("") // an empty first snapshot is the baseline
-	o := Options{Dial: func(context.Context, HostID, sshx.HostKeyPrompter) (Conn, error) {
+	o := Options{Dial: func(context.Context, HostID, Prompts) (Conn, error) {
 		return &countingConn{fakeConn: c, onDial: func() { mu.Lock(); dialed++; mu.Unlock() }}, nil
 	}, Interval: time.Second, HTTPProbe: true,
 		Settings: func(HostID) HostSettings { return HostSettings{Auto: false, Filter: detect.DefaultFilter()} }}

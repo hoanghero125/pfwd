@@ -51,7 +51,7 @@ type ForwardSpec struct {
 // ForwardState is where a forward is in its lifecycle.
 type ForwardState int
 
-// Forward states. Paused arrives with reconnects in v0.3.0.
+// Forward states.
 const (
 	Starting ForwardState = iota
 	Active
@@ -76,6 +76,32 @@ func (s ForwardState) String() string {
 	}
 }
 
+// PauseReason says why a forward is Paused.
+type PauseReason int
+
+// Pause reasons.
+const (
+	NotPaused PauseReason = iota
+	// PortGone: the port no longer listens on the server. New connections
+	// are closed at once.
+	PortGone
+	// Disconnected: the connection to the host is down. New connections
+	// wait for the reconnect.
+	Disconnected
+)
+
+// String describes the reason in a few words.
+func (r PauseReason) String() string {
+	switch r {
+	case PortGone:
+		return "port closed"
+	case Disconnected:
+		return "disconnected"
+	default:
+		return ""
+	}
+}
+
 // Forward is a snapshot of one forward.
 type Forward struct {
 	ID        string
@@ -87,6 +113,9 @@ type Forward struct {
 	StartedAt time.Time
 	// Scheme is what the HTTP probe found; SchemeUnknown until it ran.
 	Scheme forward.Scheme
+	// Pause and PausedAt say why and since when the forward is Paused.
+	Pause    PauseReason
+	PausedAt time.Time
 }
 
 // SessionState is where a host's connection is.
@@ -98,6 +127,9 @@ const (
 	Connected
 	SessionFailed
 	Closed
+	// Reconnecting: a connection that was up was lost, and the engine is
+	// waiting to retry or dialing again.
+	Reconnecting
 )
 
 // String returns the state in lowercase.
@@ -109,6 +141,8 @@ func (s SessionState) String() string {
 		return "failed"
 	case Closed:
 		return "closed"
+	case Reconnecting:
+		return "reconnecting"
 	default:
 		return "connecting"
 	}
@@ -119,11 +153,18 @@ func (s SessionState) String() string {
 type Event interface{ event() }
 
 // SessionChanged reports a host's connection state. Err is set when the
-// state is SessionFailed.
+// state is SessionFailed, and while Reconnecting it says what went wrong
+// last.
 type SessionChanged struct {
 	Host  HostID
 	State SessionState
 	Err   error
+	// RetryAt is when the next attempt starts, while Reconnecting and
+	// waiting; zero while an attempt is under way.
+	RetryAt time.Time
+	// Attempt counts reconnect attempts since the connection was lost,
+	// starting at 1.
+	Attempt int
 }
 
 // PortsChanged reports the ports listening on a host. With Strategy None
@@ -200,6 +241,52 @@ type ForwardChanged struct {
 	Forward Forward
 }
 
+// Prompts asks the user what a connection needs: trust in an unknown host
+// key, and credentials. The engine passes one to DialFunc.
+type Prompts interface {
+	sshx.HostKeyPrompter
+	sshx.CredentialPrompter
+}
+
+// CredentialPrompt asks the user for a passphrase, password or code. The
+// connection waits for exactly one Answer or Cancel.
+type CredentialPrompt struct {
+	Host     HostID
+	Question sshx.CredentialQuestion
+	reply    chan<- CredentialAnswer
+}
+
+// CredentialAnswer is the reply to a CredentialPrompt.
+type CredentialAnswer struct {
+	// Secret is what the user typed. The engine passes it on and zeroes it.
+	Secret   []byte
+	Canceled bool
+}
+
+// NewCredentialPrompt returns a prompt whose reply is sent on reply, which
+// needs room for one value. Front ends use it in tests.
+func NewCredentialPrompt(host HostID, q sshx.CredentialQuestion, reply chan<- CredentialAnswer) CredentialPrompt {
+	return CredentialPrompt{Host: host, Question: q, reply: reply}
+}
+
+// Answer sends what the user typed. The prompt takes secret over: the
+// caller must not use it again. Replies after the first are ignored.
+func (p CredentialPrompt) Answer(secret []byte) {
+	select {
+	case p.reply <- CredentialAnswer{Secret: secret}:
+	default:
+		clear(secret)
+	}
+}
+
+// Cancel tells the connection the user declined.
+func (p CredentialPrompt) Cancel() {
+	select {
+	case p.reply <- CredentialAnswer{Canceled: true}:
+	default:
+	}
+}
+
 // HostKeyPrompt asks the user to trust an unknown host key. Exactly one
 // Answer is used; the connection waits for it.
 type HostKeyPrompt struct {
@@ -228,3 +315,4 @@ func (ForwardChanged) event()    {}
 func (HostKeyPrompt) event()     {}
 func (AutoChanged) event()       {}
 func (AutoForwardFailed) event() {}
+func (CredentialPrompt) event()  {}
