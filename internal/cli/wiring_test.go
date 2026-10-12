@@ -291,7 +291,10 @@ func TestSSHConfigForwardsJoinConfigOnes(t *testing.T) {
 	o := engineOptions(cfg, nil, nil)
 	hc := &sshx.HostConfig{LocalForwards: []string{"8080 localhost:80", "/tmp/s localhost:1"}, DynamicForwards: []string{"1080"}}
 	var logs []string
-	addSSHForwards(&o, "devbox", hc, func(msg string) { logs = append(logs, msg) })
+	d := newHostDialer(cfg, &rootFlags{}, nil)
+	d.warn = func(_ engine.HostID, msg string) { logs = append(logs, msg) }
+	d.remember("devbox", hc)
+	o.Settings = d.settings(o.Settings)
 	got := o.Settings("devbox").Forwards
 	if len(got) != 3 || got[1] != (engine.ForwardSpec{Kind: engine.Local, LocalPort: 8080, RemoteHost: "localhost", RemotePort: 80}) ||
 		got[2] != (engine.ForwardSpec{Kind: engine.Dynamic, LocalPort: 1080}) {
@@ -316,13 +319,17 @@ func TestTUIOptionsListLocalPorts(t *testing.T) {
 // same port. Neither starts a forward. The lines are as OpenSSH 9.9
 // prints them.
 func TestSSHConfigSocketForwardIsSkipped(t *testing.T) {
-	o := engineOptions(config.Default(), nil, nil)
+	cfg := config.Default()
+	o := engineOptions(cfg, nil, nil)
 	hc := &sshx.HostConfig{
 		LocalForwards:   []string{"2375 /var/run/docker.sock", "8080 [localhost]:80"},
 		DynamicForwards: []string{"2375", "1080"},
 	}
 	var logs []string
-	addSSHForwards(&o, "devbox", hc, func(msg string) { logs = append(logs, msg) })
+	d := newHostDialer(cfg, &rootFlags{}, nil)
+	d.warn = func(_ engine.HostID, msg string) { logs = append(logs, msg) }
+	d.remember("devbox", hc)
+	o.Settings = d.settings(o.Settings)
 	got := o.Settings("devbox").Forwards
 	want := []engine.ForwardSpec{
 		{Kind: engine.Local, LocalPort: 8080, RemoteHost: "localhost", RemotePort: 80},

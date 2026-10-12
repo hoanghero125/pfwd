@@ -12,10 +12,6 @@ import (
 // `fwd -R/-D/--detach` arrive with each command's implementation.
 func stubCmds() []*cobra.Command {
 	return []*cobra.Command{
-		stub("fwd <host> <spec>...", "Create forwards on a host", "v0.5.0", cobra.MinimumNArgs(2),
-			"  pfwd fwd devbox 5432 8080:3000"),
-		stub("ls [host]", "List detected ports and forwards", "v0.5.0", cobra.MaximumNArgs(1),
-			"  pfwd ls devbox --json"),
 		stub("stop <id|host:port>...", "Stop forwards in the daemon", "v0.5.0", cobra.MinimumNArgs(1),
 			"  pfwd stop devbox:5432"),
 		group("daemon", "Run the engine in the background",

@@ -131,6 +131,13 @@ func (e *Engine) forwardFollowingConflict(host HostID, spec ForwardSpec) (Forwar
 	return e.Forward(host, spec)
 }
 
+// ForwardOrNearby is Forward, except that a taken local port is handled as
+// Options.OnConflict says: a free port nearby (next, and ask, since nobody
+// can be asked), any free port (random), or the error (fail).
+func (e *Engine) ForwardOrNearby(host HostID, spec ForwardSpec) (Forward, error) {
+	return e.forwardFollowingConflict(host, spec)
+}
+
 // remembered runs once per host per run, on its first connection, before
 // the Connected event: it reads state.json, so forwards made from then on
 // are saved, and returns the forwards to restore: the host's config

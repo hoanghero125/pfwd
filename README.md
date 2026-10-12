@@ -100,6 +100,34 @@ Forwards listed under `[hosts.<alias>]` in the config file are always on, like p
 
 On Linux, a local port below 1024, such as 80, needs root. When pfwd isn't allowed to listen on one, it uses that port plus 10000 instead (`localhost:10080`), and the LOCAL column shows the port it used. `forward.privileged_offset` changes the 10000; 0 turns this off.
 
+## Scripting
+
+Every command works without a terminal. Results go to stdout, errors to stderr with a suggested fix, and `--json` prints JSON instead of text.
+
+```sh
+pfwd ls devbox                  # the ports listening on devbox, once
+pfwd ls devbox --json
+pfwd fwd devbox 5432 8080:3000  # forward until Ctrl+C, reconnecting when the connection drops
+pfwd fwd devbox -R 9000 -D 1080
+```
+
+`pfwd fwd` takes ssh's `-L` syntax (`PORT`, `LOCAL:PORT`, `LOCAL:HOST:PORT`, `BIND:LOCAL:HOST:PORT`), plus `-R PORT[:LOCAL]` and `-D PORT`, each repeatable. It creates only what you name: no remembered or configured forwards, and no auto-forward unless you pass `--auto`. A taken local port follows `forward.on_conflict`, with `ask` acting as `next`. With `--json` it prints one JSON object per line as forwards change.
+
+`pfwd ls --json` prints `{"hosts": [{"host", "state", "os", "ports": [...], "forwards": [...]}]}`. Each port has `port`, `addrs`, `process`, `pid`, `label` and `ignored`. Each forward has `id`, `host`, `kind`, `bind`, `local`, `remote_host`, `remote`, `state`, `pause`, `error`, `pinned`, `auto`, `conns`, `bytes_in`, `bytes_out` and `started_at`.
+
+An unknown host key or a passphrase is asked on the terminal. Without one, the command stops with the fix: run `pfwd <host>` or `ssh <host>` once, pass `--accept-new`, or add the key to ssh-agent.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | OK |
+| 1 | Another error |
+| 2 | Bad usage: an unknown flag, a missing argument |
+| 3 | The host could not be reached |
+| 4 | Authentication failed |
+| 5 | The host key changed, or an unknown one could not be confirmed |
+| 6 | A forward could not listen, here or on the server |
+| 130 | Interrupted with Ctrl+C |
+
 ## Hosts and shell completion
 
 `pfwd hosts` lists the hosts in your ssh config, and the ones you have used pfwd with, most recent first (`--json` for scripts). Tab completion offers the same names:
@@ -156,14 +184,14 @@ Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux,
 
 ## Not supported yet
 
-- Several hosts in one window, and the scripting commands `pfwd ls` and `pfwd fwd` (v0.5.0).
+- Several hosts in one window, and a background daemon with `pfwd attach` (v0.5.0).
 - Unix-socket forwards, and a SOCKS proxy on the server side (`ssh -R` with only a port).
 
 ## Why pfwd
 
 - It needs no agent on the server, so it works on locked-down, shared and university machines where you can't upload anything.
 - It is one static Go binary for Linux, macOS and Windows, and doesn't need OpenSSH at runtime.
-- Scripting commands (`pfwd fwd`, `pfwd ls --json`) and several hosts in one window are planned for v0.5.0.
+- Scripts get the same engine as the TUI: `pfwd fwd` keeps forwards up through dropped connections, and `pfwd ls --json` lists what a server listens on.
 
 ## Contributing
 

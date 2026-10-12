@@ -26,10 +26,6 @@ func TestStubsAreNotImplementedYet(t *testing.T) {
 		args []string
 		path string // the command that must report itself, not the root TUI
 	}{
-		{[]string{"fwd", "devbox", "5432"}, "pfwd fwd"},
-		{[]string{"fwd", "devbox", "5432", "15432:db.internal:5432"}, "pfwd fwd"},
-		{[]string{"ls"}, "pfwd ls"},
-		{[]string{"ls", "devbox"}, "pfwd ls"},
 		{[]string{"stop", "devbox:5432"}, "pfwd stop"},
 		{[]string{"daemon", "start"}, "pfwd daemon start"},
 		{[]string{"daemon", "stop"}, "pfwd daemon stop"},

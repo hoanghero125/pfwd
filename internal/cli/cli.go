@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,28 +18,38 @@ import (
 	"github.com/hoanghero125/pfwd/internal/version"
 )
 
-// Exit codes. Later releases add 6 (bind
-// failed, for pfwd fwd) and 130 (interrupted).
+// Exit codes, as the README documents them.
 const (
-	exitOK      = 0
-	exitError   = 1
-	exitUsage   = 2
-	exitConnect = 3
-	exitAuth    = 4
-	exitHostKey = 5
+	exitOK          = 0
+	exitError       = 1
+	exitUsage       = 2
+	exitConnect     = 3
+	exitAuth        = 4
+	exitHostKey     = 5
+	exitBind        = 6
+	exitInterrupted = 130
 )
 
 // Execute runs pfwd with args (without the program name), writes normal
 // output to stdout and errors to stderr, and returns the process exit code.
 func Execute(args []string, stdout, stderr io.Writer) int {
+	return executeContext(context.Background(), args, stdout, stderr)
+}
+
+// executeContext is Execute with a context that commands such as pfwd fwd
+// stop on, as on Ctrl+C.
+func executeContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if args == nil {
 		args = []string{} // cobra would fall back to os.Args
 	}
 	root := newRootCmd(stdout, stderr)
 	root.SetArgs(args)
-	cmd, err := root.ExecuteC()
+	cmd, err := root.ExecuteContextC(ctx)
 	if err == nil {
 		return exitOK
+	}
+	if errors.Is(err, errInterrupted) {
+		return exitInterrupted // the user knows; nothing to explain
 	}
 	fmt.Fprint(stderr, errorLine(err))
 	code := exitCode(err)
@@ -69,6 +80,8 @@ func exitCode(err error) int {
 	switch {
 	case isUsageError(err):
 		return exitUsage
+	case errors.As(err, new(*bindError)):
+		return exitBind
 	case errors.Is(err, sshx.ErrHostKey):
 		return exitHostKey
 	case errors.Is(err, sshx.ErrAuth):
@@ -113,10 +126,10 @@ user@host. The flags below override the ssh config.`,
 	root.PersistentFlags().Bool("json", false, "print JSON instead of human-readable output")
 	root.PersistentFlags().String("config", "", "`path` of the config file to use, instead of $PFWD_CONFIG or the default that pfwd config path prints")
 	root.AddCommand(newVersionCmd(), newConfigCmd())
-	root.AddCommand(newHostsCmd(&flags))
+	root.AddCommand(newHostsCmd(&flags), newLsCmd(&flags), newFwdCmd(&flags))
 	for _, c := range stubCmds() {
 		switch c.Name() {
-		case "fwd", "ls", "doctor":
+		case "doctor":
 			c.ValidArgsFunction = completeHosts(&flags, true)
 		}
 		root.AddCommand(c)
