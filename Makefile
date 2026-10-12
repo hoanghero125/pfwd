@@ -21,7 +21,7 @@ LDFLAGS := -s -w \
 GOLANGCI_LINT_DIR := bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GOLANGCI_LINT     := $(GOLANGCI_LINT_DIR)/golangci-lint$(EXE)
 
-.PHONY: build web test lint e2e demo snapshot release-dry-run
+.PHONY: build web test lint e2e soak demo snapshot release-dry-run
 
 # Static binary with version info, like a release build.
 build: export CGO_ENABLED := 0
@@ -59,6 +59,11 @@ $(GOLANGCI_LINT):
 # End-to-end tests against sshd containers; needs Docker with the compose plugin.
 e2e:
 	go test -tags e2e -count=1 -timeout 10m -v ./test/e2e/...
+
+# Soak test: forwards kept up through connection drops, an hour by default.
+# PFWD_SOAK_DURATION and PFWD_SOAK_DROP_EVERY shorten it for a local run.
+soak:
+	go test -tags 'e2e soak' -run TestSoak -count=1 -timeout 90m -v ./test/e2e/...
 
 demo:
 	@echo "no demo tapes yet (added in M2)"
