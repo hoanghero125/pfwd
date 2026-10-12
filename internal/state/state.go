@@ -95,6 +95,31 @@ func (s *Store) Load(hostName string) ([]Forward, error) {
 	return out, err
 }
 
+// HostInfo is what state.json says about one host.
+type HostInfo struct {
+	// LastUsed is when pfwd last saved the host's forwards.
+	LastUsed time.Time
+	// Forwards is how many forwards are remembered for it.
+	Forwards int
+}
+
+// Hosts returns every host state.json knows: none when the file is
+// missing.
+func (s *Store) Hosts() (map[string]HostInfo, error) {
+	out := make(map[string]HostInfo)
+	err := s.locked(func() error {
+		f, err := s.read()
+		if err != nil {
+			return err
+		}
+		for name, h := range f.Hosts {
+			out[name] = HostInfo{LastUsed: h.LastUsed, Forwards: len(h.Forwards)}
+		}
+		return nil
+	})
+	return out, err
+}
+
 // Save replaces the forwards remembered for host and records it as used
 // now. Other hosts are left as they are.
 func (s *Store) Save(hostName string, forwards []Forward) error {

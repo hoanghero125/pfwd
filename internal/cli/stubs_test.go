@@ -31,7 +31,6 @@ func TestStubsAreNotImplementedYet(t *testing.T) {
 		{[]string{"ls"}, "pfwd ls"},
 		{[]string{"ls", "devbox"}, "pfwd ls"},
 		{[]string{"stop", "devbox:5432"}, "pfwd stop"},
-		{[]string{"hosts"}, "pfwd hosts"},
 		{[]string{"daemon", "start"}, "pfwd daemon start"},
 		{[]string{"daemon", "stop"}, "pfwd daemon stop"},
 		{[]string{"daemon", "status"}, "pfwd daemon status"},

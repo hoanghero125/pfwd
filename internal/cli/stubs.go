@@ -18,7 +18,6 @@ func stubCmds() []*cobra.Command {
 			"  pfwd ls devbox --json"),
 		stub("stop <id|host:port>...", "Stop forwards in the daemon", "v0.5.0", cobra.MinimumNArgs(1),
 			"  pfwd stop devbox:5432"),
-		stub("hosts", "List hosts from ssh config with last-used time", "v0.5.0", cobra.NoArgs, ""),
 		group("daemon", "Run the engine in the background",
 			stub("start", "Start the daemon", "v0.5.0", cobra.NoArgs, ""),
 			stub("stop", "Stop the daemon and all its forwards", "v0.5.0", cobra.NoArgs, ""),

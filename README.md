@@ -100,6 +100,17 @@ Forwards listed under `[hosts.<alias>]` in the config file are always on, like p
 
 On Linux, a local port below 1024, such as 80, needs root. When pfwd isn't allowed to listen on one, it uses that port plus 10000 instead (`localhost:10080`), and the LOCAL column shows the port it used. `forward.privileged_offset` changes the 10000; 0 turns this off.
 
+## Hosts and shell completion
+
+`pfwd hosts` lists the hosts in your ssh config, and the ones you have used pfwd with, most recent first (`--json` for scripts). Tab completion offers the same names:
+
+```sh
+pfwd completion bash > ~/.local/share/bash-completion/completions/pfwd
+pfwd completion zsh > "${fpath[1]}/_pfwd"
+pfwd completion fish > ~/.config/fish/completions/pfwd.fish
+pfwd completion powershell | Out-String | Invoke-Expression   # add this line to $PROFILE to keep it
+```
+
 ## Configuration
 
 pfwd works without a config file. To change its defaults, run `pfwd config edit`: it creates the file with every setting at its default, commented, and opens it in `$VISUAL`, `$EDITOR`, or notepad on Windows and vi elsewhere. `pfwd config validate` checks the file and points at the line and column of anything it doesn't accept; pfwd refuses to start with a broken config, so you never get silent defaults.

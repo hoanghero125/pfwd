@@ -100,7 +100,9 @@ user@host. The flags below override the ssh config.`,
 			return runTUI(cmd, args[0], &flags)
 		},
 	}
-	flags.register(root.Flags())
+	// The ssh and forwarding flags apply to every command that connects.
+	flags.register(root.PersistentFlags())
+	root.ValidArgsFunction = completeHosts(&flags, true)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetVersionTemplate("{{.Version}}\n")
@@ -111,7 +113,14 @@ user@host. The flags below override the ssh config.`,
 	root.PersistentFlags().Bool("json", false, "print JSON instead of human-readable output")
 	root.PersistentFlags().String("config", "", "`path` of the config file to use, instead of $PFWD_CONFIG or the default that pfwd config path prints")
 	root.AddCommand(newVersionCmd(), newConfigCmd())
-	root.AddCommand(stubCmds()...)
+	root.AddCommand(newHostsCmd(&flags))
+	for _, c := range stubCmds() {
+		switch c.Name() {
+		case "fwd", "ls", "doctor":
+			c.ValidArgsFunction = completeHosts(&flags, true)
+		}
+		root.AddCommand(c)
+	}
 	wireCompletion(root) // after SetOut: cobra captures the writer when it builds the shell commands
 	return root
 }
