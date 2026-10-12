@@ -30,7 +30,10 @@ type portsJSON struct {
 
 // promptJSON is a prompt event: a question a client must answer.
 type promptJSON struct {
-	ID          string `json:"id"`
+	ID string `json:"id"`
+	// Session is the host whose connection asks; Host is the one the
+	// question is about, which differs for a jump host.
+	Session     string `json:"session"`
 	Host        string `json:"host"`
 	Kind        string `json:"kind"` // host_key, passphrase, password or code
 	KeyType     string `json:"key_type,omitempty"`

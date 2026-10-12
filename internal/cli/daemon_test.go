@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +18,7 @@ import (
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/ipc"
 	"github.com/hoanghero125/pfwd/internal/sshx"
+	"github.com/hoanghero125/pfwd/internal/sshx/sshtest"
 )
 
 // daemonSocket points PFWD_SOCKET at a fresh socket or pipe.
@@ -139,5 +142,69 @@ func TestDaemonStartRefusesTestBinary(t *testing.T) {
 	daemonSocket(t)
 	if code, _, errOut := run(t, "daemon", "start"); code != 1 || !strings.Contains(errOut, "test binary") {
 		t.Errorf("pfwd daemon start from a test: code %d, stderr %q", code, errOut)
+	}
+}
+
+// TestFwdDetachLsStop: pfwd fwd --detach leaves a forward in the daemon,
+// pfwd ls lists it, and pfwd stop ends it.
+func TestFwdDetachLsStop(t *testing.T) {
+	headlessEnv(t)
+	echo := echoListener(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(ssLine(echo, "echo"))}, true)
+	startDaemon(t, "-F", h.sshConfig)
+	local := freeLocalPort(t)
+	code, out, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", local, echo), "--detach", "-F", h.sshConfig)
+	if want := fmt.Sprintf("Forwarded :%d to localhost:%d", echo, local); code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("pfwd fwd --detach: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", local), 5*time.Second)
+	if err != nil {
+		t.Fatalf("the daemon's forward doesn't answer: %v", err)
+	}
+	_ = c.Close()
+
+	code, out, _ = run(t, "ls", "--json")
+	var listed struct {
+		Hosts []hostJSON `json:"hosts"`
+	}
+	if err := json.Unmarshal([]byte(out), &listed); code != 0 || err != nil || len(listed.Hosts) != 1 ||
+		listed.Hosts[0].Host != "testbox" || len(listed.Hosts[0].Forwards) != 1 {
+		t.Fatalf("pfwd ls --json from the daemon: code %d, %v:\n%s", code, err, out)
+	}
+	if code, out, _ := run(t, "ls"); code != 0 || !strings.Contains(out, fmt.Sprintf("localhost:%d active", local)) {
+		t.Errorf("pfwd ls from the daemon: code %d:\n%s", code, out)
+	}
+	if code, _, errOut := run(t, "stop", "99"); code != 1 || !strings.Contains(errOut, "no forward 99") {
+		t.Errorf("pfwd stop 99: code %d, stderr %q", code, errOut)
+	}
+	if code, out, _ := run(t, "stop", fmt.Sprintf("testbox:%d", local)); code != 0 || !strings.Contains(out, "Stopped 1 forward") {
+		t.Errorf("pfwd stop testbox:%d: code %d, %q", local, code, out)
+	}
+	_, out, _ = run(t, "ls", "--json")
+	if err := json.Unmarshal([]byte(out), &listed); err != nil || len(listed.Hosts[0].Forwards) != 0 {
+		t.Errorf("the forward is still listed after stop:\n%s", out)
+	}
+}
+
+// TestFwdDetachUnknownHostKeyWithoutTerminal: the daemon's host-key prompt
+// reaches the client, which has no terminal to ask: exit 5 with the fix.
+func TestFwdDetachUnknownHostKeyWithoutTerminal(t *testing.T) {
+	headlessEnv(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux()}, false)
+	startDaemon(t, "-F", h.sshConfig)
+	code, _, errOut := run(t, "fwd", "testbox", "5432", "--detach", "-F", h.sshConfig)
+	if code != 5 || !strings.Contains(errOut, "--accept-new") {
+		t.Errorf("pfwd fwd --detach with an unknown key: code %d, stderr %q", code, errOut)
+	}
+}
+
+func TestStopWithoutDaemon(t *testing.T) {
+	headlessEnv(t)
+	daemonSocket(t)
+	if code, _, errOut := run(t, "stop", "devbox:5432"); code != 1 || !strings.Contains(errOut, "no pfwd daemon") {
+		t.Errorf("pfwd stop without a daemon: code %d, stderr %q", code, errOut)
+	}
+	if code, _, _ := run(t, "stop"); code != 2 {
+		t.Errorf("pfwd stop with nothing named: code %d, want 2", code)
 	}
 }

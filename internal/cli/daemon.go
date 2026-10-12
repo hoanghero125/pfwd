@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -501,11 +502,11 @@ func (b *promptBroker) add(ev engine.Event) (promptJSON, bool) {
 	switch ev := ev.(type) {
 	case engine.HostKeyPrompt:
 		q := ev.Question
-		p = pendingPrompt{key: &ev, json: promptJSON{ID: id, Host: string(ev.Host), Kind: "host_key", KeyType: q.KeyType, Fingerprint: q.Fingerprint, Saves: q.Saves, Prompt: q.Host}}
+		p = pendingPrompt{key: &ev, json: promptJSON{ID: id, Session: string(ev.Host), Host: cmp.Or(q.Host, string(ev.Host)), Kind: "host_key", KeyType: q.KeyType, Fingerprint: q.Fingerprint, Saves: q.Saves}}
 	case engine.CredentialPrompt:
 		q := ev.Question
 		kind := map[sshx.CredentialKind]string{sshx.Passphrase: "passphrase", sshx.Password: "password", sshx.Code: "code"}[q.Kind]
-		p = pendingPrompt{cred: &ev, json: promptJSON{ID: id, Host: q.Host, Kind: kind, Prompt: q.Prompt, Instruction: q.Instruction, Echo: q.Echo, Retry: q.Retry}}
+		p = pendingPrompt{cred: &ev, json: promptJSON{ID: id, Session: string(ev.Host), Host: q.Host, Kind: kind, Prompt: q.Prompt, Instruction: q.Instruction, Echo: q.Echo, Retry: q.Retry}}
 	default:
 		return promptJSON{}, false
 	}

@@ -83,16 +83,25 @@ func newLsCmd(f *rootFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ls [host]",
 		Short: "List detected ports and forwards",
-		Long: `pfwd ls <host> connects to the host, lists the TCP ports listening on it
-once, and disconnects. --json prints the same as JSON for scripts.`,
+		Long: `pfwd ls lists the daemon's hosts, their ports and forwards. With a host the
+daemon isn't connected to, or no daemon, it connects to the host, lists
+the TCP ports listening on it once, and disconnects. --json prints the
+same as JSON for scripts.`,
 		Example:           "  pfwd ls devbox\n  pfwd ls devbox --json",
 		Args:              usageArgs(cobra.MaximumNArgs(1)),
 		ValidArgsFunction: completeHosts(f, true),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
+			host := ""
+			if len(args) == 1 {
+				host = args[0]
+			}
+			if ok, err := lsFromDaemon(cmd, host); ok || err != nil {
+				return err
+			}
+			if host == "" {
 				return &usageError{errors.New("name a host: `pfwd ls <host>` lists its ports once; with the daemon running (`pfwd daemon start`), `pfwd ls` lists all of its hosts")}
 			}
-			return lsOnce(cmd, f, args[0])
+			return lsOnce(cmd, f, host)
 		},
 	}
 }

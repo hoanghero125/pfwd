@@ -132,6 +132,21 @@ An unknown host key or a passphrase is asked on the terminal. Without one, the c
 | 6 | A forward could not listen, here or on the server |
 | 130 | Interrupted with Ctrl+C |
 
+## Background daemon
+
+`pfwd fwd --detach` hands forwards to a background daemon, starting it when none runs, and returns once they listen. The daemon keeps them up, reconnecting as the TUI does, after the terminal closes:
+
+```sh
+pfwd fwd devbox 5432 8080:3000 --detach
+pfwd ls                     # every host the daemon serves, with its ports and forwards
+pfwd stop devbox:5432       # by host and local (or server) port; or by the ID pfwd ls --json shows
+pfwd stop --all devbox
+pfwd daemon status          # exit code 1 when none runs
+pfwd daemon stop            # ends the daemon and its forwards
+```
+
+`pfwd daemon start` starts it on its own. It listens on a Unix socket only you can open (in `$XDG_RUNTIME_DIR`, else your own directory under the system temp directory), or on Windows a named pipe only you can open; `PFWD_SOCKET` names another. When the daemon needs a host-key confirmation or a passphrase, `pfwd fwd --detach` asks on your terminal. The daemon logs to `pfwd.log`.
+
 ## When something doesn't work
 
 `pfwd doctor devbox` checks each step in order and says how to fix the first one that fails: how the ssh config resolves the host, whether it answers, its host key, the login, port detection, `-L` and `-R` forwarding on the server, and listening on this machine. It never writes `known_hosts`. Its exit code is 3, 4 or 5 when the connection, the login or the host key fails, as for the other commands.
@@ -194,7 +209,7 @@ Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux,
 
 ## Not supported yet
 
-- A background daemon, `pfwd stop` and `pfwd attach` (v0.5.0).
+- `pfwd attach`, the TUI on the daemon's forwards (v0.5.0).
 - Unix-socket forwards, and a SOCKS proxy on the server side (`ssh -R` with only a port).
 
 ## Why pfwd

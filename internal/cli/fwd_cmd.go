@@ -23,6 +23,7 @@ func (e *bindError) Unwrap() error { return e.err }
 // fwdFlags are pfwd fwd's own flags.
 type fwdFlags struct {
 	remote, dynamic []string
+	detach          bool
 }
 
 func newFwdCmd(f *rootFlags) *cobra.Command {
@@ -39,7 +40,8 @@ Specs use ssh's -L syntax:
   LOCAL:HOST:PORT       local LOCAL to HOST:PORT, as the server sees it
   BIND:LOCAL:HOST:PORT  the same, listening on BIND
 -R PORT[:LOCAL] exposes a local port on the server, and -D PORT starts a
-SOCKS proxy. Auto-forward is off unless you pass --auto.`,
+SOCKS proxy. Auto-forward is off unless you pass --auto. With --detach the
+daemon keeps the forwards after the command returns.`,
 		Example:           "  pfwd fwd devbox 5432 8080:3000\n  pfwd fwd devbox -R 9000 -D 1080\n  pfwd fwd devbox 5432 --json",
 		Args:              usageArgs(cobra.MinimumNArgs(1)),
 		ValidArgsFunction: completeHosts(f, true),
@@ -48,11 +50,15 @@ SOCKS proxy. Auto-forward is off unless you pass --auto.`,
 			if err != nil {
 				return &usageError{err}
 			}
+			if ff.detach {
+				return fwdDetached(cmd, f, args[0], specs)
+			}
 			return runFwd(cmd, f, args[0], specs)
 		},
 	}
 	cmd.Flags().StringArrayVarP(&ff.remote, "remote", "R", nil, "expose a local port on the server: `PORT[:LOCAL]` (repeatable)")
 	cmd.Flags().StringArrayVarP(&ff.dynamic, "dynamic", "D", nil, "start a SOCKS proxy on a local `PORT` (repeatable)")
+	cmd.Flags().BoolVar(&ff.detach, "detach", false, "hand the forwards to the daemon (starting it if needed) and return")
 	return cmd
 }
 

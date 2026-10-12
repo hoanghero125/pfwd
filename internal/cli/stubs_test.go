@@ -26,7 +26,6 @@ func TestStubsAreNotImplementedYet(t *testing.T) {
 		args []string
 		path string // the command that must report itself, not the root TUI
 	}{
-		{[]string{"stop", "devbox:5432"}, "pfwd stop"},
 		{[]string{"attach"}, "pfwd attach"},
 		{[]string{"ui"}, "pfwd ui"},
 		{[]string{"ui", "devbox", "gpu-node"}, "pfwd ui"},

@@ -12,8 +12,6 @@ import (
 // `fwd -R/-D/--detach` arrive with each command's implementation.
 func stubCmds() []*cobra.Command {
 	return []*cobra.Command{
-		stub("stop <id|host:port>...", "Stop forwards in the daemon", "v0.5.0", cobra.MinimumNArgs(1),
-			"  pfwd stop devbox:5432"),
 		stub("attach", "Open the TUI on the running daemon", "v0.5.0", cobra.NoArgs, ""),
 		stub("ui [host...]", "Open the web UI in the browser", "v0.6.0", cobra.ArbitraryArgs,
 			"  pfwd ui devbox"),

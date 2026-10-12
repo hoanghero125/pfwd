@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -131,31 +128,9 @@ func daemonStart(cmd *cobra.Command) error {
 		_ = c.Close()
 		return ipc.ErrRunning
 	}
-	exe, err := os.Executable()
+	st, err := spawnDaemon(cmd, path)
 	if err != nil {
-		return fmt.Errorf("find the pfwd binary: %w", err)
-	}
-	if base := strings.TrimSuffix(filepath.Base(exe), ".exe"); strings.HasSuffix(base, ".test") {
-		// A test binary would run its tests again, detached, and start
-		// daemons of its own.
-		return errors.New("pfwd daemon start must run from the pfwd binary, not a test binary")
-	}
-	args := []string{"daemon", "run"}
-	for _, name := range daemonFlags {
-		if fl := cmd.Flags().Lookup(name); fl != nil && fl.Changed {
-			args = append(args, "--"+name+"="+fl.Value.String())
-		}
-	}
-	run := exec.Command(exe, args...)
-	detach(run)
-	if err := run.Start(); err != nil {
-		return fmt.Errorf("start the daemon: %w", err)
-	}
-	pid := run.Process.Pid
-	_ = run.Process.Release()
-	st, err := waitStatus(cmd.Context(), path, daemonWait)
-	if err != nil {
-		return fmt.Errorf("the daemon (pid %d) didn't answer within %s: %w; its log says why (pfwd doctor --bundle collects it)", pid, daemonWait, err)
+		return err
 	}
 	if wantJSON(cmd) {
 		return writeJSON(cmd.OutOrStdout(), st)
