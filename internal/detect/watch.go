@@ -90,21 +90,32 @@ func Watch(ctx context.Context, r Runner, o WatchOptions, emit func(Update)) err
 	if ctx.Err() != nil {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("probe the server for ss and /proc: %w", err)
-	}
 	probe := ParseProbe(string(out))
+	if probe.OS == "" {
+		// No sh: maybe a Windows OpenSSH server.
+		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+		winOut, winErr := r.Output(probeCtx, WindowsProbe)
+		cancel()
+		if ctx.Err() != nil {
+			return nil
+		}
+		if winErr == nil {
+			if p := ParseProbe(string(winOut)); p.OS != "" {
+				probe, err = p, nil
+			}
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("probe the server for its port-listing tools: %w", err)
+	}
 	strategy := probe.Strategy()
 	log.Debug("detection probe", "os", probe.OS, "strategy", strategy.String())
 	if strategy == None {
 		emit(Update{Strategy: None, OS: probe.OS})
 		return nil
 	}
-	parse := ParseSS
-	if strategy == Proc {
-		parse = ParseProcNetTCP
-	}
-	cmd := ShellCommand(LoopScript(strategy, o.Interval))
+	parse := strategy.Parser()
+	cmd := LoopCommand(strategy, probe.OS, o.Interval)
 
 	var last []RemotePort
 	emitted := false

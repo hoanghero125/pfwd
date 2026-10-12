@@ -191,7 +191,7 @@ func TestWatchEmitsOnChange(t *testing.T) {
 	if got[0].Strategy != SS || got[0].OS != "Linux" || got[0].Ports[0].Process != "python3" {
 		t.Errorf("first update = %+v", got[0])
 	}
-	if r.cmds[0] != ShellCommand(ProbeScript) || r.cmds[1] != ShellCommand(LoopScript(SS, 2*time.Second)) {
+	if r.cmds[0] != ShellCommand(ProbeScript) || r.cmds[1] != ShellCommand(LoopScript(SS, "Linux", 2*time.Second)) {
 		t.Errorf("commands = %q", r.cmds)
 	}
 }
@@ -205,13 +205,13 @@ func TestWatchFirstSnapshotEmptyIsEmitted(t *testing.T) {
 }
 
 func TestWatchNoStrategy(t *testing.T) {
-	r := &fakeRunner{probe: "PFWD_OS Darwin\nHAVE_LSOF\n"}
+	r := &fakeRunner{probe: "PFWD_OS SunOS\nHAVE_NETSTAT\n"}
 	var got []Update
 	err := Watch(t.Context(), r, WatchOptions{Interval: time.Second}, func(u Update) { got = append(got, u) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []Update{{Strategy: None, OS: "Darwin"}}; !reflect.DeepEqual(got, want) {
+	if want := []Update{{Strategy: None, OS: "SunOS"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("updates = %+v, want %+v", got, want)
 	}
 }
@@ -245,7 +245,7 @@ func TestWatchOverSSH(t *testing.T) {
 		t.Fatal(err)
 	}
 	probeCmd := ShellCommand(ProbeScript)
-	loopCmd := ShellCommand(LoopScript(SS, 2*time.Second))
+	loopCmd := ShellCommand(LoopScript(SS, "Linux", 2*time.Second))
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
