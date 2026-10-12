@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hoanghero125/pfwd/internal/engine"
+	"github.com/hoanghero125/pfwd/internal/forward"
 	"github.com/hoanghero125/pfwd/internal/ipc"
 	"github.com/hoanghero125/pfwd/internal/safetext"
 	"github.com/hoanghero125/pfwd/internal/sshx"
@@ -195,15 +196,26 @@ func fwdDetached(cmd *cobra.Command, f *rootFlags, target string, specs []engine
 	return nil
 }
 
-// fromForwardJSON is the engine forward a forwardJSON describes, enough to
-// print it.
+// fromForwardJSON is the engine forward a forwardJSON describes.
 func fromForwardJSON(j forwardJSON) engine.Forward {
 	kind, _ := kindOf(j.Kind)
-	f := engine.Forward{ID: j.ID, Host: engine.HostID(j.Host), StartedAt: j.StartedAt,
-		Spec: engine.ForwardSpec{Kind: kind, BindAddr: j.Bind, LocalPort: j.Local, RemoteHost: j.RemoteHost, RemotePort: j.Remote, Pinned: j.Pinned, Auto: j.Auto}}
-	for _, s := range []engine.ForwardState{engine.Starting, engine.Active, engine.Paused, engine.Failed, engine.Stopped} {
-		if s.String() == j.State {
-			f.State = s
+	f := engine.Forward{ID: j.ID, Host: engine.HostID(j.Host), StartedAt: j.StartedAt, MappedFrom: j.MappedFrom,
+		Spec: engine.ForwardSpec{Kind: kind, BindAddr: j.Bind, LocalPort: j.Local, RemoteHost: j.RemoteHost, RemotePort: j.Remote,
+			Label: j.Label, Pinned: j.Pinned, Auto: j.Auto, Config: j.Config},
+		Stats: forward.Stats{Conns: j.Conns, BytesIn: j.BytesIn, BytesOut: j.BytesOut}}
+	for _, st := range []engine.ForwardState{engine.Starting, engine.Active, engine.Paused, engine.Failed, engine.Stopped} {
+		if st.String() == j.State {
+			f.State = st
+		}
+	}
+	for _, p := range []engine.PauseReason{engine.PortGone, engine.Disconnected, engine.ServerPortBusy} {
+		if p.String() == j.Pause {
+			f.Pause = p
+		}
+	}
+	for _, sc := range []forward.Scheme{forward.SchemeNone, forward.SchemeHTTP, forward.SchemeHTTPS} {
+		if sc.String() == j.Scheme {
+			f.Scheme = sc
 		}
 	}
 	if j.Error != "" {

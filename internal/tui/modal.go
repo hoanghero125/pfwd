@@ -68,6 +68,9 @@ func (m Model) modalLines() []string {
 	case modalHelp:
 		title = "Keys"
 		keys := helpKeys(th)
+		if m.opts.Detach {
+			keys[len(keys)-1] = [2]string{"q  ctrl+c", "detach; the daemon keeps the forwards"}
+		}
 		// The box needs a border line above and below, plus the title and
 		// a blank line; on a short window the keys scroll.
 		if room := m.height - 4; room < len(keys) {

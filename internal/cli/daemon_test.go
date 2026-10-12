@@ -208,3 +208,96 @@ func TestStopWithoutDaemon(t *testing.T) {
 		t.Errorf("pfwd stop with nothing named: code %d, want 2", code)
 	}
 }
+
+// nextEvent reads events from eng until one matches, or fails.
+func nextEvent[T engine.Event](t *testing.T, eng *attachEngine, match func(T) bool) T {
+	t.Helper()
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("the event stream ended")
+			}
+			if e, ok := ev.(T); ok && (match == nil || match(e)) {
+				return e
+			}
+		case <-timeout:
+			var zero T
+			t.Fatalf("no %T within 10 s", zero)
+		}
+	}
+}
+
+// attached returns an attach engine on the daemon at path, watching until
+// the test ends.
+func attached(t *testing.T, path string) *attachEngine {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	eng, err := newAttachEngine(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- eng.watch(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		eng.close()
+	})
+	return eng
+}
+
+func TestAttachEngine(t *testing.T) {
+	headlessEnv(t)
+	echo := echoListener(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(ssLine(echo, "echo"))}, true)
+	path := startDaemon(t, "-F", h.sshConfig)
+	local := freeLocalPort(t)
+	if code, _, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", local, echo), "--detach", "-F", h.sshConfig); code != 0 {
+		t.Fatalf("pfwd fwd --detach: code %d, stderr %q", code, errOut)
+	}
+	eng := attached(t, path)
+	nextEvent(t, eng, func(s engine.SessionChanged) bool { return s.Host == "testbox" && s.State == engine.Connected })
+	first := nextEvent(t, eng, func(f engine.ForwardChanged) bool { return f.Forward.Spec.LocalPort == uint16(local) })
+	if first.Forward.State != engine.Active || first.Forward.Spec.Kind != engine.Local {
+		t.Errorf("the daemon's forward = %+v", first.Forward)
+	}
+	if fws := eng.Forwards(); len(fws) != 1 || fws[0].ID != first.Forward.ID {
+		t.Errorf("Forwards = %+v", fws)
+	}
+	second, err := eng.Forward("testbox", engine.ForwardSpec{LocalPort: uint16(freeLocalPort(t)), RemotePort: uint16(echo)})
+	if err != nil || second.State != engine.Active {
+		t.Fatalf("Forward through the daemon = %+v, %v", second, err)
+	}
+	if err := eng.SetPinned(second.ID, true); err != nil {
+		t.Error(err)
+	}
+	if err := eng.Stop(first.Forward.ID); err != nil {
+		t.Fatal(err)
+	}
+	nextEvent(t, eng, func(f engine.ForwardChanged) bool {
+		return f.Forward.ID == first.Forward.ID && f.Forward.State == engine.Stopped
+	})
+}
+
+// TestAttachAnswersHostKeyPrompt: a host connected with + asks about its
+// host key; the TUI's yes reaches the daemon, which connects and saves it.
+func TestAttachAnswersHostKeyPrompt(t *testing.T) {
+	headlessEnv(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux()}, false)
+	path := startDaemon(t, "-F", h.sshConfig)
+	eng := attached(t, path)
+	if _, err := eng.connect(t.Context(), "testbox"); err != nil {
+		t.Fatal(err)
+	}
+	p := nextEvent[engine.HostKeyPrompt](t, eng, nil)
+	if p.Host != "testbox" || p.Question.Fingerprint == "" {
+		t.Fatalf("prompt = %+v", p)
+	}
+	p.Answer(true)
+	nextEvent(t, eng, func(s engine.SessionChanged) bool { return s.Host == "testbox" && s.State == engine.Connected })
+	if data, _ := os.ReadFile(h.knownHosts); len(data) == 0 {
+		t.Error("the accepted key wasn't saved")
+	}
+}

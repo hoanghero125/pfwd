@@ -56,6 +56,9 @@ type Options struct {
 	// uses the free port nearby, "random" any free port, "fail" reports
 	// the error, and anything else ("ask") opens the conflict modal.
 	OnConflict string
+	// Detach says q leaves the daemon running its forwards (pfwd attach),
+	// instead of quitting.
+	Detach bool
 	// Hosts lists the hosts + offers, most recently used first; nil turns
 	// + off.
 	Hosts func(ctx context.Context) ([]HostChoice, error)

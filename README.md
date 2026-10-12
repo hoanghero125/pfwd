@@ -141,6 +141,7 @@ pfwd fwd devbox 5432 8080:3000 --detach
 pfwd ls                     # every host the daemon serves, with its ports and forwards
 pfwd stop devbox:5432       # by host and local (or server) port; or by the ID pfwd ls --json shows
 pfwd stop --all devbox
+pfwd attach                 # the TUI on the daemon's hosts; q detaches and leaves the forwards running
 pfwd daemon status          # exit code 1 when none runs
 pfwd daemon stop            # ends the daemon and its forwards
 ```
@@ -209,7 +210,6 @@ Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux,
 
 ## Not supported yet
 
-- `pfwd attach`, the TUI on the daemon's forwards (v0.5.0).
 - Unix-socket forwards, and a SOCKS proxy on the server side (`ssh -R` with only a port).
 
 ## Why pfwd

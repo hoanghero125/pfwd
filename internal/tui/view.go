@@ -248,6 +248,9 @@ type hintItem struct {
 // hintItems are the hints for what is on screen, in display order.
 func (m Model) hintItems() []hintItem {
 	help, quit := hintItem{"?", "help", 0}, hintItem{"q", "quit", 0}
+	if m.opts.Detach {
+		quit = hintItem{"q", "detach", 0}
+	}
 	auto, filter, log := hintItem{"a", "auto", 2}, hintItem{"/", "filter", 4}, hintItem{"L", "log", 1}
 	switch {
 	case m.filtering:

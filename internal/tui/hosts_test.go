@@ -215,3 +215,14 @@ func TestHostKeyPromptWaitsBehindCredential(t *testing.T) {
 		t.Errorf("the host-key prompt replaced the password modal:\n%s", v)
 	}
 }
+
+func TestDetachWording(t *testing.T) {
+	m := connectedWith(newModelWith(newFakeEngine(), Options{Detach: true}), rp(5173, "node"))
+	if v := view(m); !strings.Contains(v, "q detach") {
+		t.Errorf("hints:\n%s", v)
+	}
+	m, _ = press(t, m, "?")
+	if v := view(sized(m, 140, 40)); !strings.Contains(v, "the daemon keeps the forwards") {
+		t.Errorf("help:\n%s", v)
+	}
+}

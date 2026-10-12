@@ -25,6 +25,10 @@ type forwardJSON struct {
 	Error      string    `json:"error"`
 	Pinned     bool      `json:"pinned"`
 	Auto       bool      `json:"auto"`
+	Config     bool      `json:"config"`
+	Label      string    `json:"label"`
+	Scheme     string    `json:"scheme"`
+	MappedFrom uint16    `json:"mapped_from"`
 	Conns      int64     `json:"conns"`
 	BytesIn    int64     `json:"bytes_in"`
 	BytesOut   int64     `json:"bytes_out"`
@@ -36,6 +40,7 @@ func toForwardJSON(f engine.Forward) forwardJSON {
 		ID: f.ID, Host: string(f.Host), Kind: f.Spec.Kind.String(), Bind: f.Spec.BindAddr,
 		Local: f.Spec.LocalPort, RemoteHost: f.Spec.RemoteHost, Remote: f.Spec.RemotePort,
 		State: f.State.String(), Pause: f.Pause.String(), Pinned: f.Spec.Pinned, Auto: f.Spec.Auto,
+		Config: f.Spec.Config, Label: f.Spec.Label, Scheme: f.Scheme.String(), MappedFrom: f.MappedFrom,
 		Conns: f.Stats.Conns, BytesIn: f.Stats.BytesIn, BytesOut: f.Stats.BytesOut, StartedAt: f.StartedAt,
 	}
 	if f.Err != nil {
