@@ -89,7 +89,7 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	if err != nil {
 		return err
 	}
-	auto, err := f.applyTo(&cfg)
+	auto, err := f.applyTo(&cfg, cmd.Flags().Changed)
 	if err != nil {
 		return &usageError{err}
 	}

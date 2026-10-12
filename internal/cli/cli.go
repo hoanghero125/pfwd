@@ -109,7 +109,7 @@ user@host. The flags below override the ssh config.`,
 		return &usageError{err}
 	})
 	root.PersistentFlags().Bool("json", false, "print JSON instead of human-readable output")
-	root.PersistentFlags().String("config", "", "config file to use (default from $PFWD_CONFIG or `pfwd config path`)")
+	root.PersistentFlags().String("config", "", "`path` of the config file to use, instead of $PFWD_CONFIG or the default that pfwd config path prints")
 	root.AddCommand(newVersionCmd(), newConfigCmd())
 	root.AddCommand(stubCmds()...)
 	wireCompletion(root) // after SetOut: cobra captures the writer when it builds the shell commands

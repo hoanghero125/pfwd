@@ -329,3 +329,25 @@ func TestTemplateIsValidAndDefault(t *testing.T) {
 		t.Errorf("the template does not decode to the defaults:\n%+v", c)
 	}
 }
+
+func TestLoadWrongTypeDoesNotHideOthers(t *testing.T) {
+	cfg := "[detect]\ndebounce_scans = \"x\"\nintervl = \"2s\"\n\n[forward]\nmax_conns = true\non_conflict = \"maybe\"\nauto_ports = [\n  3000,\n  \"bad\",\n]\n"
+	_, err := Load(writeConfig(t, cfg))
+	got := problems(t, err)
+	var keys []string
+	for _, p := range got {
+		keys = append(keys, p.Key)
+	}
+	want := []string{"detect.debounce_scans", "detect.intervl", "forward.max_conns", "forward.on_conflict", "forward.auto_ports"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("problem keys = %q, want %q (all of them, by line)", keys, want)
+	}
+	if len(got) == len(want) && (got[2].Line != 6 || got[1].Line != 3) {
+		t.Errorf("positions = %+v, want the lines in the file", got)
+	}
+	for _, p := range got {
+		if strings.Contains(p.Msg, "a integer") || strings.Contains(p.Msg, "a array") {
+			t.Errorf("wrong article: %q", p.Msg)
+		}
+	}
+}

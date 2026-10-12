@@ -127,19 +127,53 @@ func TestSSHSettingsFromConfig(t *testing.T) {
 	}
 }
 
+// given reports the named flags as set on the command line.
+func given(names ...string) func(string) bool {
+	return func(name string) bool {
+		for _, n := range names {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 func TestFlagsOverrideConfig(t *testing.T) {
 	f := rootFlags{bind: "0.0.0.0", interval: time.Second, auto: true}
 	cfg := config.Default()
-	auto, err := f.applyTo(&cfg)
+	auto, err := f.applyTo(&cfg, given("bind", "interval", "auto"))
 	if err != nil || cfg.Forward.Bind != "0.0.0.0" || cfg.Detect.Interval != time.Second || auto == nil || !*auto {
 		t.Errorf("applyTo = %v, %v; config bind %q, interval %v", auto, err, cfg.Forward.Bind, cfg.Detect.Interval)
 	}
 	f = rootFlags{noAuto: true}
-	if auto, err := f.applyTo(&cfg); err != nil || auto == nil || *auto {
+	if auto, err := f.applyTo(&cfg, given("no-auto")); err != nil || auto == nil || *auto {
 		t.Errorf("--no-auto = %v, %v", auto, err)
 	}
-	if auto, _ := (&rootFlags{}).applyTo(&cfg); auto != nil {
+	if auto, _ := (&rootFlags{}).applyTo(&cfg, given()); auto != nil {
 		t.Errorf("no flag gave auto %v", *auto)
+	}
+}
+
+func TestExplicitFlagValuesCount(t *testing.T) {
+	cfg := config.Default()
+	if auto, err := (&rootFlags{auto: false}).applyTo(&cfg, given("auto")); err != nil || auto == nil || *auto {
+		t.Errorf("--auto=false = %v, %v; want auto off", auto, err)
+	}
+	if auto, err := (&rootFlags{noAuto: false}).applyTo(&cfg, given("no-auto")); err != nil || auto == nil || !*auto {
+		t.Errorf("--no-auto=false = %v, %v; want auto on", auto, err)
+	}
+	if _, err := (&rootFlags{auto: true, noAuto: true}).applyTo(&cfg, given("auto", "no-auto")); err == nil {
+		t.Error("--auto --no-auto was accepted")
+	}
+	if _, err := (&rootFlags{auto: true, noAuto: false}).applyTo(&cfg, given("auto", "no-auto")); err != nil {
+		t.Errorf("--auto --no-auto=false agree, but: %v", err)
+	}
+	if _, err := (&rootFlags{interval: 0}).applyTo(&cfg, given("interval")); err == nil {
+		t.Error("--interval 0 was accepted")
+	}
+	if _, err := (&rootFlags{bind: ""}).applyTo(&cfg, given("bind")); err == nil {
+		t.Error(`--bind "" was accepted`)
 	}
 }
 

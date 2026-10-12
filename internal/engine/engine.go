@@ -58,8 +58,12 @@ type Options struct {
 	BindAddr string
 	// MaxConns caps open connections per forward; 0 means 256.
 	MaxConns int
-	// Notifier, when set, is told about every auto-forward.
+	// Notifier, when set, is told about auto-forwards: one notification
+	// for those made within NotifyDelay of each other.
 	Notifier Notifier
+	// NotifyDelay is how long a notification waits for more auto-forwards
+	// to join it; 0 means 2 s.
+	NotifyDelay time.Duration
 	// MaxBackoff caps the wait between reconnect attempts; 0 means 30 s.
 	MaxBackoff time.Duration
 	// Backoff returns the wait before reconnect attempt n (from 1); nil
@@ -95,6 +99,8 @@ type Engine struct {
 	hosts    map[HostID]*hostState
 	forwards map[string]*fwd
 	nextID   int
+	// notes are auto-forwards waiting to be announced, by host.
+	notes map[HostID][]note
 
 	// persistMu orders writes of state.json.
 	persistMu sync.Mutex
@@ -136,6 +142,9 @@ func New(o Options) *Engine {
 	if o.AutoExpire <= 0 {
 		o.AutoExpire = 10 * time.Minute
 	}
+	if o.NotifyDelay <= 0 {
+		o.NotifyDelay = 2 * time.Second
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{
 		o:        o,
@@ -146,6 +155,7 @@ func New(o Options) *Engine {
 		sessions: make(map[HostID]*session),
 		hosts:    make(map[HostID]*hostState),
 		forwards: make(map[string]*fwd),
+		notes:    make(map[HostID][]note),
 	}
 }
 

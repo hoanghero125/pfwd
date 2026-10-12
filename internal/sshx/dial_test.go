@@ -828,3 +828,22 @@ func TestDialNoUserKnownHostsFile(t *testing.T) {
 		t.Errorf("the global known_hosts was written: %q", data)
 	}
 }
+
+func TestHostKeyQuestionSaysWhetherItSaves(t *testing.T) {
+	f := newFixture(t, sshtest.Options{})
+	f.hc.KnownHostsFiles = []string{filepath.Join(t.TempDir(), "known_hosts")}
+	p := &fakePrompter{answer: true}
+	mustDial(t, f.hc, DialOptions{Prompter: p})
+	if qs := p.questions(); len(qs) != 1 || !qs[0].Saves {
+		t.Errorf("questions = %+v, want one that saves to known_hosts", qs)
+	}
+
+	f2 := newFixture(t, sshtest.Options{})
+	f2.hc.KnownHostsFiles = nil
+	f2.hc.NoUserKnownHosts = true
+	p2 := &fakePrompter{answer: true}
+	mustDial(t, f2.hc, DialOptions{Prompter: p2})
+	if qs := p2.questions(); len(qs) != 1 || qs[0].Saves {
+		t.Errorf("questions = %+v, want one that trusts for this connection only", qs)
+	}
+}

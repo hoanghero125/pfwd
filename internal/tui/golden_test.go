@@ -91,7 +91,7 @@ func goldenCases() map[string]func(*testing.T) Model {
 		},
 		"modal-hostkey": func(*testing.T) Model {
 			return apply(connecting(nil), engine.NewHostKeyPrompt("devbox", sshx.HostKeyQuestion{
-				Host: "devbox", KeyType: "ssh-ed25519", Fingerprint: "SHA256:KkzXxjJZNedqGLrx+HOOCWJgJimyaMj/kxgCfnf8M7A",
+				Host: "devbox", KeyType: "ssh-ed25519", Fingerprint: "SHA256:KkzXxjJZNedqGLrx+HOOCWJgJimyaMj/kxgCfnf8M7A", Saves: true,
 			}, make(chan bool, 1)))
 		},
 		"modal-custom": func(t *testing.T) Model {

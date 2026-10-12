@@ -20,28 +20,35 @@ const minInterval = 500 * time.Millisecond
 
 // applyTo applies the flags that override the config, and returns the
 // auto-forward override for the host (nil when neither --auto nor
-// --no-auto is given).
-func (f *rootFlags) applyTo(cfg *config.Config) (*bool, error) {
-	if f.bind != "" {
+// --no-auto is given). changed reports whether a flag was given, so an
+// explicit --auto=false or --interval 0 counts, rather than looking like
+// the flag's default.
+func (f *rootFlags) applyTo(cfg *config.Config, changed func(name string) bool) (*bool, error) {
+	if changed("bind") {
 		if a, err := netip.ParseAddr(f.bind); f.bind != "localhost" && (err != nil || a.Zone() != "") {
 			return nil, fmt.Errorf("invalid --bind %q: use an IP address such as 127.0.0.1 or 0.0.0.0", f.bind)
 		}
 		cfg.Forward.Bind = f.bind
 	}
-	if f.interval != 0 {
+	if changed("interval") {
 		if f.interval < minInterval {
 			return nil, fmt.Errorf("invalid --interval %v: use 500ms or more", f.interval)
 		}
 		cfg.Detect.Interval = f.interval
 	}
-	switch {
-	case f.auto && f.noAuto:
-		return nil, errors.New("--auto and --no-auto contradict each other: pick one")
-	case f.auto, f.noAuto:
+	var auto *bool
+	if changed("auto") {
 		on := f.auto
-		return &on, nil
+		auto = &on
 	}
-	return nil, nil
+	if changed("no-auto") {
+		on := !f.noAuto
+		if auto != nil && *auto != on {
+			return nil, errors.New("--auto and --no-auto contradict each other: pick one")
+		}
+		auto = &on
+	}
+	return auto, nil
 }
 
 // engineOptions returns the engine's settings from the config. auto, when

@@ -37,6 +37,8 @@ type modalState struct {
 	prompt          engine.HostKeyPrompt
 	// active is the number of active forwards (quit modal).
 	active int
+	// scroll is the first key the help shows, when they don't all fit.
+	scroll int
 	// cred and secret belong to the credential modal. secret has a fixed
 	// capacity and is zeroed when the modal closes.
 	cred   engine.CredentialPrompt
@@ -62,37 +64,36 @@ func (m Model) modalLines() []string {
 	switch md := m.modal; md.kind {
 	case modalHelp:
 		title = "Keys"
-		keys := [][2]string{
-			{th.g.upDown + "  j k", "move"},
-			{"g G", "first, last"},
-			{"enter  f", "forward the port, or stop it"},
-			{"F", "forward to another local port"},
-			{"x", "stop the forward"},
-			{"o", "open in the browser"},
-			{"y", "copy the URL"},
-			{"p", "pin: remember the forward next time"},
-			{"a", "turn auto-forward on or off"},
-			{"/", "filter by port, process or label"},
-			{"h", "show or hide ignored ports"},
-			{"L", "event log"},
-			{"c", "reconnect now"},
-			{"x", "stop retrying, while reconnecting"},
-			{"?  esc", "close this help"},
-			{"q  ctrl+c", "quit"},
+		keys := helpKeys(th)
+		// The box needs a border line above and below, plus the title and
+		// a blank line; on a short window the keys scroll.
+		if room := m.height - 4; room < len(keys) {
+			shown := max(1, room-1)
+			start := min(max(0, md.scroll), len(keys)-shown)
+			more := th.faint.Render(th.g.upDown + " more keys, " + itoa(start+1) + "-" + itoa(start+shown) + " of " + itoa(len(keys)))
+			keys = append(keys[start:start+shown:start+shown], [2]string{"", more})
 		}
 		for _, k := range keys {
+			if k[0] == "" {
+				body = append(body, k[1])
+				continue
+			}
 			body = append(body, th.accent.Render(pad(k[0], 13))+k[1])
 		}
 	case modalHostKey:
 		q := md.prompt.Question
 		title = "First connection to " + safetext.Clean(string(md.prompt.Host))
+		trust := "trust for this connection"
+		if q.Saves {
+			trust = "trust and save to known_hosts"
+		}
 		body = append(body,
 			"pfwd has not seen this server's key before. Check the fingerprint with whoever runs the server before you trust it.",
 			"",
 			"  "+safetext.Clean(q.KeyType),
 			"  "+safetext.Clean(q.Fingerprint),
 			"",
-			m.hint("y", "trust and save to known_hosts", "n", "don't connect"),
+			m.hint("y", trust, "n", "don't connect"),
 		)
 	case modalPort:
 		title = "Forward :" + itoa(int(md.spec.RemotePort)) + " to another local port"
@@ -138,6 +139,28 @@ func (m Model) modalLines() []string {
 		lines = append(lines, strings.Split(ansi.Wordwrap(b, modalInner, ""), "\n")...)
 	}
 	return box(th, lines, modalInner)
+}
+
+// helpKeys are the help modal's keys and what they do.
+func helpKeys(th theme) [][2]string {
+	return [][2]string{
+		{th.g.upDown + "  j k", "move"},
+		{"g G", "first, last"},
+		{"enter  f", "forward the port, or stop it"},
+		{"F", "forward to another local port"},
+		{"x", "stop the forward"},
+		{"o", "open in the browser"},
+		{"y", "copy the URL"},
+		{"p", "pin: remember the forward next time"},
+		{"a", "turn auto-forward on or off"},
+		{"/", "filter by port, process or label"},
+		{"h", "show or hide ignored ports"},
+		{"L", "event log"},
+		{"c", "reconnect now"},
+		{"x", "stop retrying, while reconnecting"},
+		{"?  esc", "close this help"},
+		{"q  ctrl+c", "quit"},
+	}
 }
 
 // credentialLines are the title and body of the credential modal. Text

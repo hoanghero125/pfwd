@@ -258,8 +258,13 @@ func (m *Model) typeSecret(text string) {
 func (m Model) handleModalKey(k string) (tea.Model, tea.Cmd) {
 	switch m.modal.kind {
 	case modalHelp:
-		if k == "?" || k == "esc" || k == "q" {
+		switch k {
+		case "?", "esc", "q":
 			m.modal = modalState{}
+		case "up", "k":
+			m.modal.scroll = max(0, m.modal.scroll-1)
+		case "down", "j":
+			m.modal.scroll = min(m.modal.scroll+1, len(helpKeys(m.th)))
 		}
 	case modalHostKey:
 		switch k {

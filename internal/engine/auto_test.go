@@ -316,12 +316,13 @@ func TestNotifierHearsAutoForwards(t *testing.T) {
 	c := newFakeConn("") // an empty first snapshot is the baseline
 	n := &fakeNotifier{}
 	o := autoOptions(dialTo(c))
-	o.Notifier = n
+	o.Notifier, o.NotifyDelay = n, 50*time.Millisecond
 	e := newEngineWith(t, o)
 	e.Connect("devbox")
-	evil := "node\x1b]52;c;ZQ==\x07"
-	c.send(listen(p, evil))
-	c.send(listen(p, evil))
+	// The raw control characters reach the parser, unlike listen's %q.
+	evil := fmt.Sprintf("LISTEN 0 5 0.0.0.0:%d 0.0.0.0:* users:((\"node\x1b]52;c;ZQ==\x07\",pid=7,fd=3))\n", p)
+	c.send(evil)
+	c.send(evil)
 	next(t, e, isAutoForwardOf(p))
 	deadline := time.Now().Add(5 * time.Second)
 	for len(n.got()) == 0 && time.Now().Before(deadline) {
@@ -331,8 +332,8 @@ func TestNotifierHearsAutoForwards(t *testing.T) {
 	if len(calls) != 1 || !strings.Contains(calls[0], "devbox") || !strings.Contains(calls[0], itoa(p)) {
 		t.Fatalf("Notify calls = %q, want one naming devbox and :%d", calls, p)
 	}
-	if strings.ContainsAny(calls[0], "\x1b\x07") {
-		t.Errorf("notification text kept control characters: %q", calls[0])
+	if strings.ContainsAny(calls[0], "\x1b\x07") || !strings.Contains(calls[0], "node") {
+		t.Errorf("notification text = %q, want the process name without its control characters", calls[0])
 	}
 	// Manual forwards don't notify.
 	if _, err := e.Forward("devbox", ForwardSpec{RemotePort: freePort(t)}); err != nil {
@@ -365,5 +366,28 @@ func TestManualForwardOfAutoForwardedPort(t *testing.T) {
 	}
 	if n := len(e.Forwards()); n != 1 {
 		t.Errorf("%d forwards, want 1", n)
+	}
+}
+
+func TestNotificationsCoalesce(t *testing.T) {
+	p1, p2 := freePort(t), freePort(t)
+	c := newFakeConn("")
+	n := &fakeNotifier{}
+	o := autoOptions(dialTo(c))
+	o.Notifier, o.NotifyDelay = n, 300*time.Millisecond
+	e := newEngineWith(t, o)
+	e.Connect("devbox")
+	both := listen(p1, "node") + listen(p2, "vite")
+	c.send(both)
+	c.send(both)
+	next(t, e, isAutoForwardOf(p1))
+	deadline := time.Now().Add(5 * time.Second)
+	for len(n.got()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(500 * time.Millisecond) // a second notification would arrive by now
+	calls := n.got()
+	if len(calls) != 1 || !strings.Contains(calls[0], "2 ports") || !strings.Contains(calls[0], itoa(p1)) || !strings.Contains(calls[0], itoa(p2)) {
+		t.Errorf("Notify calls = %q, want one naming both ports", calls)
 	}
 }

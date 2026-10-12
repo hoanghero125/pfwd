@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/sshx"
 )
@@ -305,5 +307,73 @@ func TestRestoreFailedLogged(t *testing.T) {
 		Err: errors.New("local port 5432 is already in use on 127.0.0.1")})
 	if v := view(m); !strings.Contains(v, "Couldn't restore :5432") {
 		t.Errorf("status lacks the restore failure:\n%s", v)
+	}
+}
+
+func TestHostKeyModalWithoutSaving(t *testing.T) {
+	q := hostKeyQuestion()
+	q.Saves = true
+	if v := view(apply(connecting(t), engine.NewHostKeyPrompt("devbox", q, make(chan bool, 1)))); !strings.Contains(v, "save to known_hosts") {
+		t.Errorf("modal for a saving question:\n%s", v)
+	}
+	q.Saves = false
+	v := view(apply(connecting(t), engine.NewHostKeyPrompt("devbox", q, make(chan bool, 1))))
+	if strings.Contains(v, "known_hosts") || !strings.Contains(v, "this connection") {
+		t.Errorf("modal for a question that won't save:\n%s", v)
+	}
+}
+
+func TestLogScrollKeepsItsPlace(t *testing.T) {
+	m := connectedWith(newModel(newFakeEngine()))
+	for i := range 40 {
+		m.addLog(statusInfo, "entry "+itoa(i))
+	}
+	m, _ = press(t, m, "L", "up", "up", "up")
+	before, lines := m.logScroll, len(m.logLines(m.width))
+	long := strings.Repeat("a long error message that wraps ", 6)
+	m = apply(m, engine.AutoForwardFailed{Host: "devbox", Port: 9000, Err: errors.New(long)})
+	added := len(m.logLines(m.width)) - lines
+	if added < 2 {
+		t.Fatalf("the long entry took %d lines; the test needs one that wraps", added)
+	}
+	if m.logScroll != before+added {
+		t.Errorf("logScroll = %d, want %d: the lines on screen moved", m.logScroll, before+added)
+	}
+}
+
+func TestLogScrollIsClamped(t *testing.T) {
+	m := connectedWith(newModel(newFakeEngine()))
+	for i := range maxLog {
+		m.addLog(statusInfo, "entry "+itoa(i))
+	}
+	m, _ = press(t, m, "L", "g")
+	m.addLog(statusInfo, "one more")
+	if m.logScroll > m.maxLogScroll() {
+		t.Errorf("logScroll = %d, past the top at %d", m.logScroll, m.maxLogScroll())
+	}
+}
+
+func TestHelpFitsShortWindows(t *testing.T) {
+	for h := 12; h <= 16; h++ {
+		m := mainScreen(t)
+		m, _ = update(t, m, tea.WindowSizeMsg{Width: 80, Height: h})
+		m, _ = press(t, m, "?")
+		v := view(m)
+		if !strings.Contains(v, "╰") || !strings.Contains(v, "Keys") {
+			t.Errorf("height %d: the help box is cut off:\n%s", h, v)
+			continue
+		}
+		if strings.Contains(v, "ctrl+c") {
+			continue // everything fits
+		}
+		if !strings.Contains(v, "more") {
+			t.Errorf("height %d: hidden keys but no sign of more:\n%s", h, v)
+		}
+		for range 30 {
+			m, _ = press(t, m, "down")
+		}
+		if v := view(m); !strings.Contains(v, "ctrl+c") || !strings.Contains(v, "╰") {
+			t.Errorf("height %d: scrolling down doesn't reach the last key:\n%s", h, v)
+		}
 	}
 }

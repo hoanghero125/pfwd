@@ -9,8 +9,8 @@ import (
 
 // keyIndex maps each key path in a document to where its value (or, for
 // tables and arrays, its key) starts, so validation problems can name a
-// line and column. It uses go-toml's unstable parser; the pinned version
-// and index_test.go guard against API changes.
+// line and column. It uses go-toml's unstable parser; the pinned version,
+// and the position checks in config_test.go, guard against API changes.
 type keyIndex map[string]pos
 
 type pos struct{ line, col int }

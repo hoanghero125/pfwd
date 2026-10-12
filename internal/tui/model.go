@@ -336,7 +336,10 @@ func (m *Model) addLog(kind statusKind, text string) {
 		m.log = slices.Delete(m.log, 0, n)
 	}
 	if m.logScroll > 0 {
-		m.logScroll++ // keep the lines on screen where they are
+		// Keep the lines on screen where they are, by the new entry's
+		// wrapped lines, without scrolling past the top.
+		added := len(m.entryLines(m.log[len(m.log)-1], m.width))
+		m.logScroll = min(m.logScroll+added, m.maxLogScroll())
 	}
 }
 

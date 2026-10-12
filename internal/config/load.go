@@ -90,27 +90,13 @@ func Load(path string) (Config, error) {
 	}
 	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
 
-	raw := defaultRaw()
-	err = toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&raw)
-	var list []Problem
-	var strict *toml.StrictMissingError
-	var decode *toml.DecodeError
-	// StrictMissingError first: errors.As finds a DecodeError inside it too.
-	switch {
-	case err == nil:
-	case errors.As(err, &strict):
-		for _, e := range strict.Errors {
-			line, col := e.Position()
-			list = append(list, Problem{Line: line, Col: col, Key: joinKey(e.Key()), Msg: "unknown setting"})
-		}
-	case errors.As(err, &decode):
-		line, col := decode.Position()
-		return Config{}, &Problems{Path: path, List: []Problem{{Line: line, Col: col, Key: joinKey(decode.Key()), Msg: describe(decode)}}}
-	default:
-		return Config{}, &Problems{Path: path, List: []Problem{{Msg: err.Error()}}}
+	idx := buildIndex(data)
+	raw, list, ok := decodeAll(data, idx)
+	if !ok {
+		return Config{}, &Problems{Path: path, List: list}
 	}
 
-	v := validator{idx: buildIndex(data)}
+	v := validator{idx: idx}
 	cfg := v.convert(raw)
 	list = append(list, v.problems...)
 	if len(list) > 0 {
@@ -125,6 +111,80 @@ func Load(path string) (Config, error) {
 var wrongType = regexp.MustCompile(`cannot decode TOML (\w+(?: \w+)?) into .* of type (\S+)`)
 
 // describe words a decode error for users, without Go type names.
+// maxTypeErrors bounds how many wrong types decodeAll drops and retries.
+const maxTypeErrors = 50
+
+// decodeAll decodes data strictly into the raw config. A value of the
+// wrong type is reported, removed, and the rest decoded again, so one
+// wrong type doesn't hide the file's other problems. Unknown keys are
+// reported too. ok is false when the file can't be decoded at all (a
+// syntax error); list then says why. Positions come from idx, the index
+// of the file as written, since a retry decodes re-encoded text.
+func decodeAll(data []byte, idx keyIndex) (raw rawConfig, list []Problem, ok bool) {
+	where := func(key []string, line, col int) (int, int) {
+		if l, c := idx.at(key...); l != 0 {
+			return l, c
+		}
+		return line, col
+	}
+	var doc map[string]any
+	for range maxTypeErrors {
+		raw = defaultRaw()
+		err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&raw)
+		var strict *toml.StrictMissingError
+		var decode *toml.DecodeError
+		// StrictMissingError first: errors.As finds a DecodeError inside it too.
+		switch {
+		case err == nil:
+			return raw, list, true
+		case errors.As(err, &strict):
+			for _, e := range strict.Errors {
+				line, col := where(e.Key(), 0, 0)
+				if doc == nil {
+					line, col = e.Position()
+				}
+				list = append(list, Problem{Line: line, Col: col, Key: joinKey(e.Key()), Msg: "unknown setting"})
+			}
+			return raw, list, true
+		case errors.As(err, &decode):
+			key := decode.Key()
+			line, col := decode.Position()
+			if doc != nil {
+				line, col = where(key, line, col)
+			}
+			list = append(list, Problem{Line: line, Col: col, Key: joinKey(key), Msg: describe(decode)})
+			if doc == nil && toml.Unmarshal(data, &doc) != nil {
+				return raw, list, false
+			}
+			if len(key) == 0 || !deleteKey(doc, key) {
+				return raw, list, false
+			}
+			if data, err = toml.Marshal(doc); err != nil {
+				return raw, list, false
+			}
+		default:
+			return raw, append(list, Problem{Msg: err.Error()}), false
+		}
+	}
+	return raw, list, false
+}
+
+// deleteKey removes the value at path from a decoded document.
+func deleteKey(doc map[string]any, path []string) bool {
+	for _, k := range path[:len(path)-1] {
+		next, ok := doc[k].(map[string]any)
+		if !ok {
+			return false
+		}
+		doc = next
+	}
+	if _, ok := doc[path[len(path)-1]]; !ok {
+		return false
+	}
+	delete(doc, path[len(path)-1])
+	return true
+}
+
 func describe(e *toml.DecodeError) string {
 	msg := strings.TrimPrefix(e.Error(), "toml: ")
 	m := wrongType.FindStringSubmatch(msg)
@@ -144,7 +204,7 @@ func describe(e *toml.DecodeError) string {
 	case typ == "string":
 		want = `a string (in quotes, like "2s")`
 	}
-	return fmt.Sprintf("expected %s, got a %s", want, m[1])
+	return fmt.Sprintf("expected %s, got %s", want, withArticle(m[1]))
 }
 
 type rawConfig struct {
@@ -302,6 +362,14 @@ func (v *validator) convert(r rawConfig) Config {
 		c.Hosts[alias] = h
 	}
 	return c
+}
+
+// withArticle puts "a" or "an" in front of a type name.
+func withArticle(word string) string {
+	if word != "" && strings.ContainsRune("aeiou", rune(word[0])) {
+		return "an " + word
+	}
+	return "a " + word
 }
 
 func sortedKeys[V any](m map[string]V) []string {

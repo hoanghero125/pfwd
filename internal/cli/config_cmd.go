@@ -109,6 +109,8 @@ type validation struct {
 	OK       bool          `json:"ok"`
 	Problems []problemJSON `json:"problems"`
 	Notes    []string      `json:"notes"`
+	// Error is why the file could not be read, if it couldn't.
+	Error string `json:"error,omitempty"`
 }
 
 type problemJSON struct {
@@ -135,6 +137,12 @@ func runConfigValidate(cmd *cobra.Command, _ []string) error {
 			v.Problems = append(v.Problems, problemJSON{Line: p.Line, Col: p.Col, Key: p.Key, Message: p.Msg})
 		}
 	case err != nil:
+		if wantJSON(cmd) {
+			v.Error = err.Error()
+			if werr := writeJSON(cmd.OutOrStdout(), v); werr != nil {
+				return werr
+			}
+		}
 		return err
 	default:
 		v.OK = true
@@ -191,13 +199,13 @@ func runConfigEdit(cmd *cobra.Command, _ []string) error {
 	if created {
 		fmt.Fprintf(cmd.OutOrStdout(), "created %s with the default settings\n", path)
 	}
-	argv, from := editorCommand(os.Getenv, runtime.GOOS)
+	argv, from := editorCommand(os.Getenv, runtime.GOOS, isRegularFile)
 	c := exec.CommandContext(cmd.Context(), argv[0], append(argv[1:], path)...) //nolint:gosec // the editor is the user's own VISUAL or EDITOR
 	c.Stdin, c.Stdout, c.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
 	if err := c.Run(); err != nil {
 		hint := "set VISUAL or EDITOR to your editor"
 		if from != "" {
-			hint = "check " + from + ", or unset it to use the default editor"
+			hint = "check " + from + " (put quotes around a path with spaces), or unset it to use the default editor"
 		}
 		return fmt.Errorf("run the editor %s: %w; %s", argv[0], err, hint)
 	}
@@ -229,9 +237,15 @@ func createConfig(path string) (bool, error) {
 // editorCommand returns the editor to run and the variable it came from
 // ("" for the platform default). Like git, it allows arguments, as in
 // VISUAL="code --wait"; quote a path with spaces.
-func editorCommand(getenv func(string) string, goos string) ([]string, string) {
+func editorCommand(getenv func(string) string, goos string, isFile func(string) bool) ([]string, string) {
 	for _, name := range []string{"VISUAL", "EDITOR"} {
-		if argv := splitCommand(getenv(name)); len(argv) > 0 {
+		v := strings.TrimSpace(getenv(name))
+		if v != "" && isFile(v) {
+			// A path with spaces that nobody quoted, like
+			// C:\Program Files\Sublime Text\subl.exe.
+			return []string{v}, name
+		}
+		if argv := splitCommand(v); len(argv) > 0 {
 			return argv, name
 		}
 	}
@@ -273,4 +287,10 @@ func splitCommand(s string) []string {
 		argv = append(argv, cur.String())
 	}
 	return argv
+}
+
+// isRegularFile reports whether path names an existing regular file.
+func isRegularFile(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
 }

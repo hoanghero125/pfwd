@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/hoanghero125/pfwd/internal/detect"
@@ -180,8 +181,17 @@ func (e *Engine) goOwned(fn func()) {
 // maxNotifyText caps text from the server in notifications.
 const maxNotifyText = 40
 
-// notify tells the desktop about an auto-forward. Process names come from
-// the server, so they are cleaned and cut short.
+// note is one auto-forward waiting to be announced.
+type note struct {
+	remote, local uint16
+	// what is the label or process, cleaned and cut short.
+	what string
+}
+
+// notify tells the desktop about an auto-forward. The first one for a
+// host waits NotifyDelay, and any that arrive meanwhile join its
+// notification, so a server starting several ports at once gives one.
+// Process names come from the server, so they are cleaned and cut short.
 func (e *Engine) notify(host HostID, p detect.RemotePort, f Forward) {
 	if e.o.Notifier == nil {
 		return
@@ -194,19 +204,52 @@ func (e *Engine) notify(host HostID, p detect.RemotePort, f Forward) {
 	if r := []rune(what); len(r) > maxNotifyText {
 		what = string(r[:maxNotifyText-1]) + "…"
 	}
-	title := fmt.Sprintf("Forwarded :%d from %s", p.Port, safetext.Clean(string(host)))
-	body := fmt.Sprintf("localhost:%d now reaches port %d on %s", f.Spec.LocalPort, p.Port, safetext.Clean(string(host)))
-	if what != "" {
-		body = what + ": " + body
+	e.mu.Lock()
+	first := len(e.notes[host]) == 0
+	e.notes[host] = append(e.notes[host], note{remote: p.Port, local: f.Spec.LocalPort, what: what})
+	e.mu.Unlock()
+	if !first {
+		return
 	}
-	n := e.o.Notifier
 	e.goOwned(func() {
+		t := time.NewTimer(e.o.NotifyDelay)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-e.ctx.Done():
+			return
+		}
+		e.mu.Lock()
+		notes := e.notes[host]
+		delete(e.notes, host)
+		e.mu.Unlock()
+		title, body := notification(safetext.Clean(string(host)), notes)
 		ctx, cancel := context.WithTimeout(e.ctx, notifyTimeout)
 		defer cancel()
-		if err := n.Notify(ctx, title, body); err != nil {
+		if err := e.o.Notifier.Notify(ctx, title, body); err != nil {
 			e.log.Debug("notification failed", "err", err)
 		}
 	})
+}
+
+// notification is the title and body announcing notes on host.
+func notification(host string, notes []note) (string, string) {
+	if len(notes) == 1 {
+		n := notes[0]
+		body := fmt.Sprintf("localhost:%d now reaches port %d on %s", n.local, n.remote, host)
+		if n.what != "" {
+			body = n.what + ": " + body
+		}
+		return fmt.Sprintf("Forwarded :%d from %s", n.remote, host), body
+	}
+	parts := make([]string, len(notes))
+	for i, n := range notes {
+		parts[i] = fmt.Sprintf("localhost:%d", n.local)
+		if n.what != "" {
+			parts[i] += " (" + n.what + ")"
+		}
+	}
+	return fmt.Sprintf("Forwarded %d ports from %s", len(notes), host), strings.Join(parts, ", ")
 }
 
 // startProbe checks whether a new forward speaks HTTP or HTTPS, unless
