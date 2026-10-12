@@ -27,9 +27,6 @@ func TestStubsAreNotImplementedYet(t *testing.T) {
 		path string // the command that must report itself, not the root TUI
 	}{
 		{[]string{"stop", "devbox:5432"}, "pfwd stop"},
-		{[]string{"daemon", "start"}, "pfwd daemon start"},
-		{[]string{"daemon", "stop"}, "pfwd daemon stop"},
-		{[]string{"daemon", "status"}, "pfwd daemon status"},
 		{[]string{"attach"}, "pfwd attach"},
 		{[]string{"ui"}, "pfwd ui"},
 		{[]string{"ui", "devbox", "gpu-node"}, "pfwd ui"},
@@ -82,6 +79,7 @@ var badArgs = map[string][]string{
 	"pfwd config validate":       {"extra"},
 	"pfwd daemon":                {"bogus"},
 	"pfwd daemon start":          {"extra"},
+	"pfwd daemon run":            {"extra"},
 	"pfwd daemon status":         {"extra"},
 	"pfwd daemon stop":           {"extra"},
 	"pfwd doctor":                {"a", "b"},

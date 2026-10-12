@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hoanghero125/pfwd/internal/config"
+	"github.com/hoanghero125/pfwd/internal/ipc"
 	"github.com/hoanghero125/pfwd/internal/safetext"
 	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/version"
@@ -79,6 +80,27 @@ func errorLine(err error) string {
 	return "Error: " + safetext.Clean(err.Error()) + "\n"
 }
 
+// ipcExitCode maps the code of a daemon's error to an exit code.
+func ipcExitCode(err error) int {
+	var ie *ipc.Error
+	if !errors.As(err, &ie) {
+		return exitError
+	}
+	switch ie.Code {
+	case ipc.CodeUsage:
+		return exitUsage
+	case ipc.CodeConnect:
+		return exitConnect
+	case ipc.CodeAuth:
+		return exitAuth
+	case ipc.CodeHostKey:
+		return exitHostKey
+	case ipc.CodeBind:
+		return exitBind
+	}
+	return exitError
+}
+
 // exitCode maps an error to the documented exit codes.
 func exitCode(err error) int {
 	switch {
@@ -86,6 +108,8 @@ func exitCode(err error) int {
 		return exitUsage
 	case errors.As(err, new(*bindError)):
 		return exitBind
+	case errors.As(err, new(*ipc.Error)):
+		return ipcExitCode(err)
 	case errors.Is(err, sshx.ErrHostKey):
 		return exitHostKey
 	case errors.Is(err, sshx.ErrAuth):
@@ -130,7 +154,7 @@ user@host. The flags below override the ssh config.`,
 	root.PersistentFlags().Bool("json", false, "print JSON instead of human-readable output")
 	root.PersistentFlags().String("config", "", "`path` of the config file to use, instead of $PFWD_CONFIG or the default that pfwd config path prints")
 	root.AddCommand(newVersionCmd(), newConfigCmd())
-	root.AddCommand(newHostsCmd(&flags), newLsCmd(&flags), newFwdCmd(&flags), newDoctorCmd(&flags))
+	root.AddCommand(newHostsCmd(&flags), newLsCmd(&flags), newFwdCmd(&flags), newDoctorCmd(&flags), newDaemonCmd(&flags))
 	root.AddCommand(stubCmds()...)
 	wireCompletion(root) // after SetOut: cobra captures the writer when it builds the shell commands
 	return root
