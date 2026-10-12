@@ -171,8 +171,11 @@ type Model struct {
 	all    bool
 	picker pickerState
 
-	// creds are credential prompts waiting for the modal.
-	creds []engine.CredentialPrompt
+	// keyPrompts and creds are host-key and credential prompts waiting for
+	// the modal. One opens at a time, so a prompt from another host never
+	// replaces the one the user is answering.
+	keyPrompts []engine.HostKeyPrompt
+	creds      []engine.CredentialPrompt
 
 	// forwards holds every host's forwards.
 	forwards map[string]engine.Forward
@@ -315,8 +318,8 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Update applies a message. A credential prompt waiting in the queue
-// opens as soon as no other modal is open.
+// Update applies a message. A host-key or credential prompt waiting in the
+// queue opens as soon as no other modal is open.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	if nm, ok := next.(Model); ok {
@@ -535,7 +538,7 @@ func (m *Model) applyHostEvent(ev engine.Event) {
 		m.applyForwardChanged(ev.Forward)
 	case engine.HostKeyPrompt:
 		if ev.Host == m.host {
-			m.modal = modalState{kind: modalHostKey, prompt: ev}
+			m.keyPrompts = append(m.keyPrompts, ev)
 		}
 	case engine.CredentialPrompt:
 		if ev.Host == m.host {
@@ -561,9 +564,19 @@ func (m *Model) applyHostEvent(ev engine.Event) {
 // size and never grows, so zeroing it removes every byte typed.
 const maxSecret = 1024
 
-// openQueuedPrompt opens the next credential prompt when no modal is open.
+// openQueuedPrompt opens the next prompt when no modal is open: host keys
+// first, then credentials.
 func (m *Model) openQueuedPrompt() {
-	if m.modal.kind != modalNone || len(m.creds) == 0 {
+	if m.modal.kind != modalNone {
+		return
+	}
+	if len(m.keyPrompts) > 0 {
+		p := m.keyPrompts[0]
+		m.keyPrompts = m.keyPrompts[1:]
+		m.modal = modalState{kind: modalHostKey, prompt: p}
+		return
+	}
+	if len(m.creds) == 0 {
 		return
 	}
 	p := m.creds[0]
@@ -574,6 +587,8 @@ func (m *Model) openQueuedPrompt() {
 // closePrompts drops the host-key and credential prompts of host's
 // session, which ended, zeroing anything typed.
 func (m *Model) closePrompts(host engine.HostID) {
+	m.keyPrompts = slices.DeleteFunc(m.keyPrompts, func(p engine.HostKeyPrompt) bool { return p.Host == host })
+	m.creds = slices.DeleteFunc(m.creds, func(p engine.CredentialPrompt) bool { return p.Host == host })
 	open := (m.modal.kind == modalHostKey && m.modal.prompt.Host == host) ||
 		(m.modal.kind == modalCredential && m.modal.cred.Host == host)
 	if open {

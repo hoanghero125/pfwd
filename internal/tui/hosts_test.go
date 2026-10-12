@@ -170,3 +170,48 @@ func TestPromptFromBackgroundHost(t *testing.T) {
 		t.Errorf("a prompt from the gpu tab didn't show on devbox:\n%s", v)
 	}
 }
+
+// TestHostKeyPromptsQueue: a second host's host-key prompt waits until the
+// first is answered, so the modal never changes under the user's keys.
+func TestHostKeyPromptsQueue(t *testing.T) {
+	m := twoHosts(newFakeEngine(), Options{})
+	devboxReply, gpuReply := make(chan bool, 1), make(chan bool, 1)
+	q := sshx.HostKeyQuestion{Host: "devbox", KeyType: "ssh-ed25519", Fingerprint: "SHA256:devbox"}
+	m = apply(m, engine.NewHostKeyPrompt("devbox", q, devboxReply))
+	q2 := sshx.HostKeyQuestion{Host: "gpu", KeyType: "ssh-ed25519", Fingerprint: "SHA256:gpu"}
+	m = apply(m, engine.NewHostKeyPrompt("gpu", q2, gpuReply))
+	if v := view(m); !strings.Contains(v, "SHA256:devbox") || strings.Contains(v, "SHA256:gpu") {
+		t.Fatalf("the second prompt replaced the first:\n%s", v)
+	}
+	m, _ = press(t, m, "y")
+	select {
+	case ok := <-devboxReply:
+		if !ok {
+			t.Error("y on devbox's key answered no")
+		}
+	default:
+		t.Fatal("devbox's prompt got no answer")
+	}
+	select {
+	case <-gpuReply:
+		t.Fatal("gpu's prompt was answered without being shown")
+	default:
+	}
+	if v := view(m); !strings.Contains(v, "SHA256:gpu") {
+		t.Errorf("gpu's prompt didn't open next:\n%s", v)
+	}
+}
+
+// TestHostKeyPromptWaitsBehindCredential: a host-key prompt doesn't
+// replace a credential modal being typed into.
+func TestHostKeyPromptWaitsBehindCredential(t *testing.T) {
+	m := twoHosts(newFakeEngine(), Options{})
+	cq := sshx.CredentialQuestion{Host: "devbox", Kind: sshx.Password, Prompt: "alice"}
+	m = apply(m, engine.NewCredentialPrompt("devbox", cq, make(chan engine.CredentialAnswer, 1)))
+	m, _ = press(t, m, "h", "i")
+	q := sshx.HostKeyQuestion{Host: "gpu", KeyType: "ssh-ed25519", Fingerprint: "SHA256:gpu"}
+	m = apply(m, engine.NewHostKeyPrompt("gpu", q, make(chan bool, 1)))
+	if v := view(m); !strings.Contains(v, "Password for alice@devbox") || strings.Contains(v, "SHA256:gpu") {
+		t.Errorf("the host-key prompt replaced the password modal:\n%s", v)
+	}
+}
