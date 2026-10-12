@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/netip"
 	"os"
@@ -364,6 +366,49 @@ func TestDialChangedKey(t *testing.T) {
 	}
 	if len(p.questions()) != 0 {
 		t.Error("a changed key must never be offered for confirmation")
+	}
+}
+
+// strayKeyLine is a known_hosts line with a key but no host pattern, as
+// left behind by a bad paste. OpenSSH skips it.
+const strayKeyLine = "AAAAC3NzaC1lZDI1NTE5AAAAIElMpozrYkxUZfvqLhpQevktKwb1mTxqcIBRo26p6kN0"
+
+func TestDialSkipsMalformedKnownHostsLines(t *testing.T) {
+	f := newFixture(t, sshtest.Options{})
+	content := "# comment\n" + strayKeyLine + "\nnot-a-host ssh-ed25519 !!!\n" + f.srv.KnownHostsLine() + "\n"
+	if err := os.WriteFile(f.knownHosts, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.hc.StrictHostKeyChecking = "yes"
+	tmp := t.TempDir()
+	for _, v := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(v, tmp)
+	}
+	var logs bytes.Buffer
+	mustDial(t, f.hc, DialOptions{Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	for _, want := range []string{f.knownHosts + ":2", f.knownHosts + ":3"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("log should warn about %s:\n%s", want, logs.String())
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(tmp, "pfwd-known_hosts-*")); len(left) > 0 {
+		t.Errorf("temporary copies left behind: %v", left)
+	}
+}
+
+func TestDialChangedKeyAfterMalformedLine(t *testing.T) {
+	f := newFixture(t, sshtest.Options{})
+	impostor, _ := ed25519Signer(t)
+	line := fmt.Sprintf("[%s]:%d %s", f.srv.Host(), f.srv.Port(), strings.TrimSpace(string(ssh.MarshalAuthorizedKey(impostor.PublicKey()))))
+	if err := os.WriteFile(f.knownHosts, []byte(strayKeyLine+"\n"+line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Dial(t.Context(), f.hc, DialOptions{Prompter: &fakePrompter{answer: true}, dialAgent: noAgent})
+	if !errors.Is(err, ErrHostKey) {
+		t.Fatalf("err = %v, want ErrHostKey", err)
+	}
+	if !strings.Contains(err.Error(), f.knownHosts+":2") {
+		t.Errorf("message should name %s:2, where the old key is: %v", f.knownHosts, err)
 	}
 }
 

@@ -1,15 +1,18 @@
 package sshx
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/skeema/knownhosts"
 	"golang.org/x/crypto/ssh"
@@ -38,6 +41,9 @@ type hostKeyChecker struct {
 	prompter  HostKeyPrompter
 	acceptNew bool
 	db        *knownhosts.HostKeyDB
+	// names maps a temporary copy of a known_hosts file, read in place of
+	// the file because it had lines that can't be parsed, back to the file.
+	names map[string]string
 	// lookup is the known_hosts name for this host: HostKeyAlias, or
 	// host:port.
 	lookup string
@@ -46,16 +52,16 @@ type hostKeyChecker struct {
 	beforePrompt, afterPrompt func()
 }
 
-func newHostKeyChecker(hc *HostConfig, prompter HostKeyPrompter, acceptNew bool) (*hostKeyChecker, error) {
+func newHostKeyChecker(hc *HostConfig, prompter HostKeyPrompter, acceptNew bool, log *slog.Logger) (*hostKeyChecker, error) {
 	var files []string
 	for _, f := range hc.KnownHostsFiles {
 		if _, err := os.Stat(f); err == nil {
 			files = append(files, f)
 		}
 	}
-	db, err := knownhosts.NewDB(files...)
+	db, names, err := readKnownHosts(files, log)
 	if err != nil {
-		return nil, fmt.Errorf("read known_hosts: %w; fix or remove the malformed line", err)
+		return nil, fmt.Errorf("read known_hosts: %w; check that the file is readable", err)
 	}
 	lookup := net.JoinHostPort(hc.HostName, strconv.Itoa(hc.Port))
 	if hc.HostKeyAlias != "" {
@@ -63,9 +69,89 @@ func newHostKeyChecker(hc *HostConfig, prompter HostKeyPrompter, acceptNew bool)
 		lookup = net.JoinHostPort(hc.HostKeyAlias, "22")
 	}
 	return &hostKeyChecker{
-		hc: hc, prompter: prompter, acceptNew: acceptNew, db: db, lookup: lookup,
+		hc: hc, prompter: prompter, acceptNew: acceptNew, db: db, names: names, lookup: lookup,
 		beforePrompt: func() {}, afterPrompt: func() {},
 	}, nil
+}
+
+// readKnownHosts reads the known_hosts files. Like OpenSSH, it skips a line
+// it can't parse, with a warning in the log, instead of refusing to connect.
+// A file with such lines is read from a temporary copy that has them
+// blanked, so line numbers still match the file; names maps each copy back
+// to its file. The copies are removed before it returns.
+func readKnownHosts(files []string, log *slog.Logger) (*knownhosts.HostKeyDB, map[string]string, error) {
+	names := map[string]string{}
+	defer func() {
+		for tmp := range names {
+			_ = os.Remove(tmp)
+		}
+	}()
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		p, err := parsableKnownHosts(f, log)
+		if err != nil {
+			return nil, nil, err
+		}
+		if p != f {
+			names[p] = f
+		}
+		paths = append(paths, p)
+	}
+	db, err := knownhosts.NewDB(paths...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return db, names, nil
+}
+
+// parsableKnownHosts returns f when x/crypto parses all of it, else the
+// path of a temporary copy with each line it rejects blanked and logged.
+func parsableKnownHosts(f string, log *slog.Logger) (string, error) {
+	_, err := xknownhosts.New(f)
+	if err == nil {
+		return f, nil
+	}
+	data, rerr := os.ReadFile(f)
+	if rerr != nil {
+		return "", rerr
+	}
+	tmp, cerr := os.CreateTemp("", "pfwd-known_hosts-*")
+	if cerr != nil {
+		return "", cerr
+	}
+	name := tmp.Name()
+	_ = tmp.Close()
+	lines := bytes.Split(data, []byte("\n"))
+	for src := f; err != nil; src = name {
+		n, why, ok := rejectedLine(err, src)
+		if !ok || n > len(lines) || len(lines[n-1]) == 0 {
+			_ = os.Remove(name)
+			return "", err
+		}
+		log.Warn("skipping a known_hosts line that can't be parsed", "at", fmt.Sprintf("%s:%d", f, n), "err", why)
+		lines[n-1] = nil
+		if werr := os.WriteFile(name, bytes.Join(lines, []byte("\n")), 0o600); werr != nil { //nolint:gosec // name comes from os.CreateTemp
+			_ = os.Remove(name)
+			return "", werr
+		}
+		_, err = xknownhosts.New(name)
+	}
+	return name, nil
+}
+
+// rejectedLine reads the line number and reason from x/crypto's
+// "knownhosts: <file>:<line>: <reason>" parse error.
+func rejectedLine(err error, file string) (int, string, bool) {
+	rest, ok := strings.CutPrefix(err.Error(), "knownhosts: "+file+":")
+	if !ok {
+		return 0, "", false
+	}
+	num, why, ok := strings.Cut(rest, ": ")
+	n, cerr := strconv.Atoi(num)
+	if !ok || cerr != nil || n < 1 {
+		return 0, "", false
+	}
+	return n, why, true
 }
 
 // algorithms returns the host key algorithms known for this host, so the
@@ -119,7 +205,11 @@ func (c *hostKeyChecker) changedError(err error, key ssh.PublicKey) error {
 	where := "known_hosts"
 	var keyErr *xknownhosts.KeyError
 	if errors.As(err, &keyErr) && len(keyErr.Want) > 0 {
-		where = fmt.Sprintf("%s:%d", keyErr.Want[0].Filename, keyErr.Want[0].Line)
+		file := keyErr.Want[0].Filename
+		if orig, ok := c.names[file]; ok {
+			file = orig
+		}
+		where = fmt.Sprintf("%s:%d", file, keyErr.Want[0].Line)
 	}
 	name := knownhosts.Normalize(c.lookup)
 	return &Error{Kind: ErrHostKey, Err: err, Msg: fmt.Sprintf(
