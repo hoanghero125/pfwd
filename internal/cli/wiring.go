@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/hoanghero125/pfwd/internal/desktop"
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/sshx"
+	"github.com/hoanghero125/pfwd/internal/state"
 	"github.com/hoanghero125/pfwd/internal/tui"
 )
 
@@ -18,28 +20,35 @@ const minInterval = 500 * time.Millisecond
 
 // applyTo applies the flags that override the config, and returns the
 // auto-forward override for the host (nil when neither --auto nor
-// --no-auto is given).
-func (f *rootFlags) applyTo(cfg *config.Config) (*bool, error) {
-	if f.bind != "" {
+// --no-auto is given). changed reports whether a flag was given, so an
+// explicit --auto=false or --interval 0 counts, rather than looking like
+// the flag's default.
+func (f *rootFlags) applyTo(cfg *config.Config, changed func(name string) bool) (*bool, error) {
+	if changed("bind") {
 		if a, err := netip.ParseAddr(f.bind); f.bind != "localhost" && (err != nil || a.Zone() != "") {
 			return nil, fmt.Errorf("invalid --bind %q: use an IP address such as 127.0.0.1 or 0.0.0.0", f.bind)
 		}
 		cfg.Forward.Bind = f.bind
 	}
-	if f.interval != 0 {
+	if changed("interval") {
 		if f.interval < minInterval {
 			return nil, fmt.Errorf("invalid --interval %v: use 500ms or more", f.interval)
 		}
 		cfg.Detect.Interval = f.interval
 	}
-	switch {
-	case f.auto && f.noAuto:
-		return nil, errors.New("--auto and --no-auto contradict each other: pick one")
-	case f.auto, f.noAuto:
+	var auto *bool
+	if changed("auto") {
 		on := f.auto
-		return &on, nil
+		auto = &on
 	}
-	return nil, nil
+	if changed("no-auto") {
+		on := !f.noAuto
+		if auto != nil && *auto != on {
+			return nil, errors.New("--auto and --no-auto contradict each other: pick one")
+		}
+		auto = &on
+	}
+	return auto, nil
 }
 
 // engineOptions returns the engine's settings from the config. auto, when
@@ -50,7 +59,8 @@ func engineOptions(cfg config.Config, auto *bool, n engine.Notifier) engine.Opti
 		Interval: cfg.Detect.Interval,
 		Debounce: cfg.Detect.DebounceScans,
 		Settings: func(host engine.HostID) engine.HostSettings {
-			s := engine.HostSettings{Auto: cfg.AutoFor(string(host)), Filter: cfg.FilterFor(string(host))}
+			s := engine.HostSettings{Auto: cfg.AutoFor(string(host)), Filter: cfg.FilterFor(string(host)),
+				Forwards: configForwards(cfg.Hosts[string(host)].Forwards)}
 			if auto != nil {
 				s.Auto = *auto
 			}
@@ -62,8 +72,45 @@ func engineOptions(cfg config.Config, auto *bool, n engine.Notifier) engine.Opti
 		BindAddr:   cfg.Forward.Bind,
 		MaxConns:   cfg.Forward.MaxConns,
 		Notifier:   n,
+		MaxBackoff: cfg.SSH.ReconnectMaxBackoff,
+		AutoExpire: cfg.Forward.AutoExpire,
 	}
 	return o
+}
+
+// configForwards turns a host's config forwards into engine specs. Remote
+// and dynamic ones wait for v0.4.0; config validate notes them.
+func configForwards(rules []config.ForwardRule) []engine.ForwardSpec {
+	var specs []engine.ForwardSpec
+	for _, r := range rules {
+		if r.Kind != "local" {
+			continue
+		}
+		specs = append(specs, engine.ForwardSpec{Kind: engine.Local, BindAddr: r.Bind, LocalPort: r.Local, RemoteHost: r.RemoteHost, RemotePort: r.Remote})
+	}
+	return specs
+}
+
+// stateStore returns where forwards are remembered, or nil when
+// forward.restore is off or there is no state directory.
+func stateStore(cfg config.Config, logger *slog.Logger) *state.Store {
+	if !cfg.Forward.Restore {
+		return nil
+	}
+	path, err := config.StatePath()
+	if err != nil {
+		if logger != nil {
+			logger.Warn("not remembering forwards", "err", err)
+		}
+		return nil
+	}
+	return state.Open(path, state.Options{Logger: logger})
+}
+
+// keepaliveFor is the ssh config's ServerAlive settings when it sets them,
+// else the config file's.
+func keepaliveFor(hc *sshx.HostConfig, cfg config.Config) sshx.Keepalive {
+	return hc.KeepaliveOr(sshx.Keepalive{Interval: cfg.SSH.KeepaliveInterval, CountMax: cfg.SSH.KeepaliveCountMax})
 }
 
 // tuiOptions returns the TUI's settings from the config. getenv and goos

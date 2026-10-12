@@ -127,19 +127,53 @@ func TestSSHSettingsFromConfig(t *testing.T) {
 	}
 }
 
+// given reports the named flags as set on the command line.
+func given(names ...string) func(string) bool {
+	return func(name string) bool {
+		for _, n := range names {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 func TestFlagsOverrideConfig(t *testing.T) {
 	f := rootFlags{bind: "0.0.0.0", interval: time.Second, auto: true}
 	cfg := config.Default()
-	auto, err := f.applyTo(&cfg)
+	auto, err := f.applyTo(&cfg, given("bind", "interval", "auto"))
 	if err != nil || cfg.Forward.Bind != "0.0.0.0" || cfg.Detect.Interval != time.Second || auto == nil || !*auto {
 		t.Errorf("applyTo = %v, %v; config bind %q, interval %v", auto, err, cfg.Forward.Bind, cfg.Detect.Interval)
 	}
 	f = rootFlags{noAuto: true}
-	if auto, err := f.applyTo(&cfg); err != nil || auto == nil || *auto {
+	if auto, err := f.applyTo(&cfg, given("no-auto")); err != nil || auto == nil || *auto {
 		t.Errorf("--no-auto = %v, %v", auto, err)
 	}
-	if auto, _ := (&rootFlags{}).applyTo(&cfg); auto != nil {
+	if auto, _ := (&rootFlags{}).applyTo(&cfg, given()); auto != nil {
 		t.Errorf("no flag gave auto %v", *auto)
+	}
+}
+
+func TestExplicitFlagValuesCount(t *testing.T) {
+	cfg := config.Default()
+	if auto, err := (&rootFlags{auto: false}).applyTo(&cfg, given("auto")); err != nil || auto == nil || *auto {
+		t.Errorf("--auto=false = %v, %v; want auto off", auto, err)
+	}
+	if auto, err := (&rootFlags{noAuto: false}).applyTo(&cfg, given("no-auto")); err != nil || auto == nil || !*auto {
+		t.Errorf("--no-auto=false = %v, %v; want auto on", auto, err)
+	}
+	if _, err := (&rootFlags{auto: true, noAuto: true}).applyTo(&cfg, given("auto", "no-auto")); err == nil {
+		t.Error("--auto --no-auto was accepted")
+	}
+	if _, err := (&rootFlags{auto: true, noAuto: false}).applyTo(&cfg, given("auto", "no-auto")); err != nil {
+		t.Errorf("--auto --no-auto=false agree, but: %v", err)
+	}
+	if _, err := (&rootFlags{interval: 0}).applyTo(&cfg, given("interval")); err == nil {
+		t.Error("--interval 0 was accepted")
+	}
+	if _, err := (&rootFlags{bind: ""}).applyTo(&cfg, given("bind")); err == nil {
+		t.Error(`--bind "" was accepted`)
 	}
 }
 
@@ -156,5 +190,61 @@ func TestBadFlagValuesAreUsageErrors(t *testing.T) {
 		if code != 2 || !strings.Contains(errOut, tc.want) {
 			t.Errorf("pfwd %v: code %d, stderr %q; want 2 naming %s", tc.args, code, errOut, tc.want)
 		}
+	}
+}
+
+func TestEngineOptionsResilience(t *testing.T) {
+	cfg := config.Default()
+	cfg.SSH.ReconnectMaxBackoff = 45 * time.Second
+	cfg.Forward.AutoExpire = 5 * time.Minute
+	rules := []config.ForwardRule{}
+	for _, raw := range []string{"5432", "0.0.0.0:15432:db.internal:5432", "-D 1080"} {
+		r, err := config.ParseForward(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, r)
+	}
+	cfg.Hosts = map[string]config.Host{"devbox": {Forwards: rules}}
+	o := engineOptions(cfg, nil, nil)
+	if o.MaxBackoff != 45*time.Second || o.AutoExpire != 5*time.Minute {
+		t.Errorf("MaxBackoff %v, AutoExpire %v; want 45s and 5m", o.MaxBackoff, o.AutoExpire)
+	}
+	got := o.Settings("devbox").Forwards
+	want := []engine.ForwardSpec{
+		{Kind: engine.Local, LocalPort: 5432, RemotePort: 5432},
+		{Kind: engine.Local, BindAddr: "0.0.0.0", LocalPort: 15432, RemoteHost: "db.internal", RemotePort: 5432},
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("config forwards = %+v, want %+v (the -D entry waits for v0.4.0)", got, want)
+	}
+	if fs := o.Settings("gpu").Forwards; len(fs) != 0 {
+		t.Errorf("a host without forwards got %+v", fs)
+	}
+}
+
+func TestStateStoreFollowsRestore(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	t.Setenv("APPDATA", dir)
+	cfg := config.Default()
+	if s := stateStore(cfg, nil); s == nil {
+		t.Error("forward.restore = true remembers nothing")
+	}
+	cfg.Forward.Restore = false
+	if s := stateStore(cfg, nil); s != nil {
+		t.Error("forward.restore = false still remembers forwards")
+	}
+}
+
+func TestKeepaliveFromConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.SSH.KeepaliveInterval, cfg.SSH.KeepaliveCountMax = 20*time.Second, 4
+	if k := keepaliveFor(&sshx.HostConfig{}, cfg); k.Interval != 20*time.Second || k.CountMax != 4 {
+		t.Errorf("keepalive = %+v, want the config's 20s/4", k)
+	}
+	hc := &sshx.HostConfig{ServerAliveInterval: 5 * time.Second, ServerAliveCountMax: 2}
+	if k := keepaliveFor(hc, cfg); k.Interval != 5*time.Second || k.CountMax != 2 {
+		t.Errorf("keepalive = %+v, want the ssh config's 5s/2", k)
 	}
 }

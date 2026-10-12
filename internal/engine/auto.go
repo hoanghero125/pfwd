@@ -1,11 +1,11 @@
 package engine
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/hoanghero125/pfwd/internal/detect"
@@ -24,6 +24,13 @@ type hostState struct {
 	// declined ports are never auto-forwarded again this run: the user
 	// stopped them, or auto-forwarding them failed.
 	declined map[uint16]bool
+	// restored is set once the host's config and remembered forwards were
+	// created this run; loaded once state.json was read for it, which must
+	// happen before pfwd writes the host's entry.
+	restored, loaded bool
+	// unrestored are remembered forwards that couldn't be created this
+	// run. They stay in state.json, so a busy port doesn't lose a pin.
+	unrestored []ForwardSpec
 }
 
 // errAlreadyForwarded tells autoForward that a forward appeared meanwhile.
@@ -90,6 +97,9 @@ func (e *Engine) portsUpdated(host HostID, hs *hostState, u detect.Update) {
 		added[i] = p.Port
 	}
 	e.emit(PortsChanged{Host: host, Strategy: u.Strategy, OS: u.OS, Ports: ports, Added: added, Removed: u.Removed})
+	if u.Strategy != detect.None {
+		e.applyPorts(host, hs)
+	}
 	for _, p := range u.Added {
 		e.autoForward(host, hs, p)
 	}
@@ -135,24 +145,7 @@ func (e *Engine) autoForward(host HostID, hs *hostState, p detect.RemotePort) {
 		return
 	}
 	spec := ForwardSpec{RemotePort: p.Port, LocalPort: p.Port, RemoteHost: detect.Target(p.Addrs), Label: e.label(p), Auto: true}
-	f, err := e.Forward(host, spec)
-	var inUse *forward.PortInUseError
-	if errors.As(err, &inUse) {
-		var retry bool
-		switch e.o.OnConflict {
-		case ConflictFail:
-			retry = false
-		case ConflictRandom:
-			spec.LocalPort, err = forward.FreePort(cmp.Or(spec.BindAddr, e.o.BindAddr))
-			retry = err == nil
-		default:
-			spec.LocalPort = inUse.Suggested
-			retry = inUse.Suggested != 0
-		}
-		if retry {
-			f, err = e.Forward(host, spec)
-		}
-	}
+	f, err := e.forwardFollowingConflict(host, spec)
 	switch {
 	case errors.Is(err, errAlreadyForwarded):
 		return
@@ -191,8 +184,17 @@ func (e *Engine) goOwned(fn func()) {
 // maxNotifyText caps text from the server in notifications.
 const maxNotifyText = 40
 
-// notify tells the desktop about an auto-forward. Process names come from
-// the server, so they are cleaned and cut short.
+// note is one auto-forward waiting to be announced.
+type note struct {
+	remote, local uint16
+	// what is the label or process, cleaned and cut short.
+	what string
+}
+
+// notify tells the desktop about an auto-forward. The first one for a
+// host waits NotifyDelay, and any that arrive meanwhile join its
+// notification, so a server starting several ports at once gives one.
+// Process names come from the server, so they are cleaned and cut short.
 func (e *Engine) notify(host HostID, p detect.RemotePort, f Forward) {
 	if e.o.Notifier == nil {
 		return
@@ -205,19 +207,52 @@ func (e *Engine) notify(host HostID, p detect.RemotePort, f Forward) {
 	if r := []rune(what); len(r) > maxNotifyText {
 		what = string(r[:maxNotifyText-1]) + "…"
 	}
-	title := fmt.Sprintf("Forwarded :%d from %s", p.Port, safetext.Clean(string(host)))
-	body := fmt.Sprintf("localhost:%d now reaches port %d on %s", f.Spec.LocalPort, p.Port, safetext.Clean(string(host)))
-	if what != "" {
-		body = what + ": " + body
+	e.mu.Lock()
+	first := len(e.notes[host]) == 0
+	e.notes[host] = append(e.notes[host], note{remote: p.Port, local: f.Spec.LocalPort, what: what})
+	e.mu.Unlock()
+	if !first {
+		return
 	}
-	n := e.o.Notifier
 	e.goOwned(func() {
+		t := time.NewTimer(e.o.NotifyDelay)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-e.ctx.Done():
+			return
+		}
+		e.mu.Lock()
+		notes := e.notes[host]
+		delete(e.notes, host)
+		e.mu.Unlock()
+		title, body := notification(safetext.Clean(string(host)), notes)
 		ctx, cancel := context.WithTimeout(e.ctx, notifyTimeout)
 		defer cancel()
-		if err := n.Notify(ctx, title, body); err != nil {
+		if err := e.o.Notifier.Notify(ctx, title, body); err != nil {
 			e.log.Debug("notification failed", "err", err)
 		}
 	})
+}
+
+// notification is the title and body announcing notes on host.
+func notification(host string, notes []note) (string, string) {
+	if len(notes) == 1 {
+		n := notes[0]
+		body := fmt.Sprintf("localhost:%d now reaches port %d on %s", n.local, n.remote, host)
+		if n.what != "" {
+			body = n.what + ": " + body
+		}
+		return fmt.Sprintf("Forwarded :%d from %s", n.remote, host), body
+	}
+	parts := make([]string, len(notes))
+	for i, n := range notes {
+		parts[i] = fmt.Sprintf("localhost:%d", n.local)
+		if n.what != "" {
+			parts[i] += " (" + n.what + ")"
+		}
+	}
+	return fmt.Sprintf("Forwarded %d ports from %s", len(notes), host), strings.Join(parts, ", ")
 }
 
 // startProbe checks whether a new forward speaks HTTP or HTTPS, unless

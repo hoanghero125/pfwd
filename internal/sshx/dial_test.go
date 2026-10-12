@@ -501,18 +501,6 @@ func TestDialHandshakeTimeout(t *testing.T) {
 	}
 }
 
-func TestDialProxyUnsupported(t *testing.T) {
-	for _, hc := range []*HostConfig{
-		{Alias: "a", HostName: "a", Port: 22, ProxyJump: "bastion"},
-		{Alias: "a", HostName: "a", Port: 22, ProxyCommand: "nc %h %p"},
-	} {
-		_, err := Dial(t.Context(), hc, DialOptions{dialAgent: noAgent})
-		if !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "v0.3.0") {
-			t.Errorf("err = %v, want ErrUnsupported naming v0.3.0", err)
-		}
-	}
-}
-
 func TestConnStartStreams(t *testing.T) {
 	ended := make(chan struct{})
 	f := newFixture(t, sshtest.Options{Exec: func(ctx context.Context, _ string, stdout io.Writer) int {
@@ -654,16 +642,16 @@ func TestDialPasswordOnlyServer(t *testing.T) {
 		t.Fatalf("err = %v, want ErrAuth", err)
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "password") || !strings.Contains(msg, "v0.3.0") || strings.Contains(msg, "ssh-add") {
-		t.Errorf("message should say the server wants a password and when pfwd supports it, not suggest ssh-add: %v", err)
+	if !strings.Contains(msg, "password") || strings.Contains(msg, "v0.3.0") || strings.Contains(msg, "ssh-add") {
+		t.Errorf("message should say the server wants a password, without a version promise or ssh-add: %v", err)
 	}
 }
 
 func TestDialOneTimeCodeServer(t *testing.T) {
 	hc := startKeylessServer(t, sshtest.Options{OneTimeCode: "123456"})
 	_, err := Dial(t.Context(), hc, DialOptions{dialAgent: noAgent})
-	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "one-time code") || !strings.Contains(err.Error(), "v0.3.0") {
-		t.Errorf("err = %v, want ErrAuth naming the one-time code and v0.3.0", err)
+	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "one-time code") || strings.Contains(err.Error(), "v0.3.0") {
+		t.Errorf("err = %v, want ErrAuth naming the one-time code, without a version promise", err)
 	}
 }
 
@@ -838,5 +826,24 @@ func TestDialNoUserKnownHostsFile(t *testing.T) {
 	mustDial(t, f.hc, DialOptions{AcceptNew: true})
 	if data, _ := os.ReadFile(global); len(data) != 0 {
 		t.Errorf("the global known_hosts was written: %q", data)
+	}
+}
+
+func TestHostKeyQuestionSaysWhetherItSaves(t *testing.T) {
+	f := newFixture(t, sshtest.Options{})
+	f.hc.KnownHostsFiles = []string{filepath.Join(t.TempDir(), "known_hosts")}
+	p := &fakePrompter{answer: true}
+	mustDial(t, f.hc, DialOptions{Prompter: p})
+	if qs := p.questions(); len(qs) != 1 || !qs[0].Saves {
+		t.Errorf("questions = %+v, want one that saves to known_hosts", qs)
+	}
+
+	f2 := newFixture(t, sshtest.Options{})
+	f2.hc.KnownHostsFiles = nil
+	f2.hc.NoUserKnownHosts = true
+	p2 := &fakePrompter{answer: true}
+	mustDial(t, f2.hc, DialOptions{Prompter: p2})
+	if qs := p2.questions(); len(qs) != 1 || qs[0].Saves {
+		t.Errorf("questions = %+v, want one that trusts for this connection only", qs)
 	}
 }

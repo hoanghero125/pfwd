@@ -4,7 +4,7 @@ version: "2"
 
 run:
   relative-path-mode: gomod
-  build-tags: [e2e] # lint the end-to-end tests too
+  build-tags: [e2e, soak] # lint the end-to-end and soak tests too
   modules-download-mode: readonly # fail instead of silently editing go.mod/go.sum
 
 linters:

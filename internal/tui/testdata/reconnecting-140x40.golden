@@ -1,0 +1,40 @@
+ pfwd  devbox ◐ reconnecting in 4s                                                                                        auto: on   ? help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  STATE   REMOTE  LOCAL           PROCESS                                 LABEL             CONN TRAFFIC
+▶ ◌ pause :5173   localhost:5173  disconnected                            Vite http         2    —
+  ◌ pause :8000   localhost:8000  port closed                                               0    —
+  ◌ pause :8888   localhost:8888  disconnected                            Jupyter http pin  0    —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ✗ Lost the connection to devbox; reconnecting
+ c reconnect now  x stop retrying  L log  ? help  q quit

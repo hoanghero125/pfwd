@@ -2,8 +2,8 @@
 --------------------------------------------------------------------------------
   STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
 > * fwd   :5173   localhost:5173  node         Vite http    2    v12K/s ^1.0K/s
-  x fail  :8000   localhost:8000  disconnected              0    -
-  * fwd   :8888   localhost:8888  jupyter-lab  Jupyter http 0    v0 ^0
+  o pause :8000   localhost:8000  port closed               0    -
+  * fwd   :8888   localhost:8888  jupyter-lab  Jupyter pin  0    v0 ^0
   ------------------------- detected, not forwarded --------------------------
   -       :6379   -               redis-server Redis        -    -
   -       :9090   -               ?            Prometheus   -    -
@@ -21,4 +21,4 @@
 
 - 1 ignored hidden, h shows ----------------------------------------------------
  + Forwarded :5173 to localhost:5173
- enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit
+ enter stop  o open  y copy  p pin  a auto  / filter  L log  ? help  q quit

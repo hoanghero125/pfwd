@@ -51,6 +51,10 @@ type HostConfig struct {
 	HostKeyAlias          string
 	// ConnectTimeout is 0 when unset; Dial then uses its own default.
 	ConnectTimeout time.Duration
+	// ServerAliveInterval and ServerAliveCountMax are 0 when unset; see
+	// KeepaliveOr.
+	ServerAliveInterval time.Duration
+	ServerAliveCountMax int
 	// ProxyJump and ProxyCommand are "" when unset or "none".
 	ProxyJump    string
 	ProxyCommand string
@@ -64,6 +68,8 @@ type Overrides struct {
 	Identities []string
 	// ConfigFile replaces ~/.ssh/config, like ssh -F.
 	ConfigFile string
+	// Jump replaces ProxyJump (and turns ProxyCommand off), like ssh -J.
+	Jump string
 }
 
 // Env holds what config resolution needs from the machine, so tests can
@@ -243,6 +249,7 @@ var fileKeys = []string{
 	"hostname", "user", "port", "identitiesonly", "identityagent", "proxyjump",
 	"proxycommand", "stricthostkeychecking", "hostkeyalias", "connecttimeout",
 	"userknownhostsfile", "globalknownhostsfile", "hashknownhosts",
+	"serveraliveinterval", "serveralivecountmax",
 }
 
 var defaultIdentityFiles = []string{
@@ -424,8 +431,17 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 	if n, err := strconv.Atoi(first("connecttimeout")); err == nil && n > 0 {
 		hc.ConnectTimeout = time.Duration(n) * time.Second
 	}
+	if n, err := strconv.Atoi(first("serveraliveinterval")); err == nil && n > 0 {
+		hc.ServerAliveInterval = time.Duration(n) * time.Second
+	}
+	if n, err := strconv.Atoi(first("serveralivecountmax")); err == nil && n > 0 {
+		hc.ServerAliveCountMax = n
+	}
 	hc.ProxyJump = noneToEmpty(first("proxyjump"))
 	hc.ProxyCommand = noneToEmpty(first("proxycommand"))
+	if o.Jump != "" {
+		hc.ProxyJump, hc.ProxyCommand = o.Jump, ""
+	}
 	return hc, nil
 }
 

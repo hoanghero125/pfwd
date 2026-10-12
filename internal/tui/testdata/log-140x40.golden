@@ -6,7 +6,7 @@
   09:00:00  ✓ Forwarded :8888 to localhost:8888
   09:00:00  :5173 speaks http
   09:00:00  :8888 speaks http
-  09:00:00  ✗ :8000: disconnected
+  09:00:00  ✓ Forwarded :8000 to localhost:8000 (auto)
   09:00:00  New port :8080 (python3)
   09:00:00  Port :6379 closed
   09:00:00  Port :9090 closed

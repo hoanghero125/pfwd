@@ -123,7 +123,7 @@ func newEngineWith(t *testing.T, o Options) *Engine {
 }
 
 func dialTo(c *fakeConn) DialFunc {
-	return func(context.Context, HostID, sshx.HostKeyPrompter) (Conn, error) { return c, nil }
+	return func(context.Context, HostID, Prompts) (Conn, error) { return c, nil }
 }
 
 // next returns the next event matching pred, failing after 5 seconds.
@@ -212,7 +212,7 @@ func TestConnectTwiceIsANoOp(t *testing.T) {
 	dials := 0
 	var mu sync.Mutex
 	c := newFakeConn()
-	e := newEngine(t, func(context.Context, HostID, sshx.HostKeyPrompter) (Conn, error) {
+	e := newEngine(t, func(context.Context, HostID, Prompts) (Conn, error) {
 		mu.Lock()
 		dials++
 		mu.Unlock()
@@ -230,7 +230,7 @@ func TestConnectTwiceIsANoOp(t *testing.T) {
 
 func TestConnectFailure(t *testing.T) {
 	authErr := &sshx.Error{Kind: sshx.ErrAuth, Msg: "authentication to devbox failed"}
-	e := newEngine(t, func(context.Context, HostID, sshx.HostKeyPrompter) (Conn, error) { return nil, authErr })
+	e := newEngine(t, func(context.Context, HostID, Prompts) (Conn, error) { return nil, authErr })
 	e.Connect("devbox")
 	failed := next(t, e, func(s SessionChanged) bool { return s.State == SessionFailed })
 	if !errors.Is(failed.Err, sshx.ErrAuth) {
@@ -244,7 +244,7 @@ func TestConnectFailure(t *testing.T) {
 func TestHostKeyPromptRoundTrip(t *testing.T) {
 	answer := make(chan bool, 1)
 	c := newFakeConn()
-	e := newEngine(t, func(ctx context.Context, _ HostID, p sshx.HostKeyPrompter) (Conn, error) {
+	e := newEngine(t, func(ctx context.Context, _ HostID, p Prompts) (Conn, error) {
 		ok, err := p.ConfirmHostKey(ctx, sshx.HostKeyQuestion{Host: "devbox", KeyType: "ssh-ed25519", Fingerprint: "SHA256:abc"})
 		if err != nil {
 			return nil, err
@@ -391,35 +391,6 @@ func TestStopRemovesAndEmitsStopped(t *testing.T) {
 	}
 }
 
-func TestSessionDropFailsForwards(t *testing.T) {
-	c := newFakeConn()
-	e := newEngine(t, dialTo(c))
-	connected(t, e, "devbox")
-	local := freePort(t)
-	f, err := e.Forward("devbox", ForwardSpec{LocalPort: local, RemotePort: 80})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.end(errors.New("read tcp: connection reset by peer"))
-	lost := next(t, e, func(s SessionChanged) bool { return s.State == SessionFailed })
-	if !errors.Is(lost.Err, sshx.ErrConnect) || !strings.Contains(lost.Err.Error(), "devbox") {
-		t.Errorf("session error = %v, want ErrConnect naming the host", lost.Err)
-	}
-	failed := next(t, e, func(ch ForwardChanged) bool { return ch.Forward.ID == f.ID && ch.Forward.State == Failed })
-	if failed.Forward.Err == nil {
-		t.Error("failed forward has no error")
-	}
-	if fs := e.Forwards(); len(fs) != 1 || fs[0].State != Failed {
-		t.Errorf("Forwards = %+v, want the failed forward kept until stopped", fs)
-	}
-	if _, err := e.Forward("devbox", ForwardSpec{LocalPort: freePort(t), RemotePort: 80}); err == nil {
-		t.Error("Forward after the session dropped succeeded")
-	}
-	if err := e.Stop(f.ID); err != nil {
-		t.Errorf("Stop on a failed forward: %v", err)
-	}
-}
-
 func TestProbeErrorReported(t *testing.T) {
 	c := newFakeConn()
 	c.probeErr = errors.New("exec request denied")
@@ -449,7 +420,7 @@ func TestCloseIsIdempotentAndClosesEvents(t *testing.T) {
 
 func TestCloseWhileDialing(t *testing.T) {
 	started := make(chan struct{})
-	e := New(Options{Dial: func(ctx context.Context, _ HostID, _ sshx.HostKeyPrompter) (Conn, error) {
+	e := New(Options{Dial: func(ctx context.Context, _ HostID, _ Prompts) (Conn, error) {
 		close(started)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -467,7 +438,7 @@ func TestStateStrings(t *testing.T) {
 			t.Errorf("%d = %q, want %q", s, s.String(), want)
 		}
 	}
-	for s, want := range map[SessionState]string{Connecting: "connecting", Connected: "connected", SessionFailed: "failed", Closed: "closed"} {
+	for s, want := range map[SessionState]string{Connecting: "connecting", Connected: "connected", SessionFailed: "failed", Closed: "closed", Reconnecting: "reconnecting"} {
 		if s.String() != want {
 			t.Errorf("%d = %q, want %q", s, s.String(), want)
 		}

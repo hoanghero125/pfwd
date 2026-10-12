@@ -18,6 +18,7 @@ Thanks for helping. Before you change an area, read its package doc comment and 
 | `make test` | Runs `go test -race ./...` |
 | `make lint` | Banned-call check, golangci-lint (with staticcheck), govulncheck |
 | `make e2e` | End-to-end tests against a real sshd in Docker (needs Docker with Compose) |
+| `make soak` | An hour of forwards kept up through connection drops, against the same sshd; nightly CI runs it. `PFWD_SOAK_DURATION=3m PFWD_SOAK_DROP_EVERY=20s make soak` is a quick local run |
 | `make snapshot` | GoReleaser build of every platform into `dist/` |
 
 ## Making a change

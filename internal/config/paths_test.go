@@ -36,3 +36,14 @@ func TestStateDir(t *testing.T) {
 		t.Error("stateDir without a home directory succeeded")
 	}
 }
+
+func TestStatePath(t *testing.T) {
+	dir, err := StateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := StatePath()
+	if err != nil || p != filepath.Join(dir, "state.json") {
+		t.Errorf("StatePath = %q, %v; want state.json in %s", p, err, dir)
+	}
+}

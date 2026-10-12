@@ -10,6 +10,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -29,29 +31,60 @@ type DialOptions struct {
 	AcceptNew bool
 	// Logger receives debug details; nil discards them.
 	Logger *slog.Logger
+	// Credentials is asked for key passphrases, passwords and
+	// keyboard-interactive answers. Nil makes those logins fail with a
+	// message saying what the server wanted.
+	Credentials CredentialPrompter
+	// Keys keeps decrypted keys and passwords between Dials of the same
+	// host, so a reconnect doesn't ask again. Nil keeps nothing.
+	Keys *KeyCache
+	// Keepalive sends keepalive@openssh.com requests and drops the
+	// connection when they go unanswered; the zero value turns it off.
+	Keepalive Keepalive
+
+	// Resolve looks up a ProxyJump hop ("host" or "user@host") in the ssh
+	// config. Without it, a host with ProxyJump can't be reached.
+	Resolve func(ctx context.Context, target string) (*HostConfig, error)
 
 	// dialAgent replaces openAgent in tests.
 	dialAgent func(*HostConfig) (io.ReadWriteCloser, error)
 }
 
-// Conn is an authenticated SSH connection.
+// Conn is an authenticated SSH connection. Close it when done, even after
+// Wait has returned: Close also stops its keepalive goroutine.
 type Conn struct {
 	client *ssh.Client
 	alias  string // for error messages
+	log    *slog.Logger
+
+	kaCancel context.CancelFunc
+	kaWG     sync.WaitGroup
+	// reason says why pfwd dropped the connection, for Wait.
+	reason atomic.Pointer[error]
+	// under are the jump host connections this one runs through.
+	under []io.Closer
 }
 
-// Dial connects to the host, verifies its host key and authenticates.
+// Dial connects to the host, verifies its host key and authenticates. It
+// goes through the host's ProxyJump hops or ProxyCommand when it has them.
 func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
-	if hc.ProxyJump != "" {
-		return nil, unsupported(hc.Alias, "ProxyJump")
+	if o.Logger == nil {
+		o.Logger = slog.New(slog.DiscardHandler)
 	}
-	if hc.ProxyCommand != "" {
-		return nil, unsupported(hc.Alias, "ProxyCommand")
+	hops := 0
+	return dialHost(ctx, hc, o, &hops, nil)
+}
+
+// dialHost connects to hc over its transport (a channel through via when
+// via is set) and runs the SSH handshake. hops counts the connections this
+// Dial has made.
+func dialHost(ctx context.Context, hc *HostConfig, o DialOptions, hops *int, via *Conn) (*Conn, error) {
+	*hops++
+	if *hops > maxHops {
+		return nil, &Error{Kind: ErrConnect, Msg: fmt.Sprintf(
+			"reaching %s takes more than %d hops; check ProxyJump in ~/.ssh/config for a loop", hc.Alias, maxHops)}
 	}
 	log := o.Logger
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
 	timeout := hc.ConnectTimeout
 	if timeout <= 0 {
 		timeout = defaultConnectTimeout
@@ -78,75 +111,138 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 			}
 		}
 	}
+	// a asks for credentials; its pause and resume are set once the
+	// handshake clock runs.
+	var a *asker
+	var unlock func(keyFile) ssh.Signer
+	if o.Credentials != nil {
+		a = &asker{ctx: ctx, hc: hc, p: o.Credentials, keys: o.Keys, pause: func() {}, resume: func() {}}
+		unlock = func(f keyFile) ssh.Signer { return &lazySigner{path: f.path, pub: f.pub, a: a} }
+	}
 	files, certs, notes := loadKeyFiles(hc.IdentityFiles)
 	certFiles, certNotes := loadCertFiles(hc.CertificateFiles)
 	notes = append(notes, certNotes...)
-	signers, moreNotes := orderSigners(hc, agentKeys, files, append(certs, certFiles...))
+	signers, moreNotes := orderSigners(hc, agentKeys, files, append(certs, certFiles...), unlock)
 	notes = append(notes, moreNotes...)
 	log.Debug("offering keys", "host", hc.Alias, "agent_keys", len(agentKeys), "key_files", len(files), "offered", len(signers))
 
 	addr := net.JoinHostPort(hc.HostName, strconv.Itoa(hc.Port))
-	var d net.Dialer
-	dialCtx, cancel := context.WithTimeout(ctx, timeout)
-	nc, err := d.DialContext(dialCtx, "tcp", addr)
-	cancel()
+	nc, under, err := transport(ctx, hc, o, hops, via, timeout)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, &Error{Kind: ErrConnect, Err: err, Msg: fmt.Sprintf(
-			"cannot reach %s (%s): %v; check the host name and port, and that `ssh %s` works", hc.Alias, addr, err, hc.Alias)}
+		return nil, err
 	}
 
-	// The handshake deadline pauses while the user reads the host key prompt.
-	resetDeadline := func() { _ = nc.SetDeadline(time.Now().Add(timeout)) }
-	resetDeadline()
-	checker.beforePrompt = func() { _ = nc.SetDeadline(time.Time{}) }
-	checker.afterPrompt = resetDeadline
+	// The handshake clock pauses while the user answers a prompt.
+	clock := startClock(nc, timeout)
+	checker.beforePrompt = clock.pause
+	checker.afterPrompt = clock.resume
 	stop := context.AfterFunc(ctx, func() { nc.Close() })
 
+	// Without a prompter, password and keyboard-interactive are offered
+	// only to learn that the server wants them: their callbacks end the
+	// handshake with a marker error.
+	codeCallback := ssh.KeyboardInteractiveChallenge(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+		if len(questions) == 0 {
+			return nil, nil // an informational round; answering it is free
+		}
+		return nil, errWantsCode
+	})
+	passwordCallback := func() (string, error) { return "", errWantsPassword }
+	if a != nil {
+		a.pause, a.resume = clock.pause, clock.resume
+		codeCallback, passwordCallback = a.codeCallback(), a.passwordCallback()
+	}
 	cfg := &ssh.ClientConfig{
 		User: hc.User,
-		// Password and keyboard-interactive are offered only to learn that
-		// the server wants them: their callbacks end the handshake with a
-		// marker error instead of prompting (prompts arrive in v0.3.0).
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
 				return signers, nil
 			}),
-			ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
-				if len(questions) == 0 {
-					return nil, nil // an informational round; answering it is free
-				}
-				return nil, errWantsCode
-			}),
-			ssh.PasswordCallback(func() (string, error) {
-				return "", errWantsPassword
-			}),
+			ssh.RetryableAuthMethod(ssh.KeyboardInteractive(codeCallback), maxTries),
+			ssh.RetryableAuthMethod(ssh.PasswordCallback(passwordCallback), maxTries),
 		},
 		HostKeyCallback:   checker.callback(ctx),
 		HostKeyAlgorithms: checker.algorithms(),
 	}
 	sc, chans, reqs, err := ssh.NewClientConn(nc, addr, cfg)
+	clock.stop()
+	if a != nil {
+		a.done(err)
+	}
 	if !stop() {
 		// ctx was canceled and closed the connection.
 		if err == nil {
 			sc.Close()
 		}
+		closeAll(under)
 		return nil, ctx.Err()
 	}
 	if err != nil {
 		nc.Close()
-		return nil, handshakeError(hc, addr, err, len(signers), notes)
+		closeAll(under)
+		err = handshakeError(hc, addr, err, len(signers), notes, a)
+		if pc, ok := nc.(*procConn); ok {
+			err = withProxyOutput(err, pc.said())
+		}
+		return nil, err
 	}
-	_ = nc.SetDeadline(time.Time{})
-	return &Conn{client: ssh.NewClient(sc, chans, reqs), alias: hc.Alias}, nil
+	c := &Conn{client: ssh.NewClient(sc, chans, reqs), alias: hc.Alias, log: log, under: under}
+	if o.Keepalive.Interval > 0 {
+		var kctx context.Context
+		kctx, c.kaCancel = context.WithCancel(context.Background())
+		c.kaWG.Add(1)
+		go c.keepalive(kctx, o.Keepalive)
+	}
+	return c, nil
 }
 
-func unsupported(alias, option string) error {
-	return &Error{Kind: ErrUnsupported, Msg: fmt.Sprintf(
-		"%s uses %s, which pfwd does not support yet (planned for v0.3.0); connect to a host without it for now", alias, option)}
+// withProxyOutput adds what the ProxyCommand printed to a handshake error.
+func withProxyOutput(err error, said string) error {
+	if said == "" {
+		return err
+	}
+	var e *Error
+	if errors.As(err, &e) {
+		return &Error{Kind: e.Kind, Err: e.Err, Msg: e.Msg + ". The ProxyCommand said: " + said}
+	}
+	return fmt.Errorf("%w; the ProxyCommand said: %s", err, said)
 }
+
+// handshakeClock bounds the SSH handshake: with a deadline on conns that
+// take one, else with a timer that closes the conn (SSH channels and
+// Windows pipes have no deadlines). It pauses while the user answers a
+// prompt.
+type handshakeClock struct {
+	nc      net.Conn
+	timeout time.Duration
+	timer   *time.Timer // nil when nc takes deadlines
+}
+
+func startClock(nc net.Conn, timeout time.Duration) *handshakeClock {
+	c := &handshakeClock{nc: nc, timeout: timeout}
+	if nc.SetDeadline(time.Now().Add(timeout)) != nil {
+		c.timer = time.AfterFunc(timeout, func() { _ = nc.Close() })
+	}
+	return c
+}
+
+func (c *handshakeClock) pause() {
+	if c.timer != nil {
+		c.timer.Stop()
+		return
+	}
+	_ = c.nc.SetDeadline(time.Time{})
+}
+
+func (c *handshakeClock) resume() {
+	if c.timer != nil {
+		c.timer.Reset(c.timeout)
+		return
+	}
+	_ = c.nc.SetDeadline(time.Now().Add(c.timeout))
+}
+
+func (c *handshakeClock) stop() { c.pause() }
 
 // Marker errors from the password and keyboard-interactive callbacks.
 var (
@@ -154,19 +250,40 @@ var (
 	errWantsCode     = errors.New("the server asks for keyboard-interactive input")
 )
 
-func handshakeError(hc *HostConfig, addr string, err error, offered int, notes []string) error {
+// handshakeError turns a failed handshake into a user-facing error. a is
+// the handshake's credential asker, nil when there was no prompter.
+func handshakeError(hc *HostConfig, addr string, err error, offered int, notes []string, a *asker) error {
 	var e *Error
 	if errors.As(err, &e) {
 		return e
 	}
-	if errors.Is(err, errWantsPassword) || errors.Is(err, errWantsCode) {
+	var pe *passphraseError
+	switch {
+	case errors.Is(err, ErrCanceled) || (a != nil && a.canceled):
+		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf("logging in to %s was canceled; connect again to retry", hc.Alias)}
+	case errors.As(err, &pe):
+		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf(
+			"%d wrong passphrases for %s; check the passphrase, or unlock the key with `ssh-add %s` and connect again", maxTries, pe.path, pe.path)}
+	case errors.Is(err, errWantsPassword) || errors.Is(err, errWantsCode):
 		what := "a password"
 		if errors.Is(err, errWantsCode) {
 			what = "a password or one-time code (keyboard-interactive login)"
 		}
 		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf(
-			"logging in to %s as %s needs %s, which pfwd supports from v0.3.0. For now, use a host that accepts your key alone; `ssh-copy-id %s` installs your public key there",
+			"logging in to %s as %s needs %s, and pfwd had no way to ask for it here; run pfwd in a terminal, or use a key: `ssh-copy-id %s` installs your public key there",
 			hc.Alias, hc.User, what, hc.Alias)}
+	}
+	if strings.Contains(err.Error(), "too many authentication failures") {
+		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf(
+			"%s refused the login after too many failed attempts (its MaxAuthTries); check your password and keys, and connect again", hc.Alias)}
+	}
+	if strings.Contains(err.Error(), "unable to authenticate") && a != nil && (a.triedPassword || a.triedCode) {
+		what := "password"
+		if !a.triedPassword {
+			what = "answer"
+		}
+		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf(
+			"authentication to %s as %s failed: the server did not accept the %s after %d tries; check it and connect again", hc.Alias, hc.User, what, maxTries)}
 	}
 	if strings.Contains(err.Error(), "unable to authenticate") {
 		var b strings.Builder
@@ -270,12 +387,23 @@ func (r *sessionReader) Close() error {
 	return nil
 }
 
-// Close closes the connection.
+// Close closes the connection and waits for its keepalive goroutine.
 func (c *Conn) Close() error {
-	return c.client.Close()
+	err := c.client.Close()
+	if c.kaCancel != nil {
+		c.kaCancel()
+	}
+	c.kaWG.Wait()
+	closeAll(c.under)
+	return err
 }
 
-// Wait blocks until the connection ends.
+// Wait blocks until the connection ends. When pfwd dropped it because
+// keepalives went unanswered, the error says so.
 func (c *Conn) Wait() error {
-	return c.client.Wait()
+	err := c.client.Wait()
+	if r := c.reason.Load(); r != nil {
+		return *r
+	}
+	return err
 }

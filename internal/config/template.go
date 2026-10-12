@@ -19,16 +19,16 @@ auto_ports = []            # if not empty, only auto-forward these, e.g. ["3000-
 bind = "127.0.0.1"         # local address; anything else exposes forwards to your network
 on_conflict = "ask"        # when a local port is taken: ask, next, random or fail
 privileged_offset = 10000  # remote 80 becomes local 10080 (from v0.4.0)
-auto_expire = "10m"        # drop auto-forwards whose port has been gone this long (from v0.3.0)
+auto_expire = "10m"        # drop auto-forwards whose port has been gone this long, unless pinned
 max_conns = 256            # open connections per forward
-restore = true             # restore remembered forwards on connect (from v0.3.0)
+restore = true             # remember forwards in state.json and restore them on connect
 
 [ssh]
 use_openssh_config = true  # resolve hosts with "ssh -G" when OpenSSH is installed
-keepalive_interval = "15s" # from v0.3.0
-keepalive_count_max = 3    # from v0.3.0
+keepalive_interval = "15s" # check the connection this often (ServerAliveInterval wins when set)
+keepalive_count_max = 3    # reconnect after this many unanswered checks
 connect_timeout = "10s"    # used when the ssh config sets no ConnectTimeout
-reconnect_max_backoff = "30s" # from v0.3.0
+reconnect_max_backoff = "30s" # longest wait between reconnect attempts
 
 [ui]
 theme = "auto"             # auto, dark or light
@@ -45,5 +45,6 @@ glyphs = "auto"            # auto, unicode or ascii
 # [hosts.devbox]
 # auto = false
 # auto_ports = [8888, 6006]
+# forwards = ["5432", "15432:db.internal:5432"]   # always on, pinned
 `
 }

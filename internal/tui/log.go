@@ -17,13 +17,19 @@ const logIndent = 12
 func (m Model) logLines(w int) []string {
 	var out []string
 	for _, e := range m.log {
-		glyph := m.kindGlyph(e.kind)
-		width := max(10, w-logIndent-ansi.StringWidth(glyph))
-		wrapped := strings.Split(ansi.Wordwrap(safetext.Clean(e.text), width, ""), "\n")
-		out = append(out, "  "+e.at.Format("15:04:05")+"  "+glyph+wrapped[0])
-		for _, l := range wrapped[1:] {
-			out = append(out, strings.Repeat(" ", logIndent+ansi.StringWidth(glyph))+l)
-		}
+		out = append(out, m.entryLines(e, w)...)
+	}
+	return out
+}
+
+// entryLines renders one log entry for width w.
+func (m Model) entryLines(e logEntry, w int) []string {
+	glyph := m.kindGlyph(e.kind)
+	width := max(10, w-logIndent-ansi.StringWidth(glyph))
+	wrapped := strings.Split(ansi.Wordwrap(safetext.Clean(e.text), width, ""), "\n")
+	out := []string{"  " + e.at.Format("15:04:05") + "  " + glyph + wrapped[0]}
+	for _, l := range wrapped[1:] {
+		out = append(out, strings.Repeat(" ", logIndent+ansi.StringWidth(glyph))+l)
 	}
 	return out
 }

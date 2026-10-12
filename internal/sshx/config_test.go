@@ -132,6 +132,8 @@ func TestFromOptions(t *testing.T) {
 		"stricthostkeychecking": {"accept-new"},
 		"hostkeyalias":          {"devbox-key"},
 		"connecttimeout":        {"5"},
+		"serveraliveinterval":   {"20"},
+		"serveralivecountmax":   {"5"},
 		"proxyjump":             {"none"},
 		"proxycommand":          {"none"},
 	}
@@ -151,6 +153,8 @@ func TestFromOptions(t *testing.T) {
 		StrictHostKeyChecking: "accept-new",
 		HostKeyAlias:          "devbox-key",
 		ConnectTimeout:        5 * time.Second,
+		ServerAliveInterval:   20 * time.Second,
+		ServerAliveCountMax:   5,
 	}
 	if runtime.GOOS != "windows" {
 		// On Windows a drive-less POSIX path is dropped (TestExpandPath).
@@ -176,6 +180,18 @@ func TestFromOptionsOverrides(t *testing.T) {
 	}
 	if want := []string{filepath.Join(env.Home, "k"), filepath.Join(env.Home, ".ssh", "id_rsa")}; !reflect.DeepEqual(hc.IdentityFiles, want) {
 		t.Errorf("IdentityFiles = %q, want %q", hc.IdentityFiles, want)
+	}
+}
+
+func TestFromOptionsJumpOverride(t *testing.T) {
+	env := testEnv(t)
+	opts := map[string][]string{"proxycommand": {"nc %h %p"}, "proxyjump": {"old"}}
+	hc, err := fromOptions("devbox", opts, Overrides{Jump: "bastion,inner"}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hc.ProxyJump != "bastion,inner" || hc.ProxyCommand != "" {
+		t.Errorf("ProxyJump/ProxyCommand = %q/%q, want -J to replace both", hc.ProxyJump, hc.ProxyCommand)
 	}
 }
 
@@ -326,6 +342,50 @@ func TestResolveFallsBackToParser(t *testing.T) {
 	}
 	if other.HostName != "elsewhere" || other.Port != 22 || len(other.IdentityFiles) < 3 {
 		t.Errorf("unmatched host = %+v, want hostname=alias, port 22 and the default identity files", other)
+	}
+}
+
+func TestResolveFallbackReadsServerAlive(t *testing.T) {
+	env := testEnv(t)
+	sshDir := filepath.Join(env.Home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "Host devbox\n  ServerAliveInterval 7\n  ServerAliveCountMax 2\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hc, err := Resolve(t.Context(), "devbox", Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hc.ServerAliveInterval != 7*time.Second || hc.ServerAliveCountMax != 2 {
+		t.Errorf("ServerAlive = %v/%d, want 7s/2", hc.ServerAliveInterval, hc.ServerAliveCountMax)
+	}
+}
+
+func TestKeepaliveOr(t *testing.T) {
+	def := Keepalive{Interval: 15 * time.Second, CountMax: 3}
+	tests := []struct {
+		name     string
+		interval time.Duration
+		countMax int
+		want     Keepalive
+	}{
+		{"unset", 0, 0, def},
+		// ssh -G always prints serveralivecountmax, 3 by default, so it only
+		// counts when the ssh config also turned keepalives on.
+		{"count only", 0, 3, def},
+		{"interval", 30 * time.Second, 0, Keepalive{Interval: 30 * time.Second, CountMax: 3}},
+		{"both", 30 * time.Second, 5, Keepalive{Interval: 30 * time.Second, CountMax: 5}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hc := &HostConfig{ServerAliveInterval: tt.interval, ServerAliveCountMax: tt.countMax}
+			if got := hc.KeepaliveOr(def); got != tt.want {
+				t.Errorf("KeepaliveOr = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }
 

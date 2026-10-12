@@ -27,6 +27,10 @@ type HostKeyQuestion struct {
 	KeyType string
 	// Fingerprint is the SHA256 fingerprint, as ssh prints it.
 	Fingerprint string
+	// Saves is set when a trusted key is written to known_hosts; without
+	// a user known_hosts file (UserKnownHostsFile none) it is trusted for
+	// this connection only.
+	Saves bool
 }
 
 // HostKeyPrompter asks the user whether to trust an unknown host key.
@@ -162,6 +166,11 @@ func (c *hostKeyChecker) algorithms() []string {
 
 func (c *hostKeyChecker) callback(ctx context.Context) ssh.HostKeyCallback {
 	return func(_ string, remote net.Addr, key ssh.PublicKey) error {
+		if _, ok := remote.(*net.TCPAddr); !ok {
+			// A ProxyCommand has no remote address. x/crypto checks only the
+			// host name when it has one, but still parses the address.
+			remote = &net.TCPAddr{IP: net.IPv4zero}
+		}
 		err := c.db.HostKeyCallback()(c.lookup, remote, key)
 		switch {
 		case err == nil:
@@ -188,7 +197,7 @@ func (c *hostKeyChecker) callback(ctx context.Context) ssh.HostKeyCallback {
 		}
 
 		c.beforePrompt()
-		ok, err := c.prompter.ConfirmHostKey(ctx, HostKeyQuestion{Host: c.hc.Alias, KeyType: key.Type(), Fingerprint: fingerprint})
+		ok, err := c.prompter.ConfirmHostKey(ctx, HostKeyQuestion{Host: c.hc.Alias, KeyType: key.Type(), Fingerprint: fingerprint, Saves: !c.hc.NoUserKnownHosts})
 		c.afterPrompt()
 		if err != nil {
 			return &Error{Kind: ErrHostKey, Err: err, Msg: fmt.Sprintf("host key for %s was not confirmed: %v", c.hc.Alias, err)}

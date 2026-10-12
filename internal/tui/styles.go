@@ -14,14 +14,14 @@ type glyphs struct {
 	active, paused, failed, starting, connecting, closed string
 	cursor, ok, none, rule, ellipsis, down, up           string
 	topLeft, topRight, bottomLeft, bottomRight, side     string
-	upDown, dots, block                                  string
+	upDown, dots, block, mask                            string
 }
 
 var unicodeGlyphs = glyphs{
 	active: "●", paused: "◌", failed: "✗", starting: "…", connecting: "◐", closed: "○",
 	cursor: "▶", ok: "✓", none: "—", rule: "─", ellipsis: "…", down: "↓", up: "↑",
 	topLeft: "╭", topRight: "╮", bottomLeft: "╰", bottomRight: "╯", side: "│",
-	upDown: "↑ ↓", dots: "…", block: "█",
+	upDown: "↑ ↓", dots: "…", block: "█", mask: "•",
 }
 
 // asciiGlyphs are for consoles whose fonts lack the Unicode ones, such as
@@ -30,7 +30,7 @@ var asciiGlyphs = glyphs{
 	active: "*", paused: "o", failed: "x", starting: ".", connecting: "~", closed: "-",
 	cursor: ">", ok: "+", none: "-", rule: "-", ellipsis: "~", down: "v", up: "^",
 	topLeft: "+", topRight: "+", bottomLeft: "+", bottomRight: "+", side: "|",
-	upDown: "up down", dots: "...", block: "_",
+	upDown: "up down", dots: "...", block: "_", mask: "*",
 }
 
 // theme holds the TUI's styles and glyphs. Colors are the terminal's own

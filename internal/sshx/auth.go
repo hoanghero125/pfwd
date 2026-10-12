@@ -14,7 +14,7 @@ type keyFile struct {
 	path   string
 	signer ssh.Signer    // nil when encrypted
 	pub    ssh.PublicKey // nil when unknown (an encrypted PEM key without a .pub file)
-	// encrypted keys need a passphrase, which pfwd does not ask for yet.
+	// encrypted keys need a passphrase.
 	encrypted bool
 }
 
@@ -114,8 +114,9 @@ func keyID(pub ssh.PublicKey) string {
 // IdentitiesOnly), then identity files the agent does not hold. Each key is
 // offered with its certificates first, as OpenSSH does. All of them go into
 // one publickey method, because x/crypto stops trying a method name once it
-// has failed.
-func orderSigners(hc *HostConfig, agentKeys []ssh.Signer, files []keyFile, certs []*ssh.Certificate) (signers []ssh.Signer, notes []string) {
+// has failed. unlock turns an encrypted key with a known public key into a
+// signer that asks for its passphrase; nil skips encrypted keys with a note.
+func orderSigners(hc *HostConfig, agentKeys []ssh.Signer, files []keyFile, certs []*ssh.Certificate, unlock func(keyFile) ssh.Signer) (signers []ssh.Signer, notes []string) {
 	configured := make(map[string]bool)
 	for _, f := range files {
 		if f.pub != nil {
@@ -166,8 +167,12 @@ func orderSigners(hc *HostConfig, agentKeys []ssh.Signer, files []keyFile, certs
 			continue
 		}
 		if f.encrypted {
+			if unlock != nil && f.pub != nil {
+				offer(unlock(f))
+				continue
+			}
 			notes = append(notes, fmt.Sprintf(
-				"%s is passphrase-protected; run `ssh-add %s` to unlock it in ssh-agent (pfwd asks for passphrases from v0.3.0)", f.path, f.path))
+				"%s is passphrase-protected; run `ssh-add %s` to unlock it in ssh-agent", f.path, f.path))
 			continue
 		}
 		offer(f.signer)

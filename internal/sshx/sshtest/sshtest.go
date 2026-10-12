@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
@@ -48,6 +49,9 @@ type Options struct {
 	// then answer the OneTimeCode prompt, like AuthenticationMethods
 	// publickey,keyboard-interactive.
 	KeyThenCode bool
+	// IgnoreKeepalive leaves keepalive@openssh.com requests unanswered,
+	// like a server behind a dead network path.
+	IgnoreKeepalive bool
 }
 
 // Server is a running test server. It stops, and waits for all of its
@@ -64,8 +68,12 @@ type Server struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
+	ignoreKeepalive atomic.Bool
+
 	mu    sync.Mutex
 	conns map[net.Conn]struct{}
+	// forwarded lists the addresses direct-tcpip channels asked for.
+	forwarded []string
 }
 
 // Start starts a server on 127.0.0.1 with a random port.
@@ -153,6 +161,7 @@ func Start(tb testing.TB, o Options) *Server {
 		cancel:  cancel,
 		conns:   make(map[net.Conn]struct{}),
 	}
+	s.ignoreKeepalive.Store(o.IgnoreKeepalive)
 	s.wg.Add(1)
 	go s.acceptLoop(cfg)
 	tb.Cleanup(s.stop)
@@ -172,6 +181,29 @@ func (s *Server) Port() int {
 // KnownHostsLine returns a known_hosts line that trusts the primary host key.
 func (s *Server) KnownHostsLine() string {
 	return knownhosts.Line([]string{knownhosts.Normalize(s.Addr)}, s.HostKey.PublicKey())
+}
+
+// SetIgnoreKeepalive changes IgnoreKeepalive while the server runs.
+func (s *Server) SetIgnoreKeepalive(ignore bool) {
+	s.ignoreKeepalive.Store(ignore)
+}
+
+// Forwarded returns the host:port of every direct-tcpip channel clients
+// asked for, in order, including refused ones.
+func (s *Server) Forwarded() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.forwarded...)
+}
+
+// DropConns closes every client connection, as a network failure would.
+// The server keeps accepting new ones.
+func (s *Server) DropConns() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for c := range s.conns {
+		c.Close()
+	}
 }
 
 func (s *Server) stop() {
@@ -219,6 +251,9 @@ func (s *Server) serveConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	go func() {
 		defer s.wg.Done()
 		for req := range reqs {
+			if req.Type == "keepalive@openssh.com" && s.ignoreKeepalive.Load() {
+				continue
+			}
 			if req.WantReply {
 				_ = req.Reply(req.Type == "keepalive@openssh.com", nil)
 			}
@@ -294,8 +329,12 @@ func (s *Server) handleDirectTCPIP(nch ssh.NewChannel) {
 		_ = nch.Reject(ssh.ConnectionFailed, "bad direct-tcpip payload")
 		return
 	}
+	addr := net.JoinHostPort(p.Host, strconv.Itoa(int(p.Port)))
+	s.mu.Lock()
+	s.forwarded = append(s.forwarded, addr)
+	s.mu.Unlock()
 	var d net.Dialer
-	target, err := d.DialContext(s.ctx, "tcp", net.JoinHostPort(p.Host, strconv.Itoa(int(p.Port))))
+	target, err := d.DialContext(s.ctx, "tcp", addr)
 	if err != nil {
 		_ = nch.Reject(ssh.ConnectionFailed, err.Error())
 		return

@@ -20,8 +20,9 @@ import (
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden files in testdata")
 
-// mainScreen is the full main screen: three forwards (one whose
-// port went away), three detected ports and a hidden one.
+// mainScreen is the full main screen: three forwards (one pinned, one
+// paused because its port went away), three detected ports and a hidden
+// one.
 func mainScreen(t *testing.T) Model {
 	t.Helper()
 	return mainScreenWith(t, Options{})
@@ -39,11 +40,12 @@ func mainScreenWith(t *testing.T, opts Options) Model {
 	for _, fw := range e.Forwards() {
 		fw.Scheme = forward.SchemeHTTP
 		fw.Spec.Label = map[uint16]string{5173: "Vite", 8888: "Jupyter"}[fw.Spec.RemotePort]
+		fw.Spec.Pinned = fw.Spec.RemotePort == 8888
 		m = apply(m, engine.ForwardChanged{Forward: fw})
 	}
 	m = apply(m, engine.ForwardChanged{Forward: engine.Forward{
-		ID: "9", Host: "devbox", State: engine.Failed, Err: errors.New("disconnected"),
-		Spec: engine.ForwardSpec{BindAddr: "127.0.0.1", LocalPort: 8000, RemoteHost: "127.0.0.1", RemotePort: 8000},
+		ID: "9", Host: "devbox", State: engine.Paused, Pause: engine.PortGone,
+		Spec: engine.ForwardSpec{BindAddr: "127.0.0.1", LocalPort: 8000, RemoteHost: "127.0.0.1", RemotePort: 8000, Auto: true},
 	}})
 	e.mu.Lock()
 	e.forwards[0].Stats = forward.Stats{Conns: 2}
@@ -89,7 +91,7 @@ func goldenCases() map[string]func(*testing.T) Model {
 		},
 		"modal-hostkey": func(*testing.T) Model {
 			return apply(connecting(nil), engine.NewHostKeyPrompt("devbox", sshx.HostKeyQuestion{
-				Host: "devbox", KeyType: "ssh-ed25519", Fingerprint: "SHA256:KkzXxjJZNedqGLrx+HOOCWJgJimyaMj/kxgCfnf8M7A",
+				Host: "devbox", KeyType: "ssh-ed25519", Fingerprint: "SHA256:KkzXxjJZNedqGLrx+HOOCWJgJimyaMj/kxgCfnf8M7A", Saves: true,
 			}, make(chan bool, 1)))
 		},
 		"modal-custom": func(t *testing.T) Model {
@@ -152,7 +154,23 @@ func goldenCases() map[string]func(*testing.T) Model {
 			m, _ := press(t, mainScreenWith(t, Options{ASCII: true}), "?")
 			return m
 		},
-		"bind-badge": func(t *testing.T) Model { return mainScreenWith(t, Options{BindAddr: "0.0.0.0"}) },
+		"bind-badge":   func(t *testing.T) Model { return mainScreenWith(t, Options{BindAddr: "0.0.0.0"}) },
+		"reconnecting": lostScreen,
+		"disconnected": func(t *testing.T) Model {
+			return apply(lostScreen(t), engine.SessionChanged{Host: "devbox", State: engine.SessionFailed, Err: &sshx.Error{
+				Kind: sshx.ErrConnect, Msg: "stopped reconnecting to devbox; reconnect once the host is reachable"}})
+		},
+		"modal-passphrase": func(t *testing.T) Model {
+			p, _ := credPrompt(sshx.Passphrase, "/home/alice/.ssh/id_ed25519")
+			m, _ := press(t, apply(connecting(t), p), "a", "b", "c")
+			return m
+		},
+		"modal-otp": func(t *testing.T) Model {
+			p := engine.NewCredentialPrompt("devbox", sshx.CredentialQuestion{Host: "devbox", Kind: sshx.Code,
+				Instruction: "Duo two-factor login for alice", Prompt: "Passcode or option (1-3): ", Retry: true}, make(chan engine.CredentialAnswer, 1))
+			m, _ := press(t, apply(connecting(t), p), "1")
+			return m
+		},
 	}
 }
 

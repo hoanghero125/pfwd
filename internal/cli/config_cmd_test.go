@@ -109,11 +109,10 @@ func TestConfigValidateNoFile(t *testing.T) {
 }
 
 func TestConfigValidateOK(t *testing.T) {
-	path := writeConfig(t, "[forward]\nrestore = false\n\n[hosts.devbox]\nforwards = [\"5432\"]\n")
+	path := writeConfig(t, "[forward]\nrestore = false\n\n[hosts.devbox]\nforwards = [\"5432\", \"-D 1080\"]\n")
 	code, out, errOut := run(t, "config", "validate")
 	want := "config ok: " + path + "\n" +
-		"note: forward.restore is accepted but applies from v0.3.0\n" +
-		"note: hosts.devbox.forwards is accepted but applies from v0.3.0\n"
+		"note: hosts.devbox.forwards entry \"-D 1080\" is accepted but applies from v0.4.0\n"
 	if code != 0 || out != want || errOut != "" {
 		t.Errorf("pfwd config validate: code %d, stdout %q, stderr %q; want 0 and\n%s", code, out, errOut, want)
 	}
@@ -204,8 +203,8 @@ func TestConfigEditReportsEditorFailure(t *testing.T) {
 	writeConfig(t, "")
 	t.Setenv("VISUAL", "pfwd-no-such-editor")
 	code, _, errOut := run(t, "config", "edit")
-	if code != 1 || !strings.Contains(errOut, "pfwd-no-such-editor") || !strings.Contains(errOut, "VISUAL") {
-		t.Errorf("pfwd config edit with a missing editor: code %d, stderr %q; want 1, naming the editor and VISUAL", code, errOut)
+	if code != 1 || !strings.Contains(errOut, "pfwd-no-such-editor") || !strings.Contains(errOut, "VISUAL") || !strings.Contains(errOut, "quotes") {
+		t.Errorf("pfwd config edit with a missing editor: code %d, stderr %q; want 1, naming the editor and VISUAL, and suggesting quotes", code, errOut)
 	}
 }
 
@@ -221,9 +220,13 @@ func TestEditorCommand(t *testing.T) {
 		{"", "", "windows", []string{"notepad"}, ""},
 		{`"C:\Program Files\Notepad++\notepad++.exe" -multiInst`, "", "windows", []string{`C:\Program Files\Notepad++\notepad++.exe`, "-multiInst"}, "VISUAL"},
 		{`'/opt/my editor/ed' -w`, "", "linux", []string{"/opt/my editor/ed", "-w"}, "VISUAL"},
+		// An unquoted path with spaces works when it names a file.
+		{`C:\Program Files\Sublime Text\subl.exe`, "", "windows", []string{`C:\Program Files\Sublime Text\subl.exe`}, "VISUAL"},
+		{`C:\Program Files\Other\ed.exe --wait`, "", "windows", []string{`C:\Program`, `Files\Other\ed.exe`, "--wait"}, "VISUAL"},
 	} {
 		env := map[string]string{"VISUAL": tc.visual, "EDITOR": tc.editor}
-		argv, from := editorCommand(func(k string) string { return env[k] }, tc.goos)
+		isFile := func(p string) bool { return p == `C:\Program Files\Sublime Text\subl.exe` }
+		argv, from := editorCommand(func(k string) string { return env[k] }, tc.goos, isFile)
 		if !reflect.DeepEqual(argv, tc.want) || from != tc.from {
 			t.Errorf("editorCommand(VISUAL=%q, EDITOR=%q, %s) = %q from %q; want %q from %q", tc.visual, tc.editor, tc.goos, argv, from, tc.want, tc.from)
 		}
@@ -281,5 +284,28 @@ func TestRootRefusesMissingNamedConfig(t *testing.T) {
 	code, _, errOut = run(t, "devbox")
 	if code != 1 || !strings.Contains(errOut, "PFWD_CONFIG") {
 		t.Errorf("PFWD_CONFIG with a missing file: code %d, stderr %q", code, errOut)
+	}
+}
+
+func TestConfigValidateJSONReadError(t *testing.T) {
+	dir := t.TempDir() // a directory can't be read as a file
+	t.Setenv("PFWD_CONFIG", dir)
+	code, out, _ := run(t, "config", "validate", "--json")
+	var got struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%q", err, out)
+	}
+	if code != 1 || got.OK || got.Error == "" {
+		t.Errorf("code %d, %+v; want 1 with the read error in the JSON", code, got)
+	}
+}
+
+func TestConfigFlagHelp(t *testing.T) {
+	_, out, _ := run(t, "--help")
+	if !strings.Contains(out, "--config path") || strings.Contains(out, "--config pfwd") {
+		t.Errorf("--config help should name its value path:\n%s", out)
 	}
 }

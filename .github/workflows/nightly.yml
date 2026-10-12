@@ -30,4 +30,25 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
-      # M3 adds the soak test job.
+
+  soak:
+    name: soak (an hour of connection drops)
+    runs-on: ubuntu-latest
+    timeout-minutes: 85 # longer than go test's 75m, so a hang ends in a goroutine dump
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: Soak test against an sshd container
+        shell: bash
+        run: make soak 2>&1 | tee soak.log; exit "${PIPESTATUS[0]}"
+      - name: Keep the log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: soak-log
+          path: soak.log
+          retention-days: 14
