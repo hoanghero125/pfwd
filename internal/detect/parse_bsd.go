@@ -218,7 +218,8 @@ func ParseWindows(r io.Reader) ([]RemotePort, error) {
 			}
 		default:
 			f := strings.Fields(line)
-			if len(f) != 5 || f[0] != "TCP" || (f[2] != "0.0.0.0:0" && f[2] != "[::]:0") {
+			// The state may be two words (IN ASCOLTO); the PID is last.
+			if len(f) < 5 || f[0] != "TCP" || (f[2] != "0.0.0.0:0" && f[2] != "[::]:0") {
 				continue
 			}
 			i := strings.LastIndexByte(f[1], ':')
@@ -234,7 +235,7 @@ func ParseWindows(r io.Reader) ([]RemotePort, error) {
 				continue
 			}
 			p := RemotePort{Port: uint16(port), Addrs: []string{addr}}
-			p.PID, _ = strconv.Atoi(f[4])
+			p.PID, _ = strconv.Atoi(f[len(f)-1])
 			out = append(out, p)
 		}
 	}

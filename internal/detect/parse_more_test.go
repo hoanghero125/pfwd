@@ -160,6 +160,20 @@ func TestParseWindowsLocalizedState(t *testing.T) {
 	}
 }
 
+// TestParseWindowsStateWithSpace: Italian Windows says IN ASCOLTO, two
+// words, so the PID is the last field, not the fifth.
+func TestParseWindowsStateWithSpace(t *testing.T) {
+	in := "  Proto  Indirizzo locale       Indirizzo esterno      Stato           PID\n" +
+		"  TCP    0.0.0.0:8080           0.0.0.0:0              IN ASCOLTO      77\n"
+	got, err := ParseWindows(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []RemotePort{rp(8080, "0.0.0.0", 77, "")}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseWindows = %+v, want %+v", got, want)
+	}
+}
+
 func TestProbeStrategies(t *testing.T) {
 	cases := []struct {
 		out  string

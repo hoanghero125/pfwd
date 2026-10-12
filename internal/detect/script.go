@@ -196,11 +196,13 @@ func LoopScript(s Strategy, os string, interval time.Duration) string {
 	return `while :; do printf "\036PFWD\n" || exit; ` + list + `; printf "\036PFWD END\n" || exit; sleep ` + secs + "; done"
 }
 
-// windowsLoop is the PowerShell loop for Windows servers; %d is the
+// windowsLoop is the PowerShell loop for Windows servers; %[1]d is the
 // interval in milliseconds. It writes the frame markers with \n endings
-// itself, and exits when the channel is gone and writing fails.
+// itself. Writing to a closed channel doesn't fail in .NET, so it exits
+// when its stdin ends instead: pfwd keeps stdin open and never writes.
 const windowsLoop = `$ErrorActionPreference = 'SilentlyContinue'
 $rs = [char]30
+$eof = [Console]::OpenStandardInput().ReadAsync((New-Object byte[] 1), 0, 1)
 while ($true) {
   try { [Console]::Out.Write($rs + "PFWD` + "`" + `n"); [Console]::Out.Flush() } catch { exit }
   netstat -ano -p TCP
@@ -208,7 +210,9 @@ while ($true) {
   '` + windowsTasklistMarker + `'
   tasklist /fo csv /nh
   try { [Console]::Out.Write($rs + "PFWD END` + "`" + `n"); [Console]::Out.Flush() } catch { exit }
-  Start-Sleep -Milliseconds %d
+  [void][Threading.Tasks.Task]::WaitAny(@($eof), %[1]d)
+  if ($eof.Status -eq 'RanToCompletion') { exit }
+  if ($eof.IsFaulted) { Start-Sleep -Milliseconds %[1]d }
 }`
 
 // LoopCommand returns the exec command for the strategy's snapshot loop:
