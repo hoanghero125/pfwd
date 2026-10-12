@@ -161,6 +161,11 @@ func (e *Engine) serveConn(ctx context.Context, host HostID, s *session, hs *hos
 	e.mu.Lock()
 	s.state, s.conn = Connected, conn
 	close(s.ready)
+	select {
+	case <-hs.ready:
+	default:
+		close(hs.ready)
+	}
 	e.mu.Unlock()
 	e.log.Info("connected", "host", host)
 	e.emit(SessionChanged{Host: host, State: Connected})
@@ -213,6 +218,7 @@ func (e *Engine) serveConn(ctx context.Context, host HostID, s *session, hs *hos
 
 	e.mu.Lock()
 	s.conn = nil
+	hs.ready = make(chan struct{})
 	if ctx.Err() == nil {
 		s.state = Reconnecting
 		s.ready = make(chan struct{})

@@ -233,7 +233,7 @@ func (e *Engine) persistOnly(host HostID, pinnedOnly bool) {
 	var list []state.Forward
 	var running []ForwardSpec
 	for _, f := range e.forwards {
-		if f.Host != host || f.Spec.Kind != Local || f.Spec.Config {
+		if f.Host != host || f.Spec.Config {
 			continue
 		}
 		spec := f.Spec
@@ -264,12 +264,21 @@ func toState(s ForwardSpec) state.Forward {
 		Remote: s.RemotePort, Label: s.Label, Pinned: s.Pinned, Auto: s.Auto}
 }
 
-// fromState turns a remembered forward back into a spec; false for kinds
-// this pfwd can't run.
+// fromState turns a remembered forward back into a spec; false for a kind
+// this pfwd doesn't know, or a forward missing its port.
 func fromState(f state.Forward) (ForwardSpec, bool) {
-	if f.Kind != Local.String() || f.Remote == 0 {
-		return ForwardSpec{}, false
+	spec := ForwardSpec{BindAddr: f.Bind, LocalPort: f.Local, RemoteHost: f.RemoteHost,
+		RemotePort: f.Remote, Label: f.Label, Pinned: f.Pinned, Auto: f.Auto}
+	switch f.Kind {
+	case Local.String():
+		spec.Kind = Local
+		return spec, f.Remote != 0
+	case Remote.String():
+		spec.Kind = Remote
+		return spec, f.Remote != 0
+	case Dynamic.String():
+		spec.Kind = Dynamic
+		return spec, f.Local != 0
 	}
-	return ForwardSpec{Kind: Local, BindAddr: f.Bind, LocalPort: f.Local, RemoteHost: f.RemoteHost,
-		RemotePort: f.Remote, Label: f.Label, Pinned: f.Pinned, Auto: f.Auto}, true
+	return ForwardSpec{}, false
 }

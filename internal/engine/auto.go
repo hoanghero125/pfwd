@@ -31,6 +31,10 @@ type hostState struct {
 	// unrestored are remembered forwards that couldn't be created this
 	// run. They stay in state.json, so a busy port doesn't lose a pin.
 	unrestored []ForwardSpec
+	// ready is closed while the host is connected, and replaced when the
+	// connection is lost; it outlives sessions, so it serves waiters
+	// across a Reconnect.
+	ready chan struct{}
 }
 
 // errAlreadyForwarded tells autoForward that a forward appeared meanwhile.
@@ -53,6 +57,7 @@ func (e *Engine) hostLocked(host HostID) *hostState {
 			tracker:  detect.NewTracker(e.o.Debounce),
 			ports:    map[uint16]detect.RemotePort{},
 			declined: map[uint16]bool{},
+			ready:    make(chan struct{}),
 		}
 		e.hosts[host] = hs
 	}
