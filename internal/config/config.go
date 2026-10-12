@@ -101,8 +101,9 @@ type Host struct {
 	// empty set then means every port.
 	AutoPorts    detect.PortSet
 	HasAutoPorts bool
-	// Forwards are always-on forwards, applied from v0.3.0.
-	Forwards []string
+	// Forwards are always-on, pinned forwards, created when the host
+	// connects. Remote and dynamic ones apply from v0.4.0.
+	Forwards []ForwardRule
 }
 
 // Default returns the configuration used when there is no config file.
@@ -174,23 +175,8 @@ func (c Config) Unapplied() []string {
 	note := func(key, version string) {
 		notes = append(notes, fmt.Sprintf("%s is accepted but applies from %s", key, version))
 	}
-	if c.Forward.AutoExpire != d.Forward.AutoExpire {
-		note("forward.auto_expire", "v0.3.0")
-	}
-	if c.Forward.Restore != d.Forward.Restore {
-		note("forward.restore", "v0.3.0")
-	}
 	if c.Forward.PrivilegedOffset != d.Forward.PrivilegedOffset {
 		note("forward.privileged_offset", "v0.4.0")
-	}
-	if c.SSH.KeepaliveInterval != d.SSH.KeepaliveInterval {
-		note("ssh.keepalive_interval", "v0.3.0")
-	}
-	if c.SSH.KeepaliveCountMax != d.SSH.KeepaliveCountMax {
-		note("ssh.keepalive_count_max", "v0.3.0")
-	}
-	if c.SSH.ReconnectMaxBackoff != d.SSH.ReconnectMaxBackoff {
-		note("ssh.reconnect_max_backoff", "v0.3.0")
 	}
 	aliases := make([]string, 0, len(c.Hosts))
 	for a := range c.Hosts {
@@ -198,8 +184,10 @@ func (c Config) Unapplied() []string {
 	}
 	slices.Sort(aliases)
 	for _, a := range aliases {
-		if len(c.Hosts[a].Forwards) > 0 {
-			note("hosts."+quoteKey(a)+".forwards", "v0.3.0")
+		for _, r := range c.Hosts[a].Forwards {
+			if r.Kind != "local" {
+				note(fmt.Sprintf("hosts.%s.forwards entry %q", quoteKey(a), r.Raw), "v0.4.0")
+			}
 		}
 	}
 	return notes

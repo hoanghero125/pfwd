@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/hoanghero125/pfwd/internal/desktop"
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/sshx"
+	"github.com/hoanghero125/pfwd/internal/state"
 	"github.com/hoanghero125/pfwd/internal/tui"
 )
 
@@ -50,7 +52,8 @@ func engineOptions(cfg config.Config, auto *bool, n engine.Notifier) engine.Opti
 		Interval: cfg.Detect.Interval,
 		Debounce: cfg.Detect.DebounceScans,
 		Settings: func(host engine.HostID) engine.HostSettings {
-			s := engine.HostSettings{Auto: cfg.AutoFor(string(host)), Filter: cfg.FilterFor(string(host))}
+			s := engine.HostSettings{Auto: cfg.AutoFor(string(host)), Filter: cfg.FilterFor(string(host)),
+				Forwards: configForwards(cfg.Hosts[string(host)].Forwards)}
 			if auto != nil {
 				s.Auto = *auto
 			}
@@ -62,8 +65,45 @@ func engineOptions(cfg config.Config, auto *bool, n engine.Notifier) engine.Opti
 		BindAddr:   cfg.Forward.Bind,
 		MaxConns:   cfg.Forward.MaxConns,
 		Notifier:   n,
+		MaxBackoff: cfg.SSH.ReconnectMaxBackoff,
+		AutoExpire: cfg.Forward.AutoExpire,
 	}
 	return o
+}
+
+// configForwards turns a host's config forwards into engine specs. Remote
+// and dynamic ones wait for v0.4.0; config validate notes them.
+func configForwards(rules []config.ForwardRule) []engine.ForwardSpec {
+	var specs []engine.ForwardSpec
+	for _, r := range rules {
+		if r.Kind != "local" {
+			continue
+		}
+		specs = append(specs, engine.ForwardSpec{Kind: engine.Local, BindAddr: r.Bind, LocalPort: r.Local, RemoteHost: r.RemoteHost, RemotePort: r.Remote})
+	}
+	return specs
+}
+
+// stateStore returns where forwards are remembered, or nil when
+// forward.restore is off or there is no state directory.
+func stateStore(cfg config.Config, logger *slog.Logger) *state.Store {
+	if !cfg.Forward.Restore {
+		return nil
+	}
+	path, err := config.StatePath()
+	if err != nil {
+		if logger != nil {
+			logger.Warn("not remembering forwards", "err", err)
+		}
+		return nil
+	}
+	return state.Open(path, state.Options{Logger: logger})
+}
+
+// keepaliveFor is the ssh config's ServerAlive settings when it sets them,
+// else the config file's.
+func keepaliveFor(hc *sshx.HostConfig, cfg config.Config) sshx.Keepalive {
+	return hc.KeepaliveOr(sshx.Keepalive{Interval: cfg.SSH.KeepaliveInterval, CountMax: cfg.SSH.KeepaliveCountMax})
 }
 
 // tuiOptions returns the TUI's settings from the config. getenv and goos

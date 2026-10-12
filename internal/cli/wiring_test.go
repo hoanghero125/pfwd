@@ -158,3 +158,59 @@ func TestBadFlagValuesAreUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineOptionsResilience(t *testing.T) {
+	cfg := config.Default()
+	cfg.SSH.ReconnectMaxBackoff = 45 * time.Second
+	cfg.Forward.AutoExpire = 5 * time.Minute
+	rules := []config.ForwardRule{}
+	for _, raw := range []string{"5432", "0.0.0.0:15432:db.internal:5432", "-D 1080"} {
+		r, err := config.ParseForward(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, r)
+	}
+	cfg.Hosts = map[string]config.Host{"devbox": {Forwards: rules}}
+	o := engineOptions(cfg, nil, nil)
+	if o.MaxBackoff != 45*time.Second || o.AutoExpire != 5*time.Minute {
+		t.Errorf("MaxBackoff %v, AutoExpire %v; want 45s and 5m", o.MaxBackoff, o.AutoExpire)
+	}
+	got := o.Settings("devbox").Forwards
+	want := []engine.ForwardSpec{
+		{Kind: engine.Local, LocalPort: 5432, RemotePort: 5432},
+		{Kind: engine.Local, BindAddr: "0.0.0.0", LocalPort: 15432, RemoteHost: "db.internal", RemotePort: 5432},
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("config forwards = %+v, want %+v (the -D entry waits for v0.4.0)", got, want)
+	}
+	if fs := o.Settings("gpu").Forwards; len(fs) != 0 {
+		t.Errorf("a host without forwards got %+v", fs)
+	}
+}
+
+func TestStateStoreFollowsRestore(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	t.Setenv("APPDATA", dir)
+	cfg := config.Default()
+	if s := stateStore(cfg, nil); s == nil {
+		t.Error("forward.restore = true remembers nothing")
+	}
+	cfg.Forward.Restore = false
+	if s := stateStore(cfg, nil); s != nil {
+		t.Error("forward.restore = false still remembers forwards")
+	}
+}
+
+func TestKeepaliveFromConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.SSH.KeepaliveInterval, cfg.SSH.KeepaliveCountMax = 20*time.Second, 4
+	if k := keepaliveFor(&sshx.HostConfig{}, cfg); k.Interval != 20*time.Second || k.CountMax != 4 {
+		t.Errorf("keepalive = %+v, want the config's 20s/4", k)
+	}
+	hc := &sshx.HostConfig{ServerAliveInterval: 5 * time.Second, ServerAliveCountMax: 2}
+	if k := keepaliveFor(hc, cfg); k.Interval != 5*time.Second || k.CountMax != 2 {
+		t.Errorf("keepalive = %+v, want the ssh config's 5s/2", k)
+	}
+}

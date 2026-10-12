@@ -1,0 +1,35 @@
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestParseForward(t *testing.T) {
+	tests := []struct {
+		in   string
+		want ForwardRule
+	}{
+		{"5432", ForwardRule{Kind: "local", Local: 5432, Remote: 5432}},
+		{"15432:5432", ForwardRule{Kind: "local", Local: 15432, Remote: 5432}},
+		{"15432:db.internal:5432", ForwardRule{Kind: "local", Local: 15432, RemoteHost: "db.internal", Remote: 5432}},
+		{"0.0.0.0:8080:localhost:3000", ForwardRule{Kind: "local", Bind: "0.0.0.0", Local: 8080, RemoteHost: "localhost", Remote: 3000}},
+		{"[::1]:8080:[fe80::2]:3000", ForwardRule{Kind: "local", Bind: "::1", Local: 8080, RemoteHost: "fe80::2", Remote: 3000}},
+		{" 8888 ", ForwardRule{Kind: "local", Local: 8888, Remote: 8888}},
+		{"-R 9000", ForwardRule{Kind: "remote", Local: 9000, Remote: 9000}},
+		{"-R 9000:3000", ForwardRule{Kind: "remote", Local: 3000, Remote: 9000}},
+		{"-D 1080", ForwardRule{Kind: "dynamic", Local: 1080}},
+	}
+	for _, tt := range tests {
+		got, err := ParseForward(tt.in)
+		tt.want.Raw = tt.in
+		if err != nil || got != tt.want {
+			t.Errorf("ParseForward(%q) = %+v, %v; want %+v", tt.in, got, err, tt.want)
+		}
+	}
+	for _, bad := range []string{"", "0", "70000", "abc", "1:2:3:4:5", "1::3", "-R", "-R 1:2:3", "-D x", "a b:1:c:2", "8080:host name:80", "[::1:8080:h:80"} {
+		if _, err := ParseForward(bad); err == nil || !strings.Contains(err.Error(), "invalid forward") {
+			t.Errorf("ParseForward(%q) = %v, want an invalid forward error", bad, err)
+		}
+	}
+}

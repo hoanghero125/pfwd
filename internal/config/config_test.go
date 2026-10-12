@@ -129,7 +129,11 @@ func TestLoadFullExample(t *testing.T) {
 		UI:     UI{Theme: ThemeLight, ShowHidden: true, Glyphs: GlyphsASCII},
 		Labels: map[uint16]string{8000: "API", 5173: "Frontend"},
 		Hosts: map[string]Host{
-			"devbox":   {Auto: ptr(true), Forwards: []string{"5432", "15432:db.internal:5432", "-D 1080"}},
+			"devbox": {Auto: ptr(true), Forwards: []ForwardRule{
+				{Kind: "local", Local: 5432, Remote: 5432, Raw: "5432"},
+				{Kind: "local", Local: 15432, RemoteHost: "db.internal", Remote: 5432, Raw: "15432:db.internal:5432"},
+				{Kind: "dynamic", Local: 1080, Raw: "-D 1080"},
+			}},
 			"gpu-node": {AutoPorts: detect.PortSet{{Lo: 8888, Hi: 8888}, {Lo: 6006, Hi: 6006}}, HasAutoPorts: true},
 			"my.box":   {AutoPorts: detect.PortSet{}, HasAutoPorts: true},
 		},
@@ -300,10 +304,19 @@ func TestUnapplied(t *testing.T) {
 		t.Fatal(err)
 	}
 	notes := strings.Join(c.Unapplied(), "\n")
-	for _, key := range []string{"forward.auto_expire", "forward.restore", "forward.privileged_offset", "ssh.keepalive_interval", "hosts.devbox.forwards"} {
+	for _, key := range []string{"forward.privileged_offset", "hosts.devbox.forwards"} {
 		if !strings.Contains(notes, key) {
 			t.Errorf("notes lack %s:\n%s", key, notes)
 		}
+	}
+	// v0.3.0 applies these, and the local forwards of hosts.devbox.
+	for _, key := range []string{"auto_expire", "restore", "keepalive", "reconnect_max_backoff", "15432"} {
+		if strings.Contains(notes, key) {
+			t.Errorf("notes still mention %s:\n%s", key, notes)
+		}
+	}
+	if !strings.Contains(notes, "-D 1080") {
+		t.Errorf("the note for hosts.devbox.forwards should name the -D entry:\n%s", notes)
 	}
 }
 

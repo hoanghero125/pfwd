@@ -109,11 +109,10 @@ func TestConfigValidateNoFile(t *testing.T) {
 }
 
 func TestConfigValidateOK(t *testing.T) {
-	path := writeConfig(t, "[forward]\nrestore = false\n\n[hosts.devbox]\nforwards = [\"5432\"]\n")
+	path := writeConfig(t, "[forward]\nrestore = false\n\n[hosts.devbox]\nforwards = [\"5432\", \"-D 1080\"]\n")
 	code, out, errOut := run(t, "config", "validate")
 	want := "config ok: " + path + "\n" +
-		"note: forward.restore is accepted but applies from v0.3.0\n" +
-		"note: hosts.devbox.forwards is accepted but applies from v0.3.0\n"
+		"note: hosts.devbox.forwards entry \"-D 1080\" is accepted but applies from v0.4.0\n"
 	if code != 0 || out != want || errOut != "" {
 		t.Errorf("pfwd config validate: code %d, stdout %q, stderr %q; want 0 and\n%s", code, out, errOut, want)
 	}

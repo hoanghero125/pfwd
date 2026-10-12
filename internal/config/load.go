@@ -286,15 +286,18 @@ func (v *validator) convert(r rawConfig) Config {
 
 	for _, alias := range sortedKeys(r.Hosts) {
 		rh := r.Hosts[alias]
-		h := Host{Auto: rh.Auto, Forwards: rh.Forwards}
+		h := Host{Auto: rh.Auto}
 		if rh.AutoPorts != nil {
 			h.HasAutoPorts = true
 			h.AutoPorts = v.ports([]string{"hosts", alias, "auto_ports"}, rh.AutoPorts)
 		}
 		for _, f := range rh.Forwards {
-			if err := checkForward(f); err != nil {
+			rule, err := ParseForward(f)
+			if err != nil {
 				v.add([]string{"hosts", alias, "forwards"}, "%v", err)
+				continue
 			}
+			h.Forwards = append(h.Forwards, rule)
 		}
 		c.Hosts[alias] = h
 	}
@@ -371,70 +374,3 @@ func (v *validator) ports(path []string, list []any) detect.PortSet {
 // checkForward checks a forward in the `pfwd fwd` grammar: PORT,
 // LOCAL:PORT, LOCAL:HOST:PORT, BIND:LOCAL:HOST:PORT, "-R PORT[:LOCAL]" or
 // "-D PORT". IPv6 hosts go in brackets.
-func checkForward(spec string) error {
-	bad := fmt.Errorf("invalid forward %q: use PORT, LOCAL:PORT, LOCAL:HOST:PORT, BIND:LOCAL:HOST:PORT, \"-R PORT[:LOCAL]\" or \"-D PORT\"", spec)
-	s := strings.TrimSpace(spec)
-	port := func(p string) bool {
-		n, err := strconv.ParseUint(p, 10, 16)
-		return err == nil && n > 0
-	}
-	if rest, ok := strings.CutPrefix(s, "-D "); ok {
-		if !port(strings.TrimSpace(rest)) {
-			return bad
-		}
-		return nil
-	}
-	if rest, ok := strings.CutPrefix(s, "-R "); ok {
-		parts := strings.Split(strings.TrimSpace(rest), ":")
-		if len(parts) > 2 {
-			return bad
-		}
-		for _, p := range parts {
-			if !port(p) {
-				return bad
-			}
-		}
-		return nil
-	}
-	parts := splitOutsideBrackets(s)
-	host := func(h string) bool { return h != "" && !strings.ContainsAny(h, " \t") }
-	switch len(parts) {
-	case 1:
-		if port(parts[0]) {
-			return nil
-		}
-	case 2:
-		if port(parts[0]) && port(parts[1]) {
-			return nil
-		}
-	case 3:
-		if port(parts[0]) && host(parts[1]) && port(parts[2]) {
-			return nil
-		}
-	case 4:
-		if host(parts[0]) && port(parts[1]) && host(parts[2]) && port(parts[3]) {
-			return nil
-		}
-	}
-	return bad
-}
-
-// splitOutsideBrackets splits on ':' except inside [...].
-func splitOutsideBrackets(s string) []string {
-	var parts []string
-	depth, start := 0, 0
-	for i, r := range s {
-		switch r {
-		case '[':
-			depth++
-		case ']':
-			depth--
-		case ':':
-			if depth == 0 {
-				parts = append(parts, s[start:i])
-				start = i + 1
-			}
-		}
-	}
-	return append(parts, s[start:])
-}

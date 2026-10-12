@@ -123,11 +123,12 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	}
 	o := engineOptions(cfg, auto, notifier)
 	o.Logger = logger
+	o.State = stateStore(cfg, logger)
 	// Decrypted keys and the password live as long as this run, so
 	// reconnects don't ask again.
 	keys := sshx.NewKeyCache()
 	defer keys.Clear()
-	keepalive := hc.KeepaliveOr(sshx.Keepalive{Interval: cfg.SSH.KeepaliveInterval, CountMax: cfg.SSH.KeepaliveCountMax})
+	keepalive := keepaliveFor(hc, cfg)
 	o.Dial = func(ctx context.Context, _ engine.HostID, p engine.Prompts) (engine.Conn, error) {
 		c, err := sshx.Dial(ctx, hc, sshx.DialOptions{
 			Prompter: p, Credentials: p, Keys: keys, Keepalive: keepalive,
