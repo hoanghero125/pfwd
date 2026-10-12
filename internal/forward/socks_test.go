@@ -206,3 +206,34 @@ func TestListenPrivileged(t *testing.T) {
 		t.Error("offset 0 still mapped the port")
 	}
 }
+
+// slowDialer dials like recordDialer after a delay, as a dial that waits
+// for a reconnect does.
+type slowDialer struct {
+	recordDialer
+	delay time.Duration
+}
+
+func (d *slowDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	time.Sleep(d.delay)
+	return d.recordDialer.DialContext(ctx, network, addr)
+}
+
+// TestSOCKSReplyAfterSlowDial: a dial that takes longer than the
+// handshake timeout still sends its reply and pipes.
+func TestSOCKSReplyAfterSlowDial(t *testing.T) {
+	echo := echoServer(t)
+	d := &slowDialer{recordDialer: recordDialer{target: echo}, delay: 400 * time.Millisecond}
+	_, addr, _, _ := serve(t, "", d, Options{Handshake: SOCKS5(), HandshakeTimeout: 100 * time.Millisecond})
+	c, code := socksConnect(t, addr, socksRequest(3, []byte("db.internal"), 5432))
+	if code != 0 {
+		t.Fatalf("reply code %#x, want success", code)
+	}
+	if _, err := c.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "ping" {
+		t.Fatalf("echo = %q, %v", buf, err)
+	}
+}

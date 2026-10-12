@@ -179,12 +179,16 @@ func (l *Local) handle(ctx context.Context, client net.Conn) {
 			return
 		}
 		target, reply = t, r
+		// The dial may wait for a reconnect; only the reply gets a
+		// deadline again.
+		_ = client.SetDeadline(time.Time{})
 	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	remote, err := l.dialer.DialContext(dialCtx, "tcp", target)
 	cancel()
 	if reply != nil {
+		_ = client.SetWriteDeadline(time.Now().Add(l.handshakeTimeout))
 		if rerr := reply(err); rerr != nil && err == nil {
 			_ = remote.Close()
 			return
