@@ -57,7 +57,7 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 		timeout = defaultConnectTimeout
 	}
 
-	checker, err := newHostKeyChecker(hc, o.Prompter, o.AcceptNew)
+	checker, err := newHostKeyChecker(hc, o.Prompter, o.AcceptNew, log)
 	if err != nil {
 		return nil, &Error{Kind: ErrHostKey, Err: err, Msg: err.Error()}
 	}
