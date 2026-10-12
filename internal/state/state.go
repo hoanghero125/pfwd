@@ -134,7 +134,7 @@ func (s *Store) locked(fn func() error) error {
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s is locked by another pfwd for more than %s; try again, or delete %s.lock if no pfwd is running", s.path, s.o.LockTimeout, s.path)
+			return fmt.Errorf("%s is locked by another pfwd for more than %s; try again in a moment (the lock goes away when that pfwd exits)", s.path, s.o.LockTimeout)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

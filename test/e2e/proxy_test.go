@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"io"
 	"net"
 	"net/netip"
 	"sync"
@@ -11,8 +10,9 @@ import (
 	"time"
 )
 
-// dropProxy forwards TCP connections to a target, and can cut them all
-// and refuse new ones for a while, as a network failure would.
+// dropProxy forwards TCP connections to a target. It can cut them all, or
+// keep them open and silently drop their bytes, and refuse new ones for a
+// while, as a network failure would.
 type dropProxy struct {
 	ln     net.Listener
 	target string
@@ -21,6 +21,9 @@ type dropProxy struct {
 	mu        sync.Mutex
 	conns     map[net.Conn]struct{}
 	downUntil time.Time
+	// silentUntil makes open connections drop every byte, like a network
+	// path that died without closing anything; only keepalives notice.
+	silentUntil time.Time
 }
 
 // startProxy starts a proxy to target on a free local port; it stops when
@@ -52,6 +55,21 @@ func (p *dropProxy) drop(outage time.Duration) {
 	for c := range p.conns {
 		c.Close()
 	}
+}
+
+// blackhole keeps open connections open but drops their bytes, and closes
+// new ones at once, for outage.
+func (p *dropProxy) blackhole(outage time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.downUntil = time.Now().Add(outage)
+	p.silentUntil = p.downUntil
+}
+
+func (p *dropProxy) silent() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return time.Now().Before(p.silentUntil)
 }
 
 func (p *dropProxy) close() {
@@ -95,12 +113,12 @@ func (p *dropProxy) pipe(client net.Conn) {
 	copies.Add(2)
 	go func() {
 		defer copies.Done()
-		_, _ = io.Copy(server, client)
+		p.copy(server, client)
 		server.Close()
 	}()
 	go func() {
 		defer copies.Done()
-		_, _ = io.Copy(client, server)
+		p.copy(client, server)
 		client.Close()
 	}()
 	copies.Wait()
@@ -108,6 +126,23 @@ func (p *dropProxy) pipe(client net.Conn) {
 	delete(p.conns, client)
 	delete(p.conns, server)
 	p.mu.Unlock()
+}
+
+// copy moves bytes from src to dst until either fails, dropping them while
+// the proxy is silent.
+func (p *dropProxy) copy(dst, src net.Conn) {
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 && !p.silent() {
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				return
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // track records both ends so drop can close them; false during an outage.

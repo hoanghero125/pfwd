@@ -111,6 +111,9 @@ type fwd struct {
 	local  *forward.Local
 	cancel context.CancelFunc
 	done   chan struct{}
+	// want is the local port state.json keeps for a restored forward that
+	// had to listen on another one this run; 0 means Spec.LocalPort.
+	want uint16
 }
 
 // New returns an Engine. Call Close when done with it.

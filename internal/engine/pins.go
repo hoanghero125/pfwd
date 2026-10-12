@@ -69,8 +69,9 @@ func (e *Engine) applyPorts(host HostID, hs *hostState) {
 	}
 	e.mu.Unlock()
 	for _, f := range changed {
-		e.log.Info("forward changed by detection", "id", f.ID, "state", f.State, "reason", f.Pause)
-		e.emit(ForwardChanged{Forward: e.snapshot(f)})
+		snap := e.snapshot(f)
+		e.log.Info("forward changed by detection", "id", snap.ID, "state", snap.State, "reason", snap.Pause)
+		e.emit(ForwardChanged{Forward: snap})
 	}
 	e.expireForwards(host)
 }
@@ -164,12 +165,27 @@ func (e *Engine) remembered(host HostID, hs *hostState) []ForwardSpec {
 }
 
 // restore creates the forwards remembered returned, following OnConflict
-// for busy local ports.
+// for busy local ports. One that fails stays remembered, and one moved to
+// another local port keeps asking for its own next time.
 func (e *Engine) restore(host HostID, specs []ForwardSpec) {
 	for _, spec := range specs {
-		if _, err := e.forwardFollowingConflict(host, spec); err != nil && !errors.Is(err, errAlreadyForwarded) {
+		f, err := e.forwardFollowingConflict(host, spec)
+		switch {
+		case errors.Is(err, errAlreadyForwarded):
+		case err != nil:
 			e.log.Info("restore failed", "host", host, "port", spec.RemotePort, "err", err)
+			if !spec.Config {
+				e.mu.Lock()
+				e.hostLocked(host).unrestored = append(e.hostLocked(host).unrestored, spec)
+				e.mu.Unlock()
+			}
 			e.emit(RestoreFailed{Host: host, Spec: spec, Err: err})
+		case spec.LocalPort != 0 && f.Spec.LocalPort != spec.LocalPort:
+			e.mu.Lock()
+			if ff, ok := e.forwards[f.ID]; ok {
+				ff.want = spec.LocalPort
+			}
+			e.mu.Unlock()
 		}
 	}
 	e.persist(host)
@@ -215,11 +231,24 @@ func (e *Engine) persistOnly(host HostID, pinnedOnly bool) {
 		return
 	}
 	var list []state.Forward
+	var running []ForwardSpec
 	for _, f := range e.forwards {
-		if f.Host != host || f.Spec.Kind != Local || f.Spec.Config || (pinnedOnly && !f.Spec.Pinned) {
+		if f.Host != host || f.Spec.Kind != Local || f.Spec.Config {
 			continue
 		}
-		list = append(list, toState(f.Spec))
+		spec := f.Spec
+		if f.want != 0 {
+			spec.LocalPort = f.want
+		}
+		running = append(running, spec)
+		if !pinnedOnly || spec.Pinned {
+			list = append(list, toState(spec))
+		}
+	}
+	for _, spec := range hs.unrestored {
+		if (!pinnedOnly || spec.Pinned) && !slices.ContainsFunc(running, func(r ForwardSpec) bool { return e.sameTarget(r, spec) }) {
+			list = append(list, toState(spec))
+		}
 	}
 	e.mu.Unlock()
 	slices.SortFunc(list, func(a, b state.Forward) int {

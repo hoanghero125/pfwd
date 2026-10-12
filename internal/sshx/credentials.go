@@ -8,7 +8,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -163,16 +165,32 @@ type asker struct {
 
 	// password is the last password typed, kept once the login succeeds.
 	password []byte
+	// usedKept is set when the kept password was sent in this login.
+	usedKept bool
 	// triedPassword and triedCode say which methods were attempted, for
 	// the error message.
 	triedPassword, triedCode bool
+	// canceled is set once the user cancels a prompt: x/crypto moves on to
+	// the next method after an error, so every later prompt is refused
+	// without asking, and the login ends.
+	canceled bool
+	// lastQuestions are the previous keyboard-interactive round's
+	// questions; the same ones again mean the answer was wrong.
+	lastQuestions []string
 }
 
 func (a *asker) ask(q CredentialQuestion) ([]byte, error) {
+	if a.canceled {
+		return nil, ErrCanceled
+	}
 	q.Host = a.hc.Alias
 	a.pause()
 	defer a.resume()
-	return a.p.AskCredential(a.ctx, q)
+	answer, err := a.p.AskCredential(a.ctx, q)
+	if errors.Is(err, ErrCanceled) {
+		a.canceled = true
+	}
+	return answer, err
 }
 
 // lazySigner is an encrypted key whose passphrase is asked for only when
@@ -242,6 +260,7 @@ func (a *asker) passwordCallback() func() (string, error) {
 		if tries == 0 {
 			if pw := a.keys.password(key); pw != nil {
 				tries++
+				a.usedKept = true
 				defer clear(pw)
 				a.setLast(pw)
 				return string(pw), nil
@@ -266,37 +285,52 @@ func (a *asker) setLast(pw []byte) {
 	a.password = append([]byte(nil), pw...)
 }
 
-// codeCallback answers keyboard-interactive questions one by one.
+// codeCallback answers keyboard-interactive questions one by one. A round
+// that repeats the previous round's questions is a retry: a PAM login that
+// asks for the password and then a code is not.
 func (a *asker) codeCallback() ssh.KeyboardInteractiveChallenge {
-	tries := 0
 	return func(name, instruction string, questions []string, echos []bool) ([]string, error) {
 		if len(questions) == 0 {
 			return nil, nil // an informational round; answering it is free
 		}
 		a.triedCode = true
+		retry := slices.Equal(questions, a.lastQuestions)
+		a.lastQuestions = slices.Clone(questions)
 		info := instruction
 		if name != "" {
 			info = name + "\n" + instruction
 		}
 		answers := make([]string, len(questions))
 		for i, q := range questions {
-			reply, err := a.ask(CredentialQuestion{Kind: Code, Prompt: q, Instruction: info, Echo: i < len(echos) && echos[i], Retry: tries > 0})
+			reply, err := a.ask(CredentialQuestion{Kind: Code, Prompt: q, Instruction: info, Echo: i < len(echos) && echos[i], Retry: retry})
 			if err != nil {
 				return nil, err
 			}
 			answers[i] = string(reply)
 			clear(reply)
 		}
-		tries++
 		return answers, nil
 	}
 }
 
-// done keeps the password after a successful login and zeroes the rest.
-func (a *asker) done(ok bool) {
-	if ok && a.password != nil {
+// done keeps the password after a successful login and zeroes the rest. A
+// kept password that the server refused is forgotten, so the next login
+// asks for the new one; servers such as OpenSSH hang up at MaxAuthTries
+// instead of asking again, so the password callback may never learn it.
+func (a *asker) done(err error) {
+	switch {
+	case err == nil && a.password != nil:
 		a.keys.setPassword(passwordKey(a.hc), a.password)
+	case err != nil && a.usedKept && authRefused(err):
+		a.keys.forgetPassword(passwordKey(a.hc))
 	}
 	clear(a.password)
 	a.password = nil
+}
+
+// authRefused reports whether a handshake error means the server refused
+// the login, rather than the connection failing.
+func authRefused(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "unable to authenticate") || strings.Contains(s, "too many authentication failures")
 }

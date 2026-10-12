@@ -5,12 +5,17 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/hoanghero125/pfwd/internal/sshx/sshtest"
 )
@@ -226,5 +231,119 @@ func TestDialWithoutPrompterNamesTheFix(t *testing.T) {
 	_, err := Dial(t.Context(), hc, DialOptions{dialAgent: noAgent})
 	if !errors.Is(err, ErrAuth) || strings.Contains(err.Error(), "v0.3.0") || !strings.Contains(err.Error(), "password") {
 		t.Errorf("err = %v, want ErrAuth about the password with no version promise", err)
+	}
+}
+
+// startRawServer serves cfg on a free port until the test ends, rejecting
+// every channel, and returns a config that trusts its host key.
+func startRawServer(t *testing.T, cfg *ssh.ServerConfig) *HostConfig {
+	t.Helper()
+	hostSigner, _ := ed25519Signer(t)
+	cfg.AddHostKey(hostSigner)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	t.Cleanup(func() {
+		ln.Close()
+		wg.Wait()
+	})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			nc, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			if sc, chans, reqs, err := ssh.NewServerConn(nc, cfg); err == nil {
+				sc.Close()
+				go ssh.DiscardRequests(reqs)
+				for nch := range chans {
+					_ = nch.Reject(ssh.Prohibited, "no")
+				}
+			}
+			nc.Close()
+		}
+	}()
+	dir := t.TempDir()
+	kh := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(kh, []byte(knownhosts.Line([]string{knownhosts.Normalize(ln.Addr().String())}, hostSigner.PublicKey())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host, port, _ := net.SplitHostPort(ln.Addr().String())
+	p, _ := strconv.Atoi(port)
+	return &HostConfig{Alias: "box", HostName: host, Port: p, User: "me", KnownHostsFiles: []string{kh}, StrictHostKeyChecking: "yes"}
+}
+
+func TestCancelEndsTheLogin(t *testing.T) {
+	dir := t.TempDir()
+	path, signer := writeKey(t, dir, "id_locked", "hunter2")
+	hc := startKeylessServer(t, sshtest.Options{AuthorizedKeys: []ssh.PublicKey{signer.PublicKey()}, Password: "pw", OneTimeCode: "123"})
+	hc.IdentityFiles = []string{path}
+	ask := &fakeAsker{answers: []string{"<cancel>"}}
+	_, err := Dial(t.Context(), hc, DialOptions{Credentials: ask, dialAgent: noAgent})
+	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "canceled") {
+		t.Errorf("err = %v, want ErrAuth saying the login was canceled", err)
+	}
+	if n := len(ask.questions()); n != 1 {
+		t.Errorf("asked %d times after one cancel, want 1", n)
+	}
+}
+
+// TestStalePasswordForgottenWhenServerHangsUp: OpenSSH disconnects at
+// MaxAuthTries instead of asking again, so the kept password that failed
+// must be dropped, and the failure must not be retried as a network error.
+func TestStalePasswordForgottenWhenServerHangsUp(t *testing.T) {
+	hc := startRawServer(t, &ssh.ServerConfig{
+		MaxAuthTries: 1,
+		PasswordCallback: func(_ ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
+			if string(pw) == "new" {
+				return nil, nil
+			}
+			return nil, errors.New("wrong")
+		},
+	})
+	keys := NewKeyCache()
+	defer keys.Clear()
+	keys.setPassword(passwordKey(hc), []byte("old"))
+	_, err := Dial(t.Context(), hc, DialOptions{Credentials: &fakeAsker{answers: []string{"new"}}, Keys: keys, dialAgent: noAgent})
+	if err == nil {
+		t.Fatal("the stale password logged in")
+	}
+	if !errors.Is(err, ErrAuth) {
+		t.Errorf("err = %v, want ErrAuth so reconnects stop", err)
+	}
+	if keys.password(passwordKey(hc)) != nil {
+		t.Error("the password the server rejected is still kept")
+	}
+	ask := &fakeAsker{answers: []string{"new"}}
+	mustDial(t, hc, DialOptions{Credentials: ask, Keys: keys})
+	if n := len(ask.questions()); n != 1 {
+		t.Errorf("asked %d times on the next try, want 1", n)
+	}
+}
+
+// TestPasswordThenCodeIsNotARetry: a PAM login asks for the password, then
+// a code; the code prompt must not say the password failed.
+func TestPasswordThenCodeIsNotARetry(t *testing.T) {
+	hc := startRawServer(t, &ssh.ServerConfig{
+		KeyboardInteractiveCallback: func(_ ssh.ConnMetadata, ch ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+			if a, err := ch("", "", []string{"Password: "}, []bool{false}); err != nil || len(a) != 1 || a[0] != "pw" {
+				return nil, errors.New("wrong")
+			}
+			if a, err := ch("", "", []string{"Verification code: "}, []bool{false}); err != nil || len(a) != 1 || a[0] != "123" {
+				return nil, errors.New("wrong")
+			}
+			return nil, nil
+		},
+	})
+	ask := &fakeAsker{answers: []string{"pw", "123"}}
+	mustDial(t, hc, DialOptions{Credentials: ask})
+	for _, q := range ask.questions() {
+		if q.Retry {
+			t.Errorf("%q is marked as a retry after a correct answer", q.Prompt)
+		}
 	}
 }

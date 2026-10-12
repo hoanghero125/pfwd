@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"strconv"
 	"testing"
 	"time"
@@ -10,17 +11,25 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/hoanghero125/pfwd/internal/engine"
+	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/tui"
 )
 
-// proxiedHost returns a HostConfig for service that goes through a proxy
-// the test can cut.
+// proxiedHost returns a dialer for service that goes through a proxy the
+// test can cut, with keepalives every second, as pfwd itself dials.
 func proxiedHost(t *testing.T, service string) (*dropProxy, engine.DialFunc) {
 	t.Helper()
 	hc := newHost(t, service)
 	p := startProxy(t, "127.0.0.1:"+strconv.Itoa(hc.Port))
 	hc.Port = p.port()
-	return p, dialer(hc)
+	keepalive := sshx.Keepalive{Interval: time.Second, CountMax: 2}
+	return p, func(ctx context.Context, _ engine.HostID, pr engine.Prompts) (engine.Conn, error) {
+		c, err := sshx.Dial(ctx, hc, sshx.DialOptions{Prompter: pr, Keepalive: keepalive})
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
+	}
 }
 
 // manualEngine is an engine with auto-forward off that retries quickly.

@@ -34,7 +34,7 @@ jobs:
   soak:
     name: soak (an hour of connection drops)
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 85 # longer than go test's 75m, so a hang ends in a goroutine dump
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -237,11 +237,19 @@ func (m Model) handleCredentialKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.modal.secret = m.modal.secret[:end]
 		}
 	default:
-		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
+		if isText(msg) {
 			m.typeSecret(msg.Text)
 		}
 	}
 	return m, nil
+}
+
+// isText reports whether a key press types text: no Ctrl or Alt, or both
+// at once, which is how Windows reports AltGr (@, \, {, } on many
+// layouts).
+func isText(msg tea.KeyPressMsg) bool {
+	mods := msg.Mod & (tea.ModCtrl | tea.ModAlt)
+	return msg.Text != "" && (mods == 0 || mods == tea.ModCtrl|tea.ModAlt)
 }
 
 // typeSecret adds text to the credential field, within its fixed buffer.
@@ -351,7 +359,7 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down":
 		m.setCursor(m.cursor + 1)
 	default:
-		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 && len([]rune(m.filter)) < maxFilter {
+		if isText(msg) && len([]rune(m.filter)) < maxFilter {
 			m.filter += msg.Text
 			m.rebuild()
 		}

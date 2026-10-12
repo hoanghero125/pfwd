@@ -377,3 +377,38 @@ func TestHelpFitsShortWindows(t *testing.T) {
 		}
 	}
 }
+
+func TestHostKeyModalNamesTheJumpHost(t *testing.T) {
+	q := hostKeyQuestion()
+	q.Host, q.Fingerprint, q.Saves = "bastion", "SHA256:jump", true
+	v := view(apply(connecting(t), engine.NewHostKeyPrompt("devbox", q, make(chan bool, 1))))
+	if !strings.Contains(v, "First connection to bastion") || strings.Contains(v, "First connection to devbox") {
+		t.Errorf("the modal must name the host whose key it shows:\n%s", v)
+	}
+}
+
+func TestAltGrCharactersReachTheSecret(t *testing.T) {
+	p, reply := credPrompt(sshx.Password, "alice")
+	m := apply(connecting(t), p)
+	// Windows reports AltGr as Ctrl+Alt with the character in Text.
+	m, _ = update(t, m, tea.KeyPressMsg{Code: 'q', Text: "@", Mod: tea.ModCtrl | tea.ModAlt})
+	_, _ = press(t, m, "x", "enter")
+	if a := <-reply; string(a.Secret) != "@x" {
+		t.Errorf("answer = %q, want @x", a.Secret)
+	}
+	m = connectedWith(newModel(newFakeEngine()), rp(5173, "node"))
+	m, _ = press(t, m, "/")
+	m, _ = update(t, m, tea.KeyPressMsg{Code: 'q', Text: "@", Mod: tea.ModCtrl | tea.ModAlt})
+	if m.filter != "@" {
+		t.Errorf("filter = %q, want @", m.filter)
+	}
+}
+
+func TestHostKeyChangeOnReconnectShowsTheWarning(t *testing.T) {
+	changed := &sshx.Error{Kind: sshx.ErrHostKey, Msg: "host key for devbox has changed: the server sent ssh-ed25519 SHA256:new, which does not match ~/.ssh/known_hosts:3. Someone may be intercepting the connection"}
+	m := apply(lostScreen(t), engine.SessionChanged{Host: "devbox", State: engine.SessionFailed, Err: changed})
+	v := view(m)
+	if !strings.Contains(v, "Someone may be intercepting") {
+		t.Errorf("a changed host key during a reconnect must be on screen:\n%s", v)
+	}
+}

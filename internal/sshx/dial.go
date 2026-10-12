@@ -167,7 +167,7 @@ func dialHost(ctx context.Context, hc *HostConfig, o DialOptions, hops *int, via
 	sc, chans, reqs, err := ssh.NewClientConn(nc, addr, cfg)
 	clock.stop()
 	if a != nil {
-		a.done(err == nil)
+		a.done(err)
 	}
 	if !stop() {
 		// ctx was canceled and closed the connection.
@@ -259,7 +259,7 @@ func handshakeError(hc *HostConfig, addr string, err error, offered int, notes [
 	}
 	var pe *passphraseError
 	switch {
-	case errors.Is(err, ErrCanceled):
+	case errors.Is(err, ErrCanceled) || (a != nil && a.canceled):
 		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf("logging in to %s was canceled; connect again to retry", hc.Alias)}
 	case errors.As(err, &pe):
 		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf(
@@ -272,6 +272,10 @@ func handshakeError(hc *HostConfig, addr string, err error, offered int, notes [
 		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf(
 			"logging in to %s as %s needs %s, and pfwd had no way to ask for it here; run pfwd in a terminal, or use a key: `ssh-copy-id %s` installs your public key there",
 			hc.Alias, hc.User, what, hc.Alias)}
+	}
+	if strings.Contains(err.Error(), "too many authentication failures") {
+		return &Error{Kind: ErrAuth, Err: err, Msg: fmt.Sprintf(
+			"%s refused the login after too many failed attempts (its MaxAuthTries); check your password and keys, and connect again", hc.Alias)}
 	}
 	if strings.Contains(err.Error(), "unable to authenticate") && a != nil && (a.triedPassword || a.triedCode) {
 		what := "password"

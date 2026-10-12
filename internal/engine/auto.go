@@ -28,6 +28,9 @@ type hostState struct {
 	// created this run; loaded once state.json was read for it, which must
 	// happen before pfwd writes the host's entry.
 	restored, loaded bool
+	// unrestored are remembered forwards that couldn't be created this
+	// run. They stay in state.json, so a busy port doesn't lose a pin.
+	unrestored []ForwardSpec
 }
 
 // errAlreadyForwarded tells autoForward that a forward appeared meanwhile.

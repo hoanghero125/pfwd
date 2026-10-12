@@ -199,3 +199,20 @@ func TestFileMode(t *testing.T) {
 		}
 	}
 }
+
+func TestLockTimeoutAdvice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	lf, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lf.Close()
+	if ok, err := tryLock(lf); !ok || err != nil {
+		t.Fatalf("tryLock = %v, %v", ok, err)
+	}
+	defer func() { _ = unlock(lf) }()
+	err = Open(path, Options{LockTimeout: 100 * time.Millisecond}).Save("devbox", sample)
+	if err == nil || !strings.Contains(err.Error(), "another pfwd") || strings.Contains(err.Error(), "delete") {
+		t.Errorf("err = %v; want it to name the other pfwd, without advising to delete the lock file (the OS frees it when that pfwd exits)", err)
+	}
+}

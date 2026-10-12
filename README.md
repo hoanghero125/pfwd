@@ -78,7 +78,7 @@ Each new forward is probed once, through the SSH connection, to see whether it s
 
 ## Dropped connections
 
-pfwd checks the connection every 15 seconds (`ssh.keepalive_interval`, or `ServerAliveInterval` from your ssh config) and reconnects on its own when it drops. It waits 0.5 s before the first attempt, then 1 s, 2 s and so on, up to 30 s between attempts, until the host is back. The forwards pause in the meantime but keep their local ports, so `localhost:5173` works again as soon as the connection does; a request made during the gap waits up to 10 seconds for it.
+pfwd checks the connection every 15 seconds (`ssh.keepalive_interval`, or `ServerAliveInterval` from your ssh config) and reconnects on its own when it drops. A connection the network closes is noticed at once; one that dies silently, after three unanswered checks (`ssh.keepalive_count_max`), so within about a minute. It waits 0.5 s before the first attempt, then 1 s, 2 s and so on, up to 30 s between attempts, until the host is back. The forwards pause in the meantime but keep their local ports, so `localhost:5173` works again as soon as the connection does; a request made during the gap waits up to 10 seconds for it.
 
 The top bar counts down to the next attempt. `c` tries right away, and `x` stops trying until you press `c`. A rejected login or a changed host key stops the retries, since trying again wouldn't help.
 
@@ -127,7 +127,7 @@ These flags override the file for one run: `--auto` and `--no-auto`, `--bind`, `
 
 pfwd resolves the host with `ssh -G`, so `Match`, `Include` and every default work exactly as they do for `ssh`; without OpenSSH it reads `~/.ssh/config` itself. It follows `ProxyJump` and `ProxyCommand`, checks `known_hosts` for every hop, and always refuses a changed host key.
 
-It logs in with ssh-agent (including the Windows OpenSSH agent) and your `IdentityFile` keys, and asks in the terminal for what the server wants beyond that: the passphrase of an encrypted key, a password, or a one-time code. Passphrases and passwords stay in memory for the session, so a reconnect doesn't ask again; one-time codes are asked for every time. Nothing typed is written to disk or to the log.
+It logs in with ssh-agent (including the Windows OpenSSH agent) and your `IdentityFile` keys, and asks in the terminal for what the server wants beyond that: the passphrase of an encrypted key, a password, or a one-time code. Passphrases, and passwords the server asks for with SSH's password method, stay in memory for the session, so a reconnect doesn't ask again. Answers to keyboard-interactive prompts, which is how servers ask for one-time codes (and some for passwords), are asked for every time. Nothing typed is written to disk or to the log.
 
 Nothing gets installed on the server. pfwd runs one probe, then a small `sh` loop on a single SSH channel that lists listening sockets with `ss` every 2 seconds, or reads `/proc/net/tcp` on busybox systems. It writes no files there and uploads no binary.
 

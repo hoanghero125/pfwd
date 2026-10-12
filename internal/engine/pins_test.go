@@ -328,3 +328,58 @@ func TestSetPinnedUnknownForward(t *testing.T) {
 		t.Error("pinning an unknown forward succeeded")
 	}
 }
+
+func TestFailedRestoreKeepsThePin(t *testing.T) {
+	echo := echoServer(t)
+	dir := t.TempDir()
+	busy := freePort(t)
+	holdLocal(t, busy)
+	pin := state.Forward{Kind: "local", Local: busy, RemoteHost: "127.0.0.1", Remote: echo, Pinned: true}
+	if err := storeAt(dir).Save("devbox", []state.Forward{pin}); err != nil {
+		t.Fatal(err)
+	}
+	c := newFakeConn(listen(echo, "python3"))
+	o := manualOptions(c)
+	o.State, o.OnConflict = storeAt(dir), ConflictFail
+	e := New(o)
+	e.Connect("devbox")
+	next[RestoreFailed](t, e, nil)
+	// A forward made meanwhile is saved without losing the pin.
+	if _, err := e.Forward("devbox", ForwardSpec{LocalPort: freePort(t), RemotePort: echo + 3}); err != nil {
+		t.Fatal(err)
+	}
+	if saved, _ := storeAt(dir).Load("devbox"); len(saved) != 2 {
+		t.Errorf("state while running = %+v, want the new forward and the pin that couldn't be restored", saved)
+	}
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if saved, _ := storeAt(dir).Load("devbox"); len(saved) != 1 || saved[0] != pin {
+		t.Errorf("state after quit = %+v, want the pin kept for next time", saved)
+	}
+}
+
+func TestRestoredOnOtherPortRemembersItsOwn(t *testing.T) {
+	echo := echoServer(t)
+	dir := t.TempDir()
+	busy := freePort(t)
+	holdLocal(t, busy)
+	if err := storeAt(dir).Save("devbox", []state.Forward{{Kind: "local", Local: busy, RemoteHost: "127.0.0.1", Remote: echo, Pinned: true}}); err != nil {
+		t.Fatal(err)
+	}
+	c := newFakeConn(listen(echo, "python3"))
+	o := manualOptions(c)
+	o.State, o.OnConflict = storeAt(dir), ConflictNext
+	e := New(o)
+	e.Connect("devbox")
+	got := next(t, e, func(ch ForwardChanged) bool { return ch.Forward.State == Active })
+	if got.Forward.Spec.LocalPort == busy {
+		t.Fatal("the test needs the restore to move to another port")
+	}
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if saved, _ := storeAt(dir).Load("devbox"); len(saved) != 1 || saved[0].Local != busy {
+		t.Errorf("state = %+v, want the pin to keep asking for port %d", saved, busy)
+	}
+}

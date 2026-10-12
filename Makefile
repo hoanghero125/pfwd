@@ -63,7 +63,7 @@ e2e:
 # Soak test: forwards kept up through connection drops, an hour by default.
 # PFWD_SOAK_DURATION and PFWD_SOAK_DROP_EVERY shorten it for a local run.
 soak:
-	go test -tags 'e2e soak' -run TestSoak -count=1 -timeout 90m -v ./test/e2e/...
+	go test -tags 'e2e soak' -run TestSoak -count=1 -timeout 75m -v ./test/e2e/...
 
 demo:
 	@echo "no demo tapes yet (added in M2)"

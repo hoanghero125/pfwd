@@ -82,7 +82,8 @@ func (m Model) modalLines() []string {
 		}
 	case modalHostKey:
 		q := md.prompt.Question
-		title = "First connection to " + safetext.Clean(string(md.prompt.Host))
+		// A jump host's key is asked about under the jump host's name.
+		title = "First connection to " + safetext.Clean(cmp.Or(q.Host, string(md.prompt.Host)))
 		trust := "trust for this connection"
 		if q.Saves {
 			trust = "trust and save to known_hosts"

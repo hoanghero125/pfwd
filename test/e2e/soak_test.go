@@ -5,6 +5,7 @@ package e2e
 import (
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -30,9 +31,12 @@ func soakSetting(t *testing.T, name string, def time.Duration) time.Duration {
 }
 
 // TestSoak keeps five forwards up for PFWD_SOAK_DURATION (1h) while the
-// connection drops every PFWD_SOAK_DROP_EVERY (5m) for a few seconds. After
-// every reconnect each forward must serve again; at the end all are Active
-// and no goroutine is left behind. Run it with make soak.
+// connection fails every PFWD_SOAK_DROP_EVERY (5m) for a few seconds:
+// closed outright on odd rounds, and gone silent on even ones, which only
+// keepalives notice. After every reconnect each forward must serve again.
+// The goroutine count may not grow from round to round, and at the end
+// all forwards are Active and no goroutine is left behind. Run it with
+// make soak.
 func TestSoak(t *testing.T) {
 	duration := soakSetting(t, "PFWD_SOAK_DURATION", time.Hour)
 	every := soakSetting(t, "PFWD_SOAK_DROP_EVERY", 5*time.Minute)
@@ -96,16 +100,36 @@ func TestSoak(t *testing.T) {
 
 	checkAll(0)
 	end := time.Now().Add(duration)
-	round := 0
+	round, baseline := 0, 0
 	for time.Now().Add(every).Before(end) || round == 0 {
 		time.Sleep(every)
 		round++
-		proxy.drop(outage)
+		how := "closed"
+		if round%2 == 0 {
+			how = "silent"
+			proxy.blackhole(outage)
+		} else {
+			proxy.drop(outage)
+		}
 		start := time.Now()
-		time.Sleep(time.Second)
+		// A silent path takes the keepalives (1 s, 2 missed) to notice.
+		deadline := time.Now().Add(10 * time.Second)
+		for connected.Load() && time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+		}
+		if connected.Load() {
+			t.Fatalf("round %d: the %s connection was never noticed as lost", round, how)
+		}
 		waitConnected(2 * time.Minute)
-		t.Logf("round %d: reconnected %v after the drop", round, time.Since(start).Round(time.Millisecond))
 		checkAll(round)
+		goroutines := runtime.NumGoroutine()
+		if round == 1 {
+			baseline = goroutines
+		}
+		t.Logf("round %d (%s): reconnected %v after the failure; %d goroutines", round, how, time.Since(start).Round(time.Millisecond), goroutines)
+	}
+	if grew := runtime.NumGoroutine() - baseline; round > 2 && grew >= max(5, round-1) {
+		t.Errorf("goroutines grew by %d over %d reconnects: something leaks per reconnect", grew, round)
 	}
 
 	for _, f := range eng.Forwards() {
@@ -120,7 +144,11 @@ func TestSoak(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Errorf("Close: %v", err)
 	}
-	<-drained
+	select {
+	case <-drained:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the engine's events never closed after Close")
+	}
 	proxy.close() // its goroutines started after IgnoreCurrent
 	goleak.VerifyNone(t, ignore)
 	t.Logf("%d drops survived in %v", round, duration)

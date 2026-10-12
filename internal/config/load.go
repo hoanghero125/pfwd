@@ -110,7 +110,6 @@ func Load(path string) (Config, error) {
 
 var wrongType = regexp.MustCompile(`cannot decode TOML (\w+(?: \w+)?) into .* of type (\S+)`)
 
-// describe words a decode error for users, without Go type names.
 // maxTypeErrors bounds how many wrong types decodeAll drops and retries.
 const maxTypeErrors = 50
 
@@ -185,6 +184,7 @@ func deleteKey(doc map[string]any, path []string) bool {
 	return true
 }
 
+// describe words a decode error for users, without Go type names.
 func describe(e *toml.DecodeError) string {
 	msg := strings.TrimPrefix(e.Error(), "toml: ")
 	m := wrongType.FindStringSubmatch(msg)
@@ -438,7 +438,3 @@ func (v *validator) ports(path []string, list []any) detect.PortSet {
 	}
 	return set
 }
-
-// checkForward checks a forward in the `pfwd fwd` grammar: PORT,
-// LOCAL:PORT, LOCAL:HOST:PORT, BIND:LOCAL:HOST:PORT, "-R PORT[:LOCAL]" or
-// "-D PORT". IPv6 hosts go in brackets.

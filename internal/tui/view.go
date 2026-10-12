@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/forward"
 	"github.com/hoanghero125/pfwd/internal/safetext"
+	"github.com/hoanghero125/pfwd/internal/sshx"
 )
 
 // The smallest window pfwd draws in; below it shows a "too small" note.
@@ -262,8 +264,10 @@ func (m Model) body(w, h int) []string {
 	var lines []string
 	host := safetext.Clean(string(m.host))
 	dots := m.th.g.dots
+	// After a loss the table stays, unless the server refused the
+	// reconnect: a changed host key or a rejected login needs reading.
 	showTable := len(m.rows) > 0 && (m.session == engine.Connected || m.session == engine.Reconnecting ||
-		(m.session == engine.SessionFailed && m.wasConnected))
+		(m.session == engine.SessionFailed && m.wasConnected && !refused(m.sessErr)))
 	switch {
 	case showTable:
 		return m.table(w, h)
@@ -305,6 +309,12 @@ func (m Model) body(w, h int) []string {
 		lines = append(lines, "")
 	}
 	return lines[:h]
+}
+
+// refused reports whether a connection failed because the server, or its
+// host key, refused it, rather than the network.
+func refused(err error) bool {
+	return errors.Is(err, sshx.ErrHostKey) || errors.Is(err, sshx.ErrAuth) || errors.Is(err, sshx.ErrUnsupported)
 }
 
 func (m Model) unavailable() []string {
