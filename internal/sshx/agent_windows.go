@@ -16,9 +16,9 @@ import (
 const openSSHAgentPipe = `\\.\pipe\openssh-ssh-agent`
 
 // openAgent connects to IdentityAgent, then SSH_AUTH_SOCK, then the Windows
-// OpenSSH agent pipe. SSH_AUTH_SOCK set by Git Bash points at an MSYS socket
-// that native programs can't open, so a failure there falls through to the
-// pipe.
+// OpenSSH agent pipe, then Pageant. SSH_AUTH_SOCK set by Git Bash points at
+// an MSYS socket that native programs can't open, so a failure there falls
+// through to the pipe.
 func openAgent(hc *HostConfig) (io.ReadWriteCloser, error) {
 	if hc.IdentityAgent != "" {
 		return dialAgentPath(hc.IdentityAgent)
@@ -28,7 +28,14 @@ func openAgent(hc *HostConfig) (io.ReadWriteCloser, error) {
 			return c, nil
 		}
 	}
-	return dialAgentPath(openSSHAgentPipe)
+	c, err := dialAgentPath(openSSHAgentPipe)
+	if err == nil {
+		return c, nil
+	}
+	if p, perr := openPageant(); perr == nil {
+		return p, nil
+	}
+	return nil, err
 }
 
 func dialAgentPath(path string) (io.ReadWriteCloser, error) {

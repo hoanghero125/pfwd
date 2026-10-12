@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -317,6 +318,24 @@ func (c *Conn) DialContext(ctx context.Context, network, addr string) (net.Conn,
 			"%s refuses TCP forwarding (AllowTcpForwarding or DisableForwarding in its sshd_config); ask the server's admin to allow it", c.alias)}
 	}
 	return nil, fmt.Errorf("%s could not connect to %s: %w; check that something still listens there", c.alias, addr, err)
+}
+
+// Listen asks the server to listen on bind:port and forward the
+// connections it accepts here, like ssh -R. Port 0 lets the server pick;
+// the listener's address says which. Closing the listener cancels the
+// forward. A refusal says what to check in the server's sshd_config.
+func (c *Conn) Listen(bind string, port uint16) (net.Listener, error) {
+	addr := net.JoinHostPort(bind, strconv.Itoa(int(port)))
+	ln, err := c.client.Listen("tcp", addr)
+	if err != nil {
+		hint := "the port may be taken there, or AllowTcpForwarding may be off in its sshd_config"
+		if ip, perr := netip.ParseAddr(bind); perr != nil || !ip.IsLoopback() {
+			hint = "listening on a non-loopback address needs GatewayPorts yes (or clientspecified) in its sshd_config, and the port must be free"
+		}
+		return nil, &Error{Kind: ErrForwardingRefused, Err: err, Msg: fmt.Sprintf(
+			"%s refused to listen on %s: %v; %s", c.alias, addr, err, hint)}
+	}
+	return ln, nil
 }
 
 // Output runs cmd on the server and returns its stdout. A non-zero exit
