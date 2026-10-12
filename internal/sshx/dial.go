@@ -10,6 +10,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -29,15 +31,25 @@ type DialOptions struct {
 	AcceptNew bool
 	// Logger receives debug details; nil discards them.
 	Logger *slog.Logger
+	// Keepalive sends keepalive@openssh.com requests and drops the
+	// connection when they go unanswered; the zero value turns it off.
+	Keepalive Keepalive
 
 	// dialAgent replaces openAgent in tests.
 	dialAgent func(*HostConfig) (io.ReadWriteCloser, error)
 }
 
-// Conn is an authenticated SSH connection.
+// Conn is an authenticated SSH connection. Close it when done, even after
+// Wait has returned: Close also stops its keepalive goroutine.
 type Conn struct {
 	client *ssh.Client
 	alias  string // for error messages
+	log    *slog.Logger
+
+	kaCancel context.CancelFunc
+	kaWG     sync.WaitGroup
+	// reason says why pfwd dropped the connection, for Wait.
+	reason atomic.Pointer[error]
 }
 
 // Dial connects to the host, verifies its host key and authenticates.
@@ -140,7 +152,14 @@ func Dial(ctx context.Context, hc *HostConfig, o DialOptions) (*Conn, error) {
 		return nil, handshakeError(hc, addr, err, len(signers), notes)
 	}
 	_ = nc.SetDeadline(time.Time{})
-	return &Conn{client: ssh.NewClient(sc, chans, reqs), alias: hc.Alias}, nil
+	c := &Conn{client: ssh.NewClient(sc, chans, reqs), alias: hc.Alias, log: log}
+	if o.Keepalive.Interval > 0 {
+		var kctx context.Context
+		kctx, c.kaCancel = context.WithCancel(context.Background())
+		c.kaWG.Add(1)
+		go c.keepalive(kctx, o.Keepalive)
+	}
+	return c, nil
 }
 
 func unsupported(alias, option string) error {
@@ -270,12 +289,22 @@ func (r *sessionReader) Close() error {
 	return nil
 }
 
-// Close closes the connection.
+// Close closes the connection and waits for its keepalive goroutine.
 func (c *Conn) Close() error {
-	return c.client.Close()
+	err := c.client.Close()
+	if c.kaCancel != nil {
+		c.kaCancel()
+	}
+	c.kaWG.Wait()
+	return err
 }
 
-// Wait blocks until the connection ends.
+// Wait blocks until the connection ends. When pfwd dropped it because
+// keepalives went unanswered, the error says so.
 func (c *Conn) Wait() error {
-	return c.client.Wait()
+	err := c.client.Wait()
+	if r := c.reason.Load(); r != nil {
+		return *r
+	}
+	return err
 }
