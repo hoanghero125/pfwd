@@ -310,3 +310,28 @@ func TestTUIOptionsListLocalPorts(t *testing.T) {
 		t.Error("the Reverse tab has no way to list local ports")
 	}
 }
+
+// TestSSHConfigSocketForwardIsSkipped: ssh -G prints LocalForward 2375
+// /var/run/docker.sock twice, the second time as a DynamicForward on the
+// same port. Neither starts a forward. The lines are as OpenSSH 9.9
+// prints them.
+func TestSSHConfigSocketForwardIsSkipped(t *testing.T) {
+	o := engineOptions(config.Default(), nil, nil)
+	hc := &sshx.HostConfig{
+		LocalForwards:   []string{"2375 /var/run/docker.sock", "8080 [localhost]:80"},
+		DynamicForwards: []string{"2375", "1080"},
+	}
+	var logs []string
+	addSSHForwards(&o, "devbox", hc, func(msg string) { logs = append(logs, msg) })
+	got := o.Settings("devbox").Forwards
+	want := []engine.ForwardSpec{
+		{Kind: engine.Local, LocalPort: 8080, RemoteHost: "localhost", RemotePort: 80},
+		{Kind: engine.Dynamic, LocalPort: 1080},
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("forwards = %+v, want %+v", got, want)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "docker.sock") {
+		t.Errorf("logs = %q, want one note about the socket forward", logs)
+	}
+}

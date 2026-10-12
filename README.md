@@ -94,7 +94,7 @@ Forwards listed under `[hosts.<alias>]` in the config file are always on, like p
 
 ## Remote forwards and SOCKS
 
-`r` lists the ports listening on the machine running pfwd. `enter` exposes the selected one on the server under the same port number, and `F` under another. The row shows `rev`, and a program on the server reaches your port at `localhost:<port>`. The server's sshd has to allow it (`AllowTcpForwarding yes`, the default); to listen on an address other than loopback there, it also needs `GatewayPorts`. In the config, `"-R 9000:3000"` exposes local port 3000 as port 9000 on the server.
+`r` lists the ports listening on the machine running pfwd. `enter` exposes the selected one on the server under the same port number, and `F` under another. The row shows `rev`, and a program on the server reaches your port at `localhost:<port>`. The server's sshd has to allow it (`AllowTcpForwarding yes`, the default); to listen on an address other than loopback there, it also needs `GatewayPorts`. In the config, `"-R 9000:3000"` exposes local port 3000 as port 9000 on the server. After a dropped connection, the server can hold the port for the old session a while longer; the row says `port busy` and pfwd keeps asking until the port is free. `ClientAliveInterval` in the server's sshd_config shortens that wait.
 
 `d` starts a SOCKS5 proxy on `localhost:1080` that makes its connections from the server, so a browser set to use it reaches what the server reaches. `d` again stops it. In the config, it is `"-D 1080"`. A SOCKS proxy only listens on loopback: on any other address, anyone on your network could reach everything the server can. `forward.allow_lan_socks = true` or `--allow-lan-socks` allows it anyway.
 

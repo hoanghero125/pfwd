@@ -69,6 +69,33 @@ func TestReverseTabExposesAPort(t *testing.T) {
 	}
 }
 
+// TestReverseTabTargetsTheListeningAddress: a server that listens only on
+// ::1, as Vite does on macOS, is exposed with ::1 as the target.
+func TestReverseTabTargetsTheListeningAddress(t *testing.T) {
+	e := newFakeEngine()
+	ports := []detect.RemotePort{{Port: 5173, Addrs: []string{"::1"}, Process: "node"}}
+	m := connectedWith(newModelWith(e, Options{LocalPorts: localPortsFake(ports, nil)}), rp(22, "sshd"))
+	m, _ = press(t, m, "r", "enter")
+	if len(e.specs) != 1 || e.specs[0].RemoteHost != "::1" {
+		t.Errorf("Forward calls = %+v, want the target ::1", e.specs)
+	}
+	_, _ = press(t, m, "r", "F", "9", "0", "0", "0", "enter")
+	if len(e.specs) != 2 || e.specs[1].RemoteHost != "::1" || e.specs[1].RemotePort != 9000 {
+		t.Errorf("Forward calls = %+v, want :9000 to ::1", e.specs)
+	}
+}
+
+// TestSOCKSRestoreFailedNamesTheProxy: a SOCKS proxy from the config that
+// can't start is reported as that, not as an unreadable state file.
+func TestSOCKSRestoreFailedNamesTheProxy(t *testing.T) {
+	m := apply(mainScreen(t), engine.RestoreFailed{Host: "devbox", Spec: engine.ForwardSpec{Kind: engine.Dynamic, BindAddr: "0.0.0.0", LocalPort: 1080},
+		Err: errors.New("a SOCKS proxy on 0.0.0.0 would let your network reach anything the server can")})
+	v := view(m)
+	if strings.Contains(v, "remembered forwards") || !strings.Contains(v, "Couldn't start the SOCKS proxy") {
+		t.Errorf("status:\n%s", v)
+	}
+}
+
 func TestReverseTabOtherServerPort(t *testing.T) {
 	e := newFakeEngine()
 	m := connectedWith(newModelWith(e, Options{LocalPorts: localPortsFake(localSample, nil)}))

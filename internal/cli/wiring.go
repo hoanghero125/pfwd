@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hoanghero125/pfwd/internal/config"
@@ -112,12 +113,23 @@ func configForwards(rules []config.ForwardRule) []engine.ForwardSpec {
 // can't use, such as a Unix-socket forward, is skipped and reported to
 // logf.
 func addSSHForwards(o *engine.Options, host engine.HostID, hc *sshx.HostConfig, logf func(string)) {
+	// ssh -G prints a LocalForward to a Unix socket a second time, as a
+	// DynamicForward on the same listen address; that one is not real.
+	socketListen := make(map[string]bool)
+	for _, v := range hc.LocalForwards {
+		if f := strings.Fields(v); len(f) == 2 && strings.Contains(f[1], "/") {
+			socketListen[f[0]] = true
+		}
+	}
 	var specs []engine.ForwardSpec
 	for _, lines := range []struct {
 		kind   string
 		values []string
 	}{{"localforward", hc.LocalForwards}, {"remoteforward", hc.RemoteForwards}, {"dynamicforward", hc.DynamicForwards}} {
 		for _, v := range lines.values {
+			if lines.kind == "dynamicforward" && socketListen[strings.TrimSpace(v)] {
+				continue
+			}
 			r, err := config.ParseSSHForward(lines.kind, v)
 			if err != nil {
 				logf(fmt.Sprintf("skipping a forward from the ssh config: %v", err))

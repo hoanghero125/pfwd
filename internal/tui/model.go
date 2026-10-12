@@ -445,10 +445,14 @@ func (m *Model) applyEvent(ev engine.Event) {
 	case engine.RestoreFailed:
 		switch {
 		case ev.Host != m.host:
-		case ev.Spec.RemotePort != 0:
-			m.event(statusErr, "Couldn't restore :%d: %s", ev.Spec.RemotePort, ev.Err.Error())
-		default:
+		case ev.Spec == (engine.ForwardSpec{}):
 			m.event(statusErr, "Couldn't read the remembered forwards: %s", ev.Err.Error())
+		case ev.Spec.Kind == engine.Dynamic:
+			m.event(statusErr, "Couldn't start the SOCKS proxy on %s: %s", localAddr(ev.Spec), ev.Err.Error())
+		case ev.Spec.Kind == engine.Remote:
+			m.event(statusErr, "Couldn't expose %s on :%d: %s", localAddr(ev.Spec), ev.Spec.RemotePort, ev.Err.Error())
+		default:
+			m.event(statusErr, "Couldn't restore :%d: %s", ev.Spec.RemotePort, ev.Err.Error())
 		}
 	}
 	m.rebuild()
