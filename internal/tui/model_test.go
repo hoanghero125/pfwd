@@ -28,6 +28,10 @@ type fakeEngine struct {
 	stopped    []string
 	auto       []bool
 	nextID     int
+
+	reconnects, stopRetries int
+	pins                    []string
+	pinErr                  error
 }
 
 func newFakeEngine() *fakeEngine {

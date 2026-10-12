@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"strings"
+	"unicode/utf8"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/hoanghero125/pfwd/internal/engine"
@@ -16,15 +19,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if k == "ctrl+c" && m.modal.kind != modalQuit {
-		var answer tea.Cmd
-		if m.modal.kind == modalHostKey {
-			answer = answerCmd(m.modal.prompt, false)
-		}
-		m.modal = modalState{}
+		answer := m.declinePrompt()
 		next, quit := m.requestQuit()
 		return next, tea.Batch(answer, quit)
 	}
 	switch {
+	case m.modal.kind == modalCredential:
+		return m.handleCredentialKey(msg)
 	case m.modal.kind != modalNone:
 		return m.handleModalKey(k)
 	case m.filtering:
@@ -60,7 +61,26 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		default:
 			m.modal = modalState{kind: modalPort, spec: specFor(*r.port)}
 		}
+	case "c":
+		host := m.host
+		switch m.session {
+		case engine.Reconnecting, engine.SessionFailed:
+			m.setStatus(statusInfo, "Reconnecting to %s%s", host, m.th.g.dots)
+			return m, m.reconnectCmd()
+		case engine.Connected:
+			m.setStatus(statusInfo, "Already connected to %s", host)
+		}
+	case "p":
+		f, ok := m.selectedForward()
+		if !ok {
+			return m, nil
+		}
+		return m, m.pinCmd(f, !f.Spec.Pinned)
 	case "x":
+		if m.session == engine.Reconnecting {
+			m.setStatus(statusInfo, "Stopped reconnecting; c tries again")
+			return m, m.stopRetryingCmd()
+		}
 		r, ok := m.current()
 		switch {
 		case !ok:
@@ -149,20 +169,87 @@ func (m Model) requestQuit() (Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// quitNow quits without asking, refusing an open host-key question.
+// quitNow quits without asking, refusing an open prompt.
 func (m Model) quitNow() (tea.Model, tea.Cmd) {
-	var answer tea.Cmd
-	if m.modal.kind == modalHostKey {
-		answer = answerCmd(m.modal.prompt, false)
-	}
-	m.modal = modalState{}
+	answer := m.declinePrompt()
 	return m, tea.Batch(answer, tea.Quit)
+}
+
+// declinePrompt closes the open modal; an open host-key question is
+// answered no, and a credential prompt canceled, with what was typed
+// zeroed. Queued credential prompts are canceled too.
+func (m *Model) declinePrompt() tea.Cmd {
+	var cmds []tea.Cmd
+	switch m.modal.kind {
+	case modalHostKey:
+		cmds = append(cmds, answerCmd(m.modal.prompt, false))
+	case modalCredential:
+		clear(m.modal.secret[:cap(m.modal.secret)])
+		cmds = append(cmds, cancelCredCmd(m.modal.cred))
+	}
+	for _, p := range m.creds {
+		cmds = append(cmds, cancelCredCmd(p))
+	}
+	m.modal, m.creds = modalState{}, nil
+	return tea.Batch(cmds...)
 }
 
 func answerCmd(p engine.HostKeyPrompt, ok bool) tea.Cmd {
 	return func() tea.Msg {
 		p.Answer(ok)
 		return nil
+	}
+}
+
+func answerCredCmd(p engine.CredentialPrompt, secret []byte) tea.Cmd {
+	return func() tea.Msg {
+		p.Answer(secret)
+		return nil
+	}
+}
+
+func cancelCredCmd(p engine.CredentialPrompt) tea.Cmd {
+	return func() tea.Msg {
+		p.Cancel()
+		return nil
+	}
+}
+
+// handleCredentialKey edits the credential field. Every printable key is
+// text, q included; enter sends it and esc cancels.
+func (m Model) handleCredentialKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		secret := append([]byte(nil), m.modal.secret...)
+		clear(m.modal.secret[:cap(m.modal.secret)])
+		p := m.modal.cred
+		m.modal = modalState{}
+		return m, answerCredCmd(p, secret)
+	case "esc":
+		clear(m.modal.secret[:cap(m.modal.secret)])
+		p := m.modal.cred
+		m.modal = modalState{}
+		return m, cancelCredCmd(p)
+	case "backspace":
+		if _, n := utf8.DecodeLastRune(m.modal.secret); n > 0 {
+			end := len(m.modal.secret) - n
+			clear(m.modal.secret[end:])
+			m.modal.secret = m.modal.secret[:end]
+		}
+	default:
+		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
+			m.typeSecret(msg.Text)
+		}
+	}
+	return m, nil
+}
+
+// typeSecret adds text to the credential field, within its fixed buffer.
+// Line breaks from a paste are dropped.
+func (m *Model) typeSecret(text string) {
+	text = strings.NewReplacer("\r", "", "\n", "").Replace(text)
+	if len(m.modal.secret)+len(text) <= cap(m.modal.secret) {
+		m.modal.secret = append(m.modal.secret, text...)
 	}
 }
 

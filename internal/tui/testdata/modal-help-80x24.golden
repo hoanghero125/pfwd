@@ -1,24 +1,24 @@
  pfwd  devbox ● connected                                     auto: on   ? help
 ────────────────────────────────────────────────────────────────────────────────
-  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
-▶ ● fwd   :5╭──────────────────────────────────────────────────────╮K/s ↑1.0K/s
-  ✗ fail  :8│ Keys                                                 │
-  ● fwd   :8│                                                      │↑0
-  ──────────│ ↑ ↓  j k     move                                    │──────────
-  —       :6│ g G          first, last                             │
-  —       :9│ enter  f     forward the port, or stop it            │
-            │ F            forward to another local port           │
+  STATE   RE╭──────────────────────────────────────────────────────╮FFIC
+▶ ● fwd   :5│ Keys                                                 │K/s ↑1.0K/s
+  ◌ pause :8│                                                      │
+  ● fwd   :8│ ↑ ↓  j k     move                                    │↑0
+  ──────────│ g G          first, last                             │──────────
+  —       :6│ enter  f     forward the port, or stop it            │
+  —       :9│ F            forward to another local port           │
             │ x            stop the forward                        │
             │ o            open in the browser                     │
             │ y            copy the URL                            │
+            │ p            pin: remember the forward next time     │
             │ a            turn auto-forward on or off             │
             │ /            filter by port, process or label        │
             │ h            show or hide ignored ports              │
             │ L            event log                               │
+            │ c            reconnect now                           │
+            │ x            stop retrying, while reconnecting       │
             │ ?  esc       close this help                         │
             │ q  ctrl+c    quit                                    │
-            ╰──────────────────────────────────────────────────────╯
-
-─ 1 ignored hidden, h shows ────────────────────────────────────────────────────
+─ 1 ignored ╰──────────────────────────────────────────────────────╯────────────
  ✓ Forwarded :5173 to localhost:5173
- enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit
+ enter stop  o open  y copy  p pin  a auto  / filter  L log  ? help  q quit

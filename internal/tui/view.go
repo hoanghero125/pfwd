@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"strings"
 
@@ -92,8 +93,14 @@ func (m Model) hostBar(w int) string {
 	switch m.session {
 	case engine.Connected:
 		state = th.ok.Render(g.active) + " connected"
+	case engine.Reconnecting:
+		state = th.warn.Render(g.connecting) + " " + m.reconnectText()
 	case engine.SessionFailed:
-		state = th.bad.Render(g.failed) + " failed"
+		word := "failed"
+		if m.wasConnected {
+			word = "disconnected"
+		}
+		state = th.bad.Render(g.failed) + " " + word
 	case engine.Closed:
 		state = th.faint.Render(g.closed + " closed")
 	default:
@@ -126,6 +133,15 @@ func (m Model) hostBar(w int) string {
 		return left
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// reconnectText counts down to the next reconnect attempt, in whole
+// seconds, or says one is under way.
+func (m Model) reconnectText() string {
+	if left := m.retryAt.Sub(m.now()); !m.retryAt.IsZero() && left > 0 {
+		return fmt.Sprintf("reconnecting in %ds", int(math.Ceil(left.Seconds())))
+	}
+	return "reconnecting" + m.th.g.dots
 }
 
 // viewLine is the rule above the status line. It names what is not on
@@ -184,21 +200,29 @@ type hintItem struct {
 // hintItems are the hints for what is on screen, in display order.
 func (m Model) hintItems() []hintItem {
 	help, quit := hintItem{"?", "help", 0}, hintItem{"q", "quit", 0}
+	auto, filter, log := hintItem{"a", "auto", 2}, hintItem{"/", "filter", 4}, hintItem{"L", "log", 1}
 	switch {
-	case m.session != engine.Connected && !m.logOpen:
-		return []hintItem{quit}
 	case m.filtering:
 		return []hintItem{{"enter", "keep", 0}, {"esc", "clear", 0}, {m.th.g.upDown, "move", 1}}
 	case m.logOpen:
 		return []hintItem{{m.th.g.upDown, "scroll", 0}, {"g G", "first, last", 1}, {"L", "close", 0}}
+	case m.session == engine.Reconnecting:
+		return []hintItem{{"c", "reconnect now", 0}, {"x", "stop retrying", 3}, log, help, quit}
+	case m.session == engine.SessionFailed:
+		return []hintItem{{"c", "reconnect", 0}, log, quit}
+	case m.session != engine.Connected:
+		return []hintItem{quit}
 	}
-	auto, filter, log := hintItem{"a", "auto", 2}, hintItem{"/", "filter", 4}, hintItem{"L", "log", 1}
 	r, ok := m.current()
 	switch {
 	case !ok:
 		return []hintItem{auto, log, help, quit}
 	case r.fwd != nil:
-		return []hintItem{{"enter", "stop", 0}, {"o", "open", 6}, {"y", "copy", 5}, auto, filter, log, help, quit}
+		pin := hintItem{"p", "pin", 3}
+		if r.fwd.Spec.Pinned {
+			pin.desc = "unpin"
+		}
+		return []hintItem{{"enter", "stop", 0}, {"o", "open", 6}, {"y", "copy", 5}, pin, auto, filter, log, help, quit}
 	default:
 		return []hintItem{{"enter", "forward", 0}, {"F", "other port", 3}, auto, filter, log, help, quit}
 	}
@@ -238,7 +262,11 @@ func (m Model) body(w, h int) []string {
 	var lines []string
 	host := safetext.Clean(string(m.host))
 	dots := m.th.g.dots
+	showTable := len(m.rows) > 0 && (m.session == engine.Connected || m.session == engine.Reconnecting ||
+		(m.session == engine.SessionFailed && m.wasConnected))
 	switch {
+	case showTable:
+		return m.table(w, h)
 	case m.session == engine.SessionFailed:
 		title := "Can't connect to " + host
 		if m.wasConnected {
@@ -251,11 +279,11 @@ func (m Model) body(w, h int) []string {
 			}
 			lines = append(lines, "")
 		}
-		lines = append(lines, "  Press q to quit.")
+		lines = append(lines, "  Press c to try again, or q to quit.")
+	case m.session == engine.Reconnecting:
+		lines = append(lines, "", "  Reconnecting to "+host+dots)
 	case m.session != engine.Connected:
 		lines = append(lines, "", "  Connecting to "+host+dots)
-	case len(m.rows) > 0:
-		return m.table(w, h)
 	case !m.scanned:
 		lines = append(lines, "", "  Connected. Looking for listening ports on "+host+dots)
 	case m.strategy == detect.None:
@@ -425,6 +453,8 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 		switch {
 		case f.State == engine.Failed && f.Err != nil:
 			process = th.faint.Render(safetext.Clean(f.Err.Error()))
+		case f.State == engine.Paused && f.Pause != engine.NotPaused:
+			process = th.faint.Render(f.Pause.String())
 		case r.port == nil:
 			process = th.faint.Render("not listening")
 		default:
@@ -448,22 +478,36 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 	return line
 }
 
-// labelCell is the LABEL column: the label, then the scheme once the probe
-// found one. A long label is cut before the scheme, so the scheme shows.
+// labelCell is the LABEL column: the label, then tags: the scheme once the
+// probe found one, and "pin" or "cfg" for forwards remembered across runs.
+// When they don't all fit, the scheme goes first, then the label is cut,
+// so the tags show.
 func (m Model) labelCell(r row, w int) string {
 	th := m.th
 	label := safetext.Clean(rowLabel(r))
-	var scheme string
-	if r.fwd != nil && (r.fwd.Scheme == forward.SchemeHTTP || r.fwd.Scheme == forward.SchemeHTTPS) {
-		scheme = r.fwd.Scheme.String()
+	var scheme, keep string
+	if f := r.fwd; f != nil {
+		if f.Scheme == forward.SchemeHTTP || f.Scheme == forward.SchemeHTTPS {
+			scheme = f.Scheme.String()
+		}
+		switch {
+		case f.Spec.Config:
+			keep = "cfg"
+		case f.Spec.Pinned:
+			keep = "pin"
+		}
 	}
-	if scheme == "" || w == 0 {
+	suffix := strings.TrimSpace(scheme + " " + keep)
+	if keep != "" && scheme != "" && ansi.StringWidth(label)+1+len(suffix) > w-1 {
+		suffix = keep
+	}
+	if suffix == "" || w == 0 {
 		return th.cell(label, w)
 	}
-	if room := w - 2 - len(scheme); label != "" && room > 1 {
-		return th.cell(ansi.Truncate(label, room, th.g.ellipsis)+" "+th.faint.Render(scheme), w)
+	if room := w - 2 - len(suffix); label != "" && room > 1 {
+		return th.cell(ansi.Truncate(label, room, th.g.ellipsis)+" "+th.faint.Render(suffix), w)
 	}
-	return th.cell(th.faint.Render(scheme), w)
+	return th.cell(th.faint.Render(suffix), w)
 }
 
 // processName is the cleaned process name, or unknown when the server

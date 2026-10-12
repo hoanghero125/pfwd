@@ -25,6 +25,9 @@ type Engine interface {
 	Stop(id string) error
 	Forwards() []engine.Forward
 	SetAuto(host engine.HostID, on bool)
+	Reconnect(host engine.HostID)
+	StopRetrying(host engine.HostID)
+	SetPinned(id string, pinned bool) error
 }
 
 // Options configure the TUI. The zero value draws Unicode glyphs, asks
@@ -117,6 +120,12 @@ type Model struct {
 	wasConnected bool
 	autoKnown    bool
 	auto         bool
+	// retryAt and attempt describe the next reconnect while reconnecting;
+	// retryAt is zero while an attempt is under way.
+	retryAt time.Time
+	attempt int
+	// creds are credential prompts waiting for the modal.
+	creds []engine.CredentialPrompt
 
 	scanned   bool
 	strategy  detect.Strategy
@@ -205,6 +214,11 @@ type (
 		text string
 		err  error
 	}
+	pinResultMsg struct {
+		port   uint16
+		pinned bool
+		err    error
+	}
 )
 
 func waitEvent(ch <-chan engine.Event) tea.Cmd {
@@ -236,8 +250,18 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Update applies a message.
+// Update applies a message. A credential prompt waiting in the queue
+// opens as soon as no other modal is open.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if nm, ok := next.(Model); ok {
+		nm.openQueuedPrompt()
+		return nm, cmd
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -271,6 +295,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus(statusInfo, "Sent %s to the terminal's clipboard", msg.text)
 			m.addLog(statusInfo, "The system clipboard didn't take it: "+msg.err.Error())
+		}
+	case pinResultMsg:
+		switch {
+		case msg.err != nil:
+			m.setStatus(statusErr, "%s", msg.err.Error())
+		case msg.pinned:
+			m.setStatus(statusOK, "Pinned :%d: it comes back next time pfwd connects", msg.port)
+		default:
+			m.setStatus(statusOK, "Unpinned :%d", msg.port)
+		}
+	case tea.PasteMsg:
+		if m.modal.kind == modalCredential {
+			m.typeSecret(msg.Content)
 		}
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -310,15 +347,35 @@ func (m *Model) applyEvent(ev engine.Event) {
 		if ev.Host != m.host {
 			return
 		}
+		prev := m.session
 		m.session = ev.State
 		switch ev.State {
 		case engine.Connected:
-			m.wasConnected = true
-			m.addLog(statusOK, "Connected to "+host)
+			if m.wasConnected {
+				m.event(statusOK, "Reconnected to %s", host)
+			} else {
+				m.addLog(statusOK, "Connected to "+host)
+			}
+			m.wasConnected, m.sessErr = true, nil
+			m.retryAt, m.attempt = time.Time{}, 0
+		case engine.Reconnecting:
+			m.retryAt, m.attempt = ev.RetryAt, ev.Attempt
+			switch {
+			case prev != engine.Reconnecting:
+				// The ports listed before the drop are stale now.
+				m.ports, m.scanned = nil, false
+				m.event(statusErr, "Lost the connection to %s; reconnecting", host)
+				if ev.Err != nil {
+					m.addLog(statusErr, ev.Err.Error())
+				}
+			case !ev.RetryAt.IsZero() && ev.Err != nil:
+				m.addLog(statusErr, fmt.Sprintf("Reconnect attempt %d failed: %s", ev.Attempt-1, ev.Err.Error()))
+			}
 		case engine.SessionFailed:
 			m.sessErr = ev.Err
-			if m.modal.kind == modalHostKey {
-				m.modal = modalState{}
+			m.closePrompts()
+			if m.wasConnected {
+				m.setStatus(statusErr, "Disconnected from %s; c reconnects", host)
 			}
 			if ev.Err != nil {
 				m.addLog(statusErr, "Connection to "+host+" ended: "+ev.Err.Error())
@@ -362,8 +419,44 @@ func (m *Model) applyEvent(ev engine.Event) {
 		if ev.Host == m.host {
 			m.modal = modalState{kind: modalHostKey, prompt: ev}
 		}
+	case engine.CredentialPrompt:
+		if ev.Host == m.host {
+			m.creds = append(m.creds, ev)
+		}
+	case engine.RestoreFailed:
+		switch {
+		case ev.Host != m.host:
+		case ev.Spec.RemotePort != 0:
+			m.event(statusErr, "Couldn't restore :%d: %s", ev.Spec.RemotePort, ev.Err.Error())
+		default:
+			m.event(statusErr, "Couldn't read the remembered forwards: %s", ev.Err.Error())
+		}
 	}
 	m.rebuild()
+}
+
+// maxSecret caps the credential field. Its buffer is allocated at this
+// size and never grows, so zeroing it removes every byte typed.
+const maxSecret = 1024
+
+// openQueuedPrompt opens the next credential prompt when no modal is open.
+func (m *Model) openQueuedPrompt() {
+	if m.modal.kind != modalNone || len(m.creds) == 0 {
+		return
+	}
+	p := m.creds[0]
+	m.creds = m.creds[1:]
+	m.modal = modalState{kind: modalCredential, cred: p, secret: make([]byte, 0, maxSecret)}
+}
+
+// closePrompts drops the host-key and credential prompts of a session that
+// ended, zeroing anything typed.
+func (m *Model) closePrompts() {
+	if m.modal.kind == modalHostKey || m.modal.kind == modalCredential {
+		clear(m.modal.secret[:cap(m.modal.secret)])
+		m.modal = modalState{}
+	}
+	m.creds = nil
 }
 
 func (m *Model) applyForwardChanged(f engine.Forward) {
@@ -371,16 +464,29 @@ func (m *Model) applyForwardChanged(f engine.Forward) {
 		return
 	}
 	prev, had := m.forwards[f.ID]
+	port := int(f.Spec.RemotePort)
 	if f.State == engine.Stopped {
 		if had {
 			m.dropForward(f.ID)
-			m.addLog(statusOK, "Stopped :"+itoa(int(f.Spec.RemotePort)))
+			if prev.State == engine.Paused && prev.Pause == engine.PortGone && prev.Spec.Auto && !prev.Spec.Pinned {
+				m.addLog(statusInfo, fmt.Sprintf("Removed :%d: its port stayed closed", port))
+			} else {
+				m.addLog(statusOK, "Stopped :"+itoa(port))
+			}
 		}
 		return
 	}
 	m.forwards[f.ID] = f
 	if !had && f.State != engine.Failed {
 		m.forwardStarted(f)
+	}
+	if had && prev.State != f.State {
+		switch {
+		case f.State == engine.Paused && f.Pause == engine.PortGone:
+			m.addLog(statusInfo, fmt.Sprintf("Paused :%d: the port closed on %s", port, safetext.Clean(string(m.host))))
+		case f.State == engine.Active && prev.State == engine.Paused && prev.Pause == engine.PortGone:
+			m.addLog(statusOK, fmt.Sprintf("Resumed :%d", port))
+		}
 	}
 	if f.Scheme != prev.Scheme && (f.Scheme == forward.SchemeHTTP || f.Scheme == forward.SchemeHTTPS) {
 		m.addLog(statusInfo, fmt.Sprintf(":%d speaks %s", f.Spec.RemotePort, f.Scheme))
@@ -416,14 +522,16 @@ func (m *Model) dropForward(id string) {
 
 // applyStats refreshes counters and computes traffic rates. It only
 // updates forwards the model already knows, so a stale snapshot never
-// brings back a stopped forward.
+// brings back a stopped forward, and only their counters: states and
+// errors arrive as events, and a snapshot taken before one must not undo
+// it.
 func (m *Model) applyStats(msg statsMsg) {
 	for _, f := range msg.forwards {
 		cur, ok := m.forwards[f.ID]
 		if !ok {
 			continue
 		}
-		cur.Stats, cur.State, cur.Err = f.Stats, f.State, f.Err
+		cur.Stats = f.Stats
 		m.forwards[f.ID] = cur
 		if prev, ok := m.samples[f.ID]; ok && msg.at.After(prev.at) {
 			dt := msg.at.Sub(prev.at).Seconds()
@@ -663,10 +771,12 @@ func (m Model) current() (row, bool) {
 	return row{}, false
 }
 
+// activeForwards counts the forwards quitting would stop: active ones, and
+// paused ones whose listeners still wait.
 func (m Model) activeForwards() int {
 	n := 0
 	for _, f := range m.forwards {
-		if f.State == engine.Active {
+		if f.State == engine.Active || f.State == engine.Paused {
 			n++
 		}
 	}
@@ -717,6 +827,30 @@ func (m Model) setAutoCmd(on bool) tea.Cmd {
 	return func() tea.Msg {
 		eng.SetAuto(host, on)
 		return nil
+	}
+}
+
+func (m Model) reconnectCmd() tea.Cmd {
+	eng, host := m.eng, m.host
+	return func() tea.Msg {
+		eng.Reconnect(host)
+		return nil
+	}
+}
+
+func (m Model) stopRetryingCmd() tea.Cmd {
+	eng, host := m.eng, m.host
+	return func() tea.Msg {
+		eng.StopRetrying(host)
+		return nil
+	}
+}
+
+func (m Model) pinCmd(f engine.Forward, pinned bool) tea.Cmd {
+	eng := m.eng
+	return func() tea.Msg {
+		err := eng.SetPinned(f.ID, pinned)
+		return pinResultMsg{port: f.Spec.RemotePort, pinned: pinned, err: err}
 	}
 }
 

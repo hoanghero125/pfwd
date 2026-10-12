@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"cmp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/safetext"
+	"github.com/hoanghero125/pfwd/internal/sshx"
 )
 
 type modalKind int
@@ -18,6 +21,7 @@ const (
 	modalConflict
 	modalHostKey
 	modalQuit
+	modalCredential
 )
 
 // modalState is the open modal, if any, and what it needs.
@@ -33,6 +37,10 @@ type modalState struct {
 	prompt          engine.HostKeyPrompt
 	// active is the number of active forwards (quit modal).
 	active int
+	// cred and secret belong to the credential modal. secret has a fixed
+	// capacity and is zeroed when the modal closes.
+	cred   engine.CredentialPrompt
+	secret []byte
 }
 
 // modalInner is the text width inside a modal box.
@@ -62,10 +70,13 @@ func (m Model) modalLines() []string {
 			{"x", "stop the forward"},
 			{"o", "open in the browser"},
 			{"y", "copy the URL"},
+			{"p", "pin: remember the forward next time"},
 			{"a", "turn auto-forward on or off"},
 			{"/", "filter by port, process or label"},
 			{"h", "show or hide ignored ports"},
 			{"L", "event log"},
+			{"c", "reconnect now"},
+			{"x", "stop retrying, while reconnecting"},
 			{"?  esc", "close this help"},
 			{"q  ctrl+c", "quit"},
 		}
@@ -106,6 +117,8 @@ func (m Model) modalLines() []string {
 		} else {
 			body = append(body, where, "", m.hint("enter", "use localhost:"+itoa(int(md.suggested)), "F", "other port", "esc", "cancel"))
 		}
+	case modalCredential:
+		title, body = m.credentialLines(md)
 	case modalQuit:
 		title = "Quit pfwd?"
 		active := "1 forward is active. Quitting stops it."
@@ -125,6 +138,40 @@ func (m Model) modalLines() []string {
 		lines = append(lines, strings.Split(ansi.Wordwrap(b, modalInner, ""), "\n")...)
 	}
 	return box(th, lines, modalInner)
+}
+
+// credentialLines are the title and body of the credential modal. Text
+// from the server is cleaned; a secret shows as one mask glyph per
+// character unless the server asked to echo it.
+func (m Model) credentialLines(md modalState) (string, []string) {
+	th := m.th
+	q := md.cred.Question
+	host := safetext.Clean(cmp.Or(q.Host, string(md.cred.Host)))
+	var title string
+	var body []string
+	action := "log in"
+	switch q.Kind {
+	case sshx.Passphrase:
+		title, action = "Unlock your key", "unlock"
+		body = append(body, "Passphrase for "+safetext.Clean(q.Prompt))
+	case sshx.Password:
+		title = "Password for " + safetext.Clean(q.Prompt) + "@" + host
+	default:
+		title = host + " asks"
+		if q.Instruction != "" {
+			body = append(body, safetext.Clean(q.Instruction), "")
+		}
+		body = append(body, safetext.Clean(q.Prompt))
+	}
+	typed := strings.Repeat(th.g.mask, utf8.RuneCount(md.secret))
+	if q.Echo {
+		typed = safetext.Clean(string(md.secret))
+	}
+	if q.Retry {
+		body = append(body, th.bad.Render("That didn't work. Try again."))
+	}
+	body = append(body, "  "+typed+th.accent.Render(th.g.block), "", m.hint("enter", action, "esc", "cancel"))
+	return title, body
 }
 
 // box draws a border around lines padded to inner cells.

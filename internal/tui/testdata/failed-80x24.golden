@@ -7,7 +7,7 @@
   keys offered. Add your key to ssh-agent (`ssh-add <key>`) or set
   IdentityFile for devbox in ~/.ssh/config, and check that `ssh devbox` works
 
-  Press q to quit.
+  Press c to try again, or q to quit.
 
 
 
@@ -21,4 +21,4 @@
 
 ────────────────────────────────────────────────────────────────────────────────
 
- q quit
+ c reconnect  L log  q quit
