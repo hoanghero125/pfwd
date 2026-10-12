@@ -128,6 +128,12 @@ An unknown host key or a passphrase is asked on the terminal. Without one, the c
 | 6 | A forward could not listen, here or on the server |
 | 130 | Interrupted with Ctrl+C |
 
+## When something doesn't work
+
+`pfwd doctor devbox` checks each step in order and says how to fix the first one that fails: how the ssh config resolves the host, whether it answers, its host key, the login, port detection, `-L` and `-R` forwarding on the server, and listening on this machine. It never writes `known_hosts`. Its exit code is 3, 4 or 5 when the connection, the login or the host key fails, as for the other commands.
+
+`pfwd doctor --bundle devbox` also writes `pfwd-doctor-<time>.zip` for a bug report: the version, your config file, how many forwards are remembered per host, the end of the log, and the report. Secrets and your home directory are taken out, but look inside before you attach it.
+
 ## Hosts and shell completion
 
 `pfwd hosts` lists the hosts in your ssh config, and the ones you have used pfwd with, most recent first (`--json` for scripts). Tab completion offers the same names:

@@ -20,8 +20,6 @@ func stubCmds() []*cobra.Command {
 			stub("status", "Show whether the daemon is running", "v0.5.0", cobra.NoArgs, ""),
 		),
 		stub("attach", "Open the TUI on the running daemon", "v0.5.0", cobra.NoArgs, ""),
-		stub("doctor [host]", "Diagnose config, auth, detection and port binding for a host", "v0.5.0", cobra.MaximumNArgs(1),
-			"  pfwd doctor devbox"),
 		stub("ui [host...]", "Open the web UI in the browser", "v0.6.0", cobra.ArbitraryArgs,
 			"  pfwd ui devbox"),
 	}

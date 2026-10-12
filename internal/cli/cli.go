@@ -51,6 +51,10 @@ func executeContext(ctx context.Context, args []string, stdout, stderr io.Writer
 	if errors.Is(err, errInterrupted) {
 		return exitInterrupted // the user knows; nothing to explain
 	}
+	var quiet *silentExit
+	if errors.As(err, &quiet) {
+		return quiet.code // the command printed its own report
+	}
 	fmt.Fprint(stderr, errorLine(err))
 	code := exitCode(err)
 	if code == exitUsage {
@@ -126,14 +130,8 @@ user@host. The flags below override the ssh config.`,
 	root.PersistentFlags().Bool("json", false, "print JSON instead of human-readable output")
 	root.PersistentFlags().String("config", "", "`path` of the config file to use, instead of $PFWD_CONFIG or the default that pfwd config path prints")
 	root.AddCommand(newVersionCmd(), newConfigCmd())
-	root.AddCommand(newHostsCmd(&flags), newLsCmd(&flags), newFwdCmd(&flags))
-	for _, c := range stubCmds() {
-		switch c.Name() {
-		case "doctor":
-			c.ValidArgsFunction = completeHosts(&flags, true)
-		}
-		root.AddCommand(c)
-	}
+	root.AddCommand(newHostsCmd(&flags), newLsCmd(&flags), newFwdCmd(&flags), newDoctorCmd(&flags))
+	root.AddCommand(stubCmds()...)
 	wireCompletion(root) // after SetOut: cobra captures the writer when it builds the shell commands
 	return root
 }

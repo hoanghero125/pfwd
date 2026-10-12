@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -132,5 +133,26 @@ func TestE2ELsAndFwd(t *testing.T) {
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 130 {
 		t.Errorf("pfwd fwd after Ctrl+C: %v, want exit code 130", err)
+	}
+}
+
+// TestE2EDoctor: every check passes against the ss container.
+func TestE2EDoctor(t *testing.T) {
+	dir := t.TempDir()
+	bin := buildPfwd(t, dir)
+	out, err := pfwdCmd(t, bin, dir, "doctor", "e2e-ss").CombinedOutput()
+	if err != nil {
+		t.Fatalf("pfwd doctor: %v\n%s", err, out)
+	}
+	for _, name := range []string{"login", "detection", "-L forwards", "-R forwards", "local bind"} {
+		found := false
+		for _, l := range strings.Split(string(out), "\n") {
+			if strings.Contains(l, name) && (strings.HasPrefix(l, "✓") || strings.HasPrefix(l, "+")) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("check %q did not pass:\n%s", name, out)
+		}
 	}
 }
