@@ -56,6 +56,12 @@ type Options struct {
 	// uses the free port nearby, "random" any free port, "fail" reports
 	// the error, and anything else ("ask") opens the conflict modal.
 	OnConflict string
+	// Hosts lists the hosts + offers, most recently used first; nil turns
+	// + off.
+	Hosts func(ctx context.Context) ([]HostChoice, error)
+	// Connect resolves a host picked with + and connects the engine to it,
+	// returning its ID.
+	Connect func(ctx context.Context, name string) (engine.HostID, error)
 	// LocalPorts lists this machine's listening ports for the Reverse tab
 	// (r); nil leaves the tab empty with a note.
 	LocalPorts func(ctx context.Context) ([]detect.RemotePort, error)
@@ -105,8 +111,43 @@ type rate struct{ in, out float64 }
 // if the server still lists it) or a detected port that is not forwarded.
 type row struct {
 	key  string
+	host engine.HostID
 	fwd  *engine.Forward
 	port *engine.Port
+}
+
+// HostChoice is a host the picker (+) offers.
+type HostChoice struct {
+	Name string
+	// LastUsed is when pfwd last used the host; zero when never.
+	LastUsed time.Time
+}
+
+// hostView is what the TUI knows about one host's connection and ports.
+type hostView struct {
+	session      engine.SessionState
+	sessErr      error
+	wasConnected bool
+	autoKnown    bool
+	auto         bool
+	// retryAt and attempt describe the next reconnect while reconnecting;
+	// retryAt is zero while an attempt is under way.
+	retryAt time.Time
+	attempt int
+
+	scanned   bool
+	strategy  detect.Strategy
+	detectErr error
+	ports     []engine.Port
+}
+
+// pickerState is the host picker's list and filter.
+type pickerState struct {
+	loading bool
+	err     error
+	choices []HostChoice
+	filter  string
+	cursor  int
 }
 
 // Model is the TUI state. Create it with New.
@@ -121,23 +162,19 @@ type Model struct {
 
 	width, height int
 
-	session      engine.SessionState
-	sessErr      error
-	wasConnected bool
-	autoKnown    bool
-	auto         bool
-	// retryAt and attempt describe the next reconnect while reconnecting;
-	// retryAt is zero while an attempt is under way.
-	retryAt time.Time
-	attempt int
+	// hosts are the tabs, in the order they were opened. views holds each
+	// host's state; host and the embedded hostView are the current tab's.
+	hosts []engine.HostID
+	views map[engine.HostID]*hostView
+	*hostView
+	// all shows every host's rows, with a HOST column (ctrl+a).
+	all    bool
+	picker pickerState
+
 	// creds are credential prompts waiting for the modal.
 	creds []engine.CredentialPrompt
 
-	scanned   bool
-	strategy  detect.Strategy
-	detectErr error
-	ports     []engine.Port
-
+	// forwards holds every host's forwards.
 	forwards map[string]engine.Forward
 	samples  map[string]sample
 	rates    map[string]rate
@@ -179,9 +216,22 @@ type Model struct {
 // New returns the model for one host. Connect the engine to the host
 // separately; the model reacts to its events.
 func New(e Engine, host engine.HostID, opts Options) Model {
+	return NewHosts(e, []engine.HostID{host}, opts)
+}
+
+// NewHosts returns the model for several hosts, one tab each, the first
+// one current. Connect the engine to them separately.
+func NewHosts(e Engine, hosts []engine.HostID, opts Options) Model {
+	views := make(map[engine.HostID]*hostView, len(hosts))
+	for _, h := range hosts {
+		views[h] = &hostView{}
+	}
 	return Model{
 		eng:        e,
-		host:       host,
+		host:       hosts[0],
+		hosts:      slices.Clone(hosts),
+		views:      views,
+		hostView:   views[hosts[0]],
 		opts:       opts,
 		th:         newTheme(opts.Theme != "light", opts.ASCII),
 		goos:       runtime.GOOS,
@@ -210,6 +260,7 @@ type (
 		at       time.Time
 	}
 	forwardResultMsg struct {
+		host engine.HostID
 		spec engine.ForwardSpec
 		fwd  engine.Forward
 		err  error
@@ -219,6 +270,7 @@ type (
 	}
 	stopResultMsg struct {
 		id     string
+		host   engine.HostID
 		remote uint16
 		err    error
 	}
@@ -295,7 +347,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyStats(msg)
 		return m, m.tick()
 	case forwardResultMsg:
-		return m, m.applyForwardResult(msg)
+		return m.onHost(msg.host, func(m Model) (tea.Model, tea.Cmd) {
+			cmd := m.applyForwardResult(msg)
+			return m, cmd
+		})
+	case hostsMsg:
+		m.picker.loading, m.picker.choices, m.picker.err = false, msg.hosts, msg.err
+	case hostAddedMsg:
+		m.addHost(msg)
 	case stopResultMsg:
 		m.applyStopResult(msg)
 	case openResultMsg:
@@ -359,6 +418,47 @@ func (m *Model) addLog(kind statusKind, text string) {
 }
 
 func (m *Model) applyEvent(ev engine.Event) {
+	if h, ok := eventHost(ev); ok && h != m.host {
+		v := m.views[h]
+		if v == nil {
+			return // a host this window doesn't show
+		}
+		host, view := m.host, m.hostView
+		m.host, m.hostView = h, v
+		m.applyHostEvent(ev)
+		m.host, m.hostView = host, view
+		m.rebuild()
+		return
+	}
+	m.applyHostEvent(ev)
+}
+
+// eventHost returns the host an event is about.
+func eventHost(ev engine.Event) (engine.HostID, bool) {
+	switch ev := ev.(type) {
+	case engine.SessionChanged:
+		return ev.Host, true
+	case engine.AutoChanged:
+		return ev.Host, true
+	case engine.AutoForwardFailed:
+		return ev.Host, true
+	case engine.PortsChanged:
+		return ev.Host, true
+	case engine.ForwardChanged:
+		return ev.Forward.Host, true
+	case engine.HostKeyPrompt:
+		return ev.Host, true
+	case engine.CredentialPrompt:
+		return ev.Host, true
+	case engine.RestoreFailed:
+		return ev.Host, true
+	}
+	return "", false
+}
+
+// applyHostEvent applies an event about the current host (applyEvent
+// makes the event's host current while it runs).
+func (m *Model) applyHostEvent(ev engine.Event) {
 	host := safetext.Clean(string(m.host))
 	switch ev := ev.(type) {
 	case engine.SessionChanged:
@@ -391,7 +491,7 @@ func (m *Model) applyEvent(ev engine.Event) {
 			}
 		case engine.SessionFailed:
 			m.sessErr = ev.Err
-			m.closePrompts()
+			m.closePrompts(ev.Host)
 			if m.wasConnected {
 				m.setStatus(statusErr, "Disconnected from %s; c reconnects", host)
 			}
@@ -471,10 +571,12 @@ func (m *Model) openQueuedPrompt() {
 	m.modal = modalState{kind: modalCredential, cred: p, secret: make([]byte, 0, maxSecret)}
 }
 
-// closePrompts drops the host-key and credential prompts of a session that
-// ended, zeroing anything typed.
-func (m *Model) closePrompts() {
-	if m.modal.kind == modalHostKey || m.modal.kind == modalCredential {
+// closePrompts drops the host-key and credential prompts of host's
+// session, which ended, zeroing anything typed.
+func (m *Model) closePrompts(host engine.HostID) {
+	open := (m.modal.kind == modalHostKey && m.modal.prompt.Host == host) ||
+		(m.modal.kind == modalCredential && m.modal.cred.Host == host)
+	if open {
 		clear(m.modal.secret[:cap(m.modal.secret)])
 		m.modal = modalState{}
 	}
@@ -541,7 +643,7 @@ func describe(f engine.Forward, host string) string {
 // auto-forward also goes to the status line; a manual one gets its status
 // from the forward's result.
 func (m *Model) forwardStarted(f engine.Forward) {
-	text := describe(f, safetext.Clean(string(m.host)))
+	text := describe(f, safetext.Clean(string(f.Host)))
 	if !f.Spec.Auto {
 		m.addLog(statusOK, text)
 		return
@@ -600,7 +702,7 @@ func (m *Model) applyForwardResult(msg forwardResultMsg) tea.Cmd {
 		m.forwardStarted(msg.fwd)
 	}
 	m.selected = "f:" + msg.fwd.ID
-	m.setStatus(statusOK, "%s", describe(msg.fwd, safetext.Clean(string(m.host))))
+	m.setStatus(statusOK, "%s", describe(msg.fwd, safetext.Clean(string(msg.fwd.Host))))
 	m.rebuild()
 	return nil
 }
@@ -620,7 +722,7 @@ func (m *Model) portTaken(msg forwardResultMsg, inUse *forward.PortInUseError) t
 		m.event(statusErr, "%s", inUse.Error())
 		return nil
 	}
-	m.modal = modalState{kind: modalConflict, spec: spec, busy: inUse.Port, bind: inUse.Addr, suggested: inUse.Suggested}
+	m.modal = modalState{kind: modalConflict, host: m.host, spec: spec, busy: inUse.Port, bind: inUse.Addr, suggested: inUse.Suggested}
 	return nil
 }
 
@@ -637,67 +739,29 @@ func (m *Model) applyStopResult(msg stopResultMsg) {
 		m.dropForward(msg.id)
 		m.addLog(statusOK, "Stopped "+what)
 	}
-	m.selected = portKey(msg.remote)
+	m.selected = portKey(msg.host, msg.remote)
 	m.setStatus(statusOK, "Stopped %s", what)
 	m.rebuild()
 }
 
-func portKey(p uint16) string { return "p:" + itoa(int(p)) }
+func portKey(host engine.HostID, p uint16) string { return "p:" + string(host) + ":" + itoa(int(p)) }
 
 // rebuild recomputes the rows: forwards first, then detected ports that
 // are not forwarded, each sorted by port, minus hidden ports and rows the
 // filter doesn't match. The cursor stays on the selected row's key, or on
 // the same index when that row is gone.
 func (m *Model) rebuild() {
-	byPort := make(map[uint16]*engine.Port, len(m.ports))
-	for i := range m.ports {
-		byPort[m.ports[i].Port] = &m.ports[i]
-	}
-	var fwds []engine.Forward
-	for _, f := range m.forwards {
-		fwds = append(fwds, f)
-	}
-	slices.SortFunc(fwds, func(a, b engine.Forward) int {
-		if a.Spec.RemotePort != b.Spec.RemotePort {
-			return int(a.Spec.RemotePort) - int(b.Spec.RemotePort)
-		}
-		return compareIDs(a.ID, b.ID)
-	})
-
 	m.total, m.hidden = 0, 0
-	rows := make([]row, 0, len(fwds)+len(m.ports))
-	// forwarded are server ports a local forward covers; own are the
-	// server-side listeners of remote forwards, which are pfwd's.
-	forwarded, own := make(map[uint16]bool), make(map[uint16]bool)
-	for i := range fwds {
-		f := &fwds[i]
-		r := row{key: "f:" + f.ID, fwd: f}
-		switch f.Spec.Kind {
-		case engine.Local:
-			forwarded[f.Spec.RemotePort] = true
-			r.port = byPort[f.Spec.RemotePort]
-		case engine.Remote:
-			own[f.Spec.RemotePort] = true
-		}
-		m.total++
-		if m.matches(r) {
-			rows = append(rows, r)
-		}
+	var fwdRows, portRows []row
+	hosts := []engine.HostID{m.host}
+	if m.all {
+		hosts = m.hosts
 	}
-	for i := range m.ports {
-		p := &m.ports[i]
-		switch {
-		case forwarded[p.Port], own[p.Port]:
-			continue
-		case p.Ignored && !m.showHidden:
-			m.hidden++
-			continue
-		}
-		m.total++
-		if r := (row{key: portKey(p.Port), port: p}); m.matches(r) {
-			rows = append(rows, r)
-		}
+	for _, h := range hosts {
+		f, p := m.hostRows(h, m.views[h])
+		fwdRows, portRows = append(fwdRows, f...), append(portRows, p...)
 	}
+	rows := append(fwdRows, portRows...)
 	m.rows = rows
 
 	idx := slices.IndexFunc(rows, func(r row) bool { return r.key == m.selected })
@@ -709,6 +773,61 @@ func (m *Model) rebuild() {
 		idx = min(m.cursor, len(rows)-1)
 	}
 	m.setCursor(idx)
+}
+
+// hostRows returns host's forward rows and its detected-port rows that
+// pass the filter, and counts them in total and hidden.
+func (m *Model) hostRows(host engine.HostID, v *hostView) (fwdRows, portRows []row) {
+	byPort := make(map[uint16]*engine.Port, len(v.ports))
+	for i := range v.ports {
+		byPort[v.ports[i].Port] = &v.ports[i]
+	}
+	var fwds []engine.Forward
+	for _, f := range m.forwards {
+		if f.Host == host {
+			fwds = append(fwds, f)
+		}
+	}
+	slices.SortFunc(fwds, func(a, b engine.Forward) int {
+		if a.Spec.RemotePort != b.Spec.RemotePort {
+			return int(a.Spec.RemotePort) - int(b.Spec.RemotePort)
+		}
+		return compareIDs(a.ID, b.ID)
+	})
+
+	// forwarded are server ports a local forward covers; own are the
+	// server-side listeners of remote forwards, which are pfwd's.
+	forwarded, own := make(map[uint16]bool), make(map[uint16]bool)
+	for i := range fwds {
+		f := &fwds[i]
+		r := row{key: "f:" + f.ID, host: host, fwd: f}
+		switch f.Spec.Kind {
+		case engine.Local:
+			forwarded[f.Spec.RemotePort] = true
+			r.port = byPort[f.Spec.RemotePort]
+		case engine.Remote:
+			own[f.Spec.RemotePort] = true
+		}
+		m.total++
+		if m.matches(r) {
+			fwdRows = append(fwdRows, r)
+		}
+	}
+	for i := range v.ports {
+		p := &v.ports[i]
+		switch {
+		case forwarded[p.Port], own[p.Port]:
+			continue
+		case p.Ignored && !m.showHidden:
+			m.hidden++
+			continue
+		}
+		m.total++
+		if r := (row{key: portKey(host, p.Port), host: host, port: p}); m.matches(r) {
+			portRows = append(portRows, r)
+		}
+	}
+	return fwdRows, portRows
 }
 
 // remotePort is the server port a row stands for.
@@ -842,7 +961,7 @@ func (m Model) forwardCmd(spec engine.ForwardSpec) tea.Cmd {
 	eng, host := m.eng, m.host
 	return func() tea.Msg {
 		f, err := eng.Forward(host, spec)
-		return forwardResultMsg{spec: spec, fwd: f, err: err}
+		return forwardResultMsg{host: host, spec: spec, fwd: f, err: err}
 	}
 }
 
@@ -852,7 +971,7 @@ func (m Model) enterCmd(spec engine.ForwardSpec) tea.Cmd {
 	eng, host := m.eng, m.host
 	return func() tea.Msg {
 		f, err := eng.Forward(host, spec)
-		return forwardResultMsg{spec: spec, fwd: f, err: err, resolve: true}
+		return forwardResultMsg{host: host, spec: spec, fwd: f, err: err, resolve: true}
 	}
 }
 
@@ -862,18 +981,18 @@ func (m Model) randomPortCmd(spec engine.ForwardSpec) tea.Cmd {
 	return func() tea.Msg {
 		port, err := forward.FreePort(bind)
 		if err != nil {
-			return forwardResultMsg{spec: spec, err: err}
+			return forwardResultMsg{host: host, spec: spec, err: err}
 		}
 		spec.LocalPort = port
 		f, err := eng.Forward(host, spec)
-		return forwardResultMsg{spec: spec, fwd: f, err: err}
+		return forwardResultMsg{host: host, spec: spec, fwd: f, err: err}
 	}
 }
 
 func (m Model) stopCmd(f engine.Forward) tea.Cmd {
-	eng, id, remote := m.eng, f.ID, f.Spec.RemotePort
+	eng, id, host, remote := m.eng, f.ID, f.Host, f.Spec.RemotePort
 	return func() tea.Msg {
-		return stopResultMsg{id: id, remote: remote, err: eng.Stop(id)}
+		return stopResultMsg{id: id, host: host, remote: remote, err: eng.Stop(id)}
 	}
 }
 

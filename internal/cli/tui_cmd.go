@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -55,23 +57,23 @@ func (f *rootFlags) register(fs *pflag.FlagSet) {
 	fs.BoolVar(&f.allowLANSocks, "allow-lan-socks", false, "let a SOCKS proxy listen on a non-loopback --bind, instead of forward.allow_lan_socks")
 }
 
-// hostArgs accepts exactly one host, as "alias" or "user@alias".
+// hostArgs accepts one host or more, each as "alias" or "user@alias".
 func hostArgs(_ *cobra.Command, args []string) error {
-	switch len(args) {
-	case 0:
+	if len(args) == 0 {
 		return &usageError{errors.New("missing host: run pfwd <host> with a host from ~/.ssh/config, like: pfwd devbox")}
-	case 1:
-		if _, _, err := sshx.SplitTarget(args[0]); err != nil {
+	}
+	for _, a := range args {
+		if _, _, err := sshx.SplitTarget(a); err != nil {
 			return &usageError{err}
 		}
-		return nil
-	default:
-		return &usageError{errors.New("one host at a time for now; several hosts in one window arrive in v0.5.0")}
 	}
+	return nil
 }
 
-// runTUI connects to target and runs the terminal UI until the user quits.
-func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
+// runTUI connects to targets, a tab each, and runs the terminal UI until
+// the user quits. The ssh flags (-p, -l, -i, -J) apply to every host named
+// here, not to hosts added later with +.
+func runTUI(cmd *cobra.Command, targets []string, f *rootFlags) error {
 	c, err := loadCommon(cmd, f)
 	if err != nil {
 		return err
@@ -88,13 +90,19 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 	ctx := cmd.Context()
 	d := newHostDialer(c.cfg, f, logger)
 	defer d.close()
-	host, err := d.add(ctx, target, true)
-	if err != nil {
-		return err
+	var hosts []engine.HostID
+	for _, target := range targets {
+		host, err := d.add(ctx, target, true)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+		}
+		hc := d.hostConfig(host)
+		logger.Info("starting", "version", version.Get().Version, "host", hc.Alias, "hostname", hc.HostName, "port", hc.Port,
+			"config", c.cfgPath, "not_applied_yet", c.cfg.Unapplied())
 	}
-	hc := d.hostConfig(host)
-	logger.Info("starting", "version", version.Get().Version, "host", hc.Alias, "hostname", hc.HostName, "port", hc.Port,
-		"config", c.cfgPath, "not_applied_yet", c.cfg.Unapplied())
 
 	var notifier engine.Notifier
 	if c.cfg.UI.Notifications {
@@ -111,14 +119,33 @@ func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
 			logger.Warn("engine shutdown", "err", err)
 		}
 	}()
-	eng.Connect(host)
+	for _, h := range hosts {
+		eng.Connect(h)
+	}
+	topts := tuiOptions(c.cfg, os.Getenv, runtime.GOOS)
+	topts.Hosts = func(context.Context) ([]tui.HostChoice, error) {
+		rows, err := listHosts(f.sshConfig)
+		choices := make([]tui.HostChoice, 0, len(rows))
+		for _, r := range rows {
+			choices = append(choices, tui.HostChoice{Name: r.Host, LastUsed: r.LastUsed})
+		}
+		return choices, err
+	}
+	topts.Connect = func(ctx context.Context, name string) (engine.HostID, error) {
+		h, err := d.add(ctx, name, false)
+		if err != nil {
+			return "", err
+		}
+		eng.Connect(h)
+		return h, nil
+	}
 
 	opts := []tea.ProgramOption{tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out)}
 	if noColor(os.Getenv("NO_COLOR"), f.noColor) {
 		// Bubble Tea only honors NO_COLOR values such as 1 or true.
 		opts = append(opts, tea.WithColorProfile(colorprofile.Ascii))
 	}
-	prog := tea.NewProgram(tui.New(eng, host, tuiOptions(c.cfg, os.Getenv, runtime.GOOS)), opts...)
+	prog := tea.NewProgram(tui.NewHosts(eng, hosts, topts), opts...)
 	final, err := prog.Run()
 	if err != nil {
 		return fmt.Errorf("run the terminal UI: %w", err)

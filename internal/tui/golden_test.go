@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"os"
@@ -159,6 +160,27 @@ func goldenCases() map[string]func(*testing.T) Model {
 		"disconnected": func(t *testing.T) Model {
 			return apply(lostScreen(t), engine.SessionChanged{Host: "devbox", State: engine.SessionFailed, Err: &sshx.Error{
 				Kind: sshx.ErrConnect, Msg: "stopped reconnecting to devbox; reconnect once the host is reachable"}})
+		},
+		"tabs": func(*testing.T) Model {
+			m := bothConnected(twoHosts(newFakeEngine(), Options{}))
+			return apply(m, engine.SessionChanged{Host: "gpu", State: engine.Reconnecting, Attempt: 1})
+		},
+		"all-hosts": func(t *testing.T) Model {
+			m := bothConnected(twoHosts(newFakeEngine(), Options{}))
+			m = apply(m, engine.ForwardChanged{Forward: engine.Forward{ID: "1", Host: "gpu", State: engine.Active,
+				Spec: engine.ForwardSpec{BindAddr: "127.0.0.1", LocalPort: 8888, RemoteHost: "127.0.0.1", RemotePort: 8888}}})
+			m, _ = press(t, m, "ctrl+a")
+			return m
+		},
+		"picker": func(t *testing.T) Model {
+			opts := Options{
+				Hosts: func(context.Context) ([]HostChoice, error) {
+					return []HostChoice{{Name: "staging", LastUsed: t0.Add(-2 * time.Hour)}, {Name: "devbox"}, {Name: "web-01"}}, nil
+				},
+				Connect: func(_ context.Context, name string) (engine.HostID, error) { return engine.HostID(name), nil },
+			}
+			m, _ := press(t, bothConnected(twoHosts(newFakeEngine(), opts)), "+")
+			return m
 		},
 		"kinds": func(t *testing.T) Model {
 			return apply(mainScreen(t), engine.ForwardChanged{Forward: remoteFwd}, engine.ForwardChanged{Forward: socksFwd})

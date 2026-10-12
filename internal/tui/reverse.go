@@ -57,7 +57,7 @@ func (m Model) handleReverseKey(k string) (tea.Model, tea.Cmd) {
 		}
 	case "F":
 		if p, ok := m.localSelected(); ok {
-			m.modal = modalState{kind: modalPort, spec: engine.ForwardSpec{Kind: engine.Remote, LocalPort: p.Port, RemoteHost: detect.Target(p.Addrs)}}
+			m.modal = modalState{kind: modalPort, host: m.host, spec: engine.ForwardSpec{Kind: engine.Remote, LocalPort: p.Port, RemoteHost: detect.Target(p.Addrs)}}
 		}
 	case "esc", "q", "r":
 		m.reverseOpen = false

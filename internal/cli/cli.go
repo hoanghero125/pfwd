@@ -100,7 +100,7 @@ func exitCode(err error) int {
 func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	var flags rootFlags
 	root := &cobra.Command{
-		Use:   "pfwd <host>",
+		Use:   "pfwd <host>...",
 		Short: "Detect and forward remote ports over SSH",
 		Long: `pfwd is the VS Code Ports panel for any terminal. It connects to a host from
 ~/.ssh/config, watches which TCP ports start listening on it, and forwards
@@ -108,18 +108,18 @@ them to localhost with one keypress.
 
 Name the host the way you would for ssh: an alias from ~/.ssh/config, or
 user@host. The flags below override the ssh config.`,
-		Example:       "  pfwd devbox\n  pfwd alice@10.0.0.5 -p 2222 -i ~/.ssh/id_work",
+		Example:       "  pfwd devbox\n  pfwd devbox gpu-node\n  pfwd alice@10.0.0.5 -p 2222 -i ~/.ssh/id_work",
 		Version:       version.Get().String(),
 		Args:          hostArgs,
 		SilenceErrors: true, // Execute prints errors itself
 		SilenceUsage:  true, // no usage dump on runtime errors
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTUI(cmd, args[0], &flags)
+			return runTUI(cmd, args, &flags)
 		},
 	}
 	// The ssh and forwarding flags apply to every command that connects.
 	flags.register(root.PersistentFlags())
-	root.ValidArgsFunction = completeHosts(&flags, true)
+	root.ValidArgsFunction = completeHosts(&flags, false)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetVersionTemplate("{{.Version}}\n")

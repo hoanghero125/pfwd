@@ -26,6 +26,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.modal.kind == modalCredential:
 		return m.handleCredentialKey(msg)
+	case m.modal.kind == modalPicker:
+		return m.handlePickerKey(msg)
+	case m.modal.kind == modalPort || m.modal.kind == modalConflict:
+		return m.onHost(m.modal.host, func(m Model) (tea.Model, tea.Cmd) { return m.handleModalKey(k) })
 	case m.modal.kind != modalNone:
 		return m.handleModalKey(k)
 	case m.filtering:
@@ -36,6 +40,36 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleReverseKey(k)
 	}
 
+	switch k {
+	case "tab", "shift+tab":
+		if len(m.hosts) > 1 {
+			step := 1
+			if k == "shift+tab" {
+				step = -1
+			}
+			m.switchHost(m.hostIndex() + step)
+		}
+		return m, nil
+	case "ctrl+a":
+		if len(m.hosts) > 1 {
+			m.all = !m.all
+			m.selected, m.selectedPort = "", 0
+			m.rebuild()
+		}
+		return m, nil
+	case "+":
+		return m, m.openPicker()
+	}
+	if r, ok := m.current(); ok && m.all {
+		// In the all-hosts view, keys act on the selected row's host.
+		return m.onHost(r.host, func(m Model) (tea.Model, tea.Cmd) { return m.tableKey(msg) })
+	}
+	return m.tableKey(msg)
+}
+
+// tableKey handles a key on the port table.
+func (m Model) tableKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	k := msg.String()
 	switch k {
 	case "up", "k":
 		m.setCursor(m.cursor - 1)
@@ -61,7 +95,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case r.fwd != nil:
 			m.setStatus(statusInfo, ":%d is already forwarded; stop it with x first", r.fwd.Spec.RemotePort)
 		default:
-			m.modal = modalState{kind: modalPort, spec: specFor(*r.port)}
+			m.modal = modalState{kind: modalPort, host: m.host, spec: specFor(*r.port)}
 		}
 	case "c":
 		host := m.host
@@ -317,7 +351,7 @@ func (m Model) handleModalKey(k string) (tea.Model, tea.Cmd) {
 				return m, m.forwardCmd(spec)
 			}
 		case "F":
-			m.modal = modalState{kind: modalPort, spec: m.modal.spec}
+			m.modal = modalState{kind: modalPort, host: m.modal.host, spec: m.modal.spec}
 		case "esc", "q":
 			m.modal = modalState{}
 		}

@@ -5,10 +5,8 @@
   ◌ pause :8000   localhost:8000  port closed                                               0    —
   ● fwd   :8888   localhost:8888  jupyter-lab                             Jupyter http pin  0    ↓0 ↑0
   ─────────────────────────────────────────────────────── detected, not forwarded ────────────────────────────────────────────────────────
-  —       :6379   —               redis-server                            Redis             —    —
-  —       :9090   —               ?                                       Prometheus        —    —
-                                          ╭──────────────────────────────────────────────────────╮
-                                          │ Keys                                                 │
+  —       :6379   —               redis-se╭──────────────────────────────────────────────────────╮
+  —       :9090   —               ?       │ Keys                                                 │
                                           │                                                      │
                                           │ ↑ ↓  j k     move                                    │
                                           │ g G          first, last                             │
@@ -22,6 +20,9 @@
                                           │ /            filter by port, process or label        │
                                           │ h            show or hide ignored ports              │
                                           │ L            event log                               │
+                                          │ tab          next host; shift+tab the one before     │
+                                          │ ctrl+a       all hosts in one table, or back         │
+                                          │ +            connect another host                    │
                                           │ r            expose a local port on the server       │
                                           │ d            start or stop a SOCKS proxy (1080)      │
                                           │ c            reconnect now                           │
@@ -29,7 +30,6 @@
                                           │ ?  esc       close this help                         │
                                           │ q  ctrl+c    quit                                    │
                                           ╰──────────────────────────────────────────────────────╯
-
 
 
 

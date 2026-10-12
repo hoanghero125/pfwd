@@ -62,10 +62,14 @@ func TestRootNeedsHost(t *testing.T) {
 	}
 }
 
-func TestRootOneHostOnly(t *testing.T) {
+func TestRootAcceptsSeveralHosts(t *testing.T) {
+	// Without a terminal, pfwd gets as far as asking for one.
 	code, _, errOut := run(t, "devbox", "gpu-node")
-	if code != 2 || !strings.Contains(errOut, "one host") {
-		t.Errorf("pfwd devbox gpu-node: code %d, stderr %q; want 2", code, errOut)
+	if code != 1 || !strings.Contains(errOut, "interactive terminal") {
+		t.Errorf("pfwd devbox gpu-node: code %d, stderr %q; want the terminal error", code, errOut)
+	}
+	if code, _, _ := run(t, "devbox", "$(reboot)"); code != 2 {
+		t.Errorf("a bad second host: code %d, want 2", code)
 	}
 }
 

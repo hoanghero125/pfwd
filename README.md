@@ -29,6 +29,7 @@ pfwd devbox            # an alias from ~/.ssh/config
 pfwd alice@10.0.0.5    # or user@host, like ssh
 pfwd devbox -p 2222 -i ~/.ssh/id_work -F ./ssh_config
 pfwd devbox -J bastion # through a jump host, like ssh -J
+pfwd devbox gpu-node   # several hosts, a tab each
 ```
 
 The first time you connect to a server, pfwd shows its host key fingerprint and asks before saving it to `known_hosts`, the way `ssh` does. Then the table fills in:
@@ -63,6 +64,9 @@ The first time you connect to a server, pfwd shows its host key fingerprint and 
 | `r` | list this machine's ports, to expose one on the server |
 | `d` | start or stop a SOCKS proxy on port 1080 |
 | `c` | reconnect now |
+| `tab`, `shift+tab` | next or previous host, with several open |
+| `ctrl+a` | every host in one table, with a HOST column; keys act on the selected row's host |
+| `+` | connect another host from your ssh config |
 | `?` | help |
 | `q` or `ctrl+c` | quit (asks first while forwards are active) |
 
@@ -190,7 +194,7 @@ Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux,
 
 ## Not supported yet
 
-- Several hosts in one window, and a background daemon with `pfwd attach` (v0.5.0).
+- A background daemon, `pfwd stop` and `pfwd attach` (v0.5.0).
 - Unix-socket forwards, and a SOCKS proxy on the server side (`ssh -R` with only a port).
 
 ## Why pfwd

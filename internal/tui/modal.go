@@ -22,11 +22,14 @@ const (
 	modalHostKey
 	modalQuit
 	modalCredential
+	modalPicker
 )
 
 // modalState is the open modal, if any, and what it needs.
 type modalState struct {
 	kind modalKind
+	// host is the host the port and conflict modals forward on.
+	host engine.HostID
 	// spec is the forward being made (port and conflict modals).
 	spec engine.ForwardSpec
 	// input and inputErr belong to the port modal's field.
@@ -126,6 +129,8 @@ func (m Model) modalLines() []string {
 		}
 	case modalCredential:
 		title, body = m.credentialLines(md)
+	case modalPicker:
+		title, body = m.pickerLines()
 	case modalQuit:
 		title = "Quit pfwd?"
 		active := "1 forward is active. Quitting stops it."
@@ -162,6 +167,9 @@ func helpKeys(th theme) [][2]string {
 		{"/", "filter by port, process or label"},
 		{"h", "show or hide ignored ports"},
 		{"L", "event log"},
+		{"tab", "next host; shift+tab the one before"},
+		{"ctrl+a", "all hosts in one table, or back"},
+		{"+", "connect another host"},
 		{"r", "expose a local port on the server"},
 		{"d", "start or stop a SOCKS proxy (1080)"},
 		{"c", "reconnect now"},
