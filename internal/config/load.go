@@ -233,6 +233,7 @@ type rawForward struct {
 	AutoExpire       string `toml:"auto_expire"`
 	MaxConns         int    `toml:"max_conns"`
 	Restore          bool   `toml:"restore"`
+	AllowLANSocks    bool   `toml:"allow_lan_socks"`
 }
 
 type rawSSH struct {
@@ -321,6 +322,7 @@ func (v *validator) convert(r rawConfig) Config {
 	c.Forward.AutoExpire = v.duration([]string{"forward", "auto_expire"}, r.Forward.AutoExpire, time.Second)
 	c.Forward.MaxConns = v.atLeast([]string{"forward", "max_conns"}, r.Forward.MaxConns, 1)
 	c.Forward.Restore = r.Forward.Restore
+	c.Forward.AllowLANSocks = r.Forward.AllowLANSocks
 
 	c.SSH.UseOpenSSHConfig = r.SSH.UseOpenSSHConfig
 	c.SSH.KeepaliveInterval = v.duration([]string{"ssh", "keepalive_interval"}, r.SSH.KeepaliveInterval, time.Second)

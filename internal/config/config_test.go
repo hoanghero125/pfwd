@@ -304,19 +304,9 @@ func TestUnapplied(t *testing.T) {
 		t.Fatal(err)
 	}
 	notes := strings.Join(c.Unapplied(), "\n")
-	for _, key := range []string{"forward.privileged_offset", "hosts.devbox.forwards"} {
-		if !strings.Contains(notes, key) {
-			t.Errorf("notes lack %s:\n%s", key, notes)
-		}
-	}
-	// v0.3.0 applies these, and the local forwards of hosts.devbox.
-	for _, key := range []string{"auto_expire", "restore", "keepalive", "reconnect_max_backoff", "15432"} {
-		if strings.Contains(notes, key) {
-			t.Errorf("notes still mention %s:\n%s", key, notes)
-		}
-	}
-	if !strings.Contains(notes, "-D 1080") {
-		t.Errorf("the note for hosts.devbox.forwards should name the -D entry:\n%s", notes)
+	// v0.4.0 applies every setting, -R and -D forwards included.
+	if notes != "" {
+		t.Errorf("notes = %q, want none", notes)
 	}
 }
 

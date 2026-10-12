@@ -448,3 +448,39 @@ func TestSplitPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestFromOptionsForwardLines(t *testing.T) {
+	env := testEnv(t)
+	opts := map[string][]string{
+		"localforward":   {"8080 localhost:80", "15432 db:5432"},
+		"remoteforward":  {"9000 localhost:3000"},
+		"dynamicforward": {"1080"},
+	}
+	hc, err := fromOptions("devbox", opts, Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(hc.LocalForwards, opts["localforward"]) || !reflect.DeepEqual(hc.RemoteForwards, opts["remoteforward"]) ||
+		!reflect.DeepEqual(hc.DynamicForwards, opts["dynamicforward"]) {
+		t.Errorf("forwards = %q %q %q", hc.LocalForwards, hc.RemoteForwards, hc.DynamicForwards)
+	}
+}
+
+func TestResolveFallbackReadsForwardLines(t *testing.T) {
+	env := testEnv(t)
+	sshDir := filepath.Join(env.Home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "Host devbox\n  LocalForward 8080 localhost:80\n  LocalForward 9090 localhost:90\n  DynamicForward 1080\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hc, err := Resolve(t.Context(), "devbox", Overrides{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hc.LocalForwards) != 2 || len(hc.DynamicForwards) != 1 {
+		t.Errorf("forwards = %q, %q", hc.LocalForwards, hc.DynamicForwards)
+	}
+}

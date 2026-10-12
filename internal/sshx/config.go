@@ -58,6 +58,11 @@ type HostConfig struct {
 	// ProxyJump and ProxyCommand are "" when unset or "none".
 	ProxyJump    string
 	ProxyCommand string
+	// LocalForwards, RemoteForwards and DynamicForwards are the raw values
+	// of the LocalForward, RemoteForward and DynamicForward lines.
+	LocalForwards   []string
+	RemoteForwards  []string
+	DynamicForwards []string
 }
 
 // Overrides are command-line settings that win over the ssh config.
@@ -297,8 +302,9 @@ func optionsFromFiles(alias string, o Overrides, env Env) (map[string][]string, 
 			}
 		}
 	}
-	// IdentityFile and CertificateFile accumulate across files, like OpenSSH.
-	for _, key := range []string{"identityfile", "certificatefile"} {
+	// IdentityFile, CertificateFile and the forward lines accumulate
+	// across files, like OpenSSH.
+	for _, key := range []string{"identityfile", "certificatefile", "localforward", "remoteforward", "dynamicforward"} {
 		for _, c := range cfgs {
 			vs, err := c.GetAll(alias, key)
 			if err != nil {
@@ -442,6 +448,9 @@ func fromOptions(alias string, opts map[string][]string, o Overrides, env Env) (
 	if o.Jump != "" {
 		hc.ProxyJump, hc.ProxyCommand = o.Jump, ""
 	}
+	hc.LocalForwards = opts["localforward"]
+	hc.RemoteForwards = opts["remoteforward"]
+	hc.DynamicForwards = opts["dynamicforward"]
 	return hc, nil
 }
 

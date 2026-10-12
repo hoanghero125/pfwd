@@ -1,14 +1,17 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"os"
 	"time"
 
 	"github.com/hoanghero125/pfwd/internal/config"
 	"github.com/hoanghero125/pfwd/internal/desktop"
+	"github.com/hoanghero125/pfwd/internal/detect"
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/state"
@@ -35,6 +38,9 @@ func (f *rootFlags) applyTo(cfg *config.Config, changed func(name string) bool) 
 			return nil, fmt.Errorf("invalid --interval %v: use 500ms or more", f.interval)
 		}
 		cfg.Detect.Interval = f.interval
+	}
+	if changed("allow-lan-socks") {
+		cfg.Forward.AllowLANSocks = f.allowLANSocks
 	}
 	var auto *bool
 	if changed("auto") {
@@ -74,21 +80,63 @@ func engineOptions(cfg config.Config, auto *bool, n engine.Notifier) engine.Opti
 		Notifier:   n,
 		MaxBackoff: cfg.SSH.ReconnectMaxBackoff,
 		AutoExpire: cfg.Forward.AutoExpire,
+		// The engine reads 0 as the default offset; privileged_offset = 0
+		// turns the mapping off.
+		PrivilegedOffset: cfg.Forward.PrivilegedOffset,
+		AllowLANSocks:    cfg.Forward.AllowLANSocks,
+	}
+	if cfg.Forward.PrivilegedOffset == 0 {
+		o.PrivilegedOffset = -1
 	}
 	return o
 }
 
-// configForwards turns a host's config forwards into engine specs. Remote
-// and dynamic ones wait for v0.4.0; config validate notes them.
+// configForwards turns a host's config forwards into engine specs.
 func configForwards(rules []config.ForwardRule) []engine.ForwardSpec {
 	var specs []engine.ForwardSpec
 	for _, r := range rules {
-		if r.Kind != "local" {
-			continue
+		switch r.Kind {
+		case "local":
+			specs = append(specs, engine.ForwardSpec{Kind: engine.Local, BindAddr: r.Bind, LocalPort: r.Local, RemoteHost: r.RemoteHost, RemotePort: r.Remote})
+		case "remote":
+			specs = append(specs, engine.ForwardSpec{Kind: engine.Remote, BindAddr: r.Bind, RemotePort: r.Remote, LocalPort: r.Local, RemoteHost: r.RemoteHost})
+		case "dynamic":
+			specs = append(specs, engine.ForwardSpec{Kind: engine.Dynamic, BindAddr: r.Bind, LocalPort: r.Local})
 		}
-		specs = append(specs, engine.ForwardSpec{Kind: engine.Local, BindAddr: r.Bind, LocalPort: r.Local, RemoteHost: r.RemoteHost, RemotePort: r.Remote})
 	}
 	return specs
+}
+
+// addSSHForwards adds host's LocalForward, RemoteForward and DynamicForward
+// lines from the ssh config after its config.toml forwards. A line pfwd
+// can't use, such as a Unix-socket forward, is skipped and reported to
+// logf.
+func addSSHForwards(o *engine.Options, host engine.HostID, hc *sshx.HostConfig, logf func(string)) {
+	var specs []engine.ForwardSpec
+	for _, lines := range []struct {
+		kind   string
+		values []string
+	}{{"localforward", hc.LocalForwards}, {"remoteforward", hc.RemoteForwards}, {"dynamicforward", hc.DynamicForwards}} {
+		for _, v := range lines.values {
+			r, err := config.ParseSSHForward(lines.kind, v)
+			if err != nil {
+				logf(fmt.Sprintf("skipping a forward from the ssh config: %v", err))
+				continue
+			}
+			specs = append(specs, configForwards([]config.ForwardRule{r})...)
+		}
+	}
+	if len(specs) == 0 {
+		return
+	}
+	settings := o.Settings
+	o.Settings = func(h engine.HostID) engine.HostSettings {
+		s := settings(h)
+		if h == host {
+			s.Forwards = append(append([]engine.ForwardSpec(nil), s.Forwards...), specs...)
+		}
+		return s
+	}
 }
 
 // stateStore returns where forwards are remembered, or nil when
@@ -124,6 +172,9 @@ func tuiOptions(cfg config.Config, getenv func(string) string, goos string) tui.
 		ShowHidden:      cfg.UI.ShowHidden,
 		BindAddr:        cfg.Forward.Bind,
 		OnConflict:      string(cfg.Forward.OnConflict),
+		LocalPorts: func(ctx context.Context) ([]detect.RemotePort, error) {
+			return detect.LocalPorts(ctx, goos, detect.RunLocal, os.ReadFile)
+		},
 	}
 	if cfg.UI.Theme == config.ThemeDark || cfg.UI.Theme == config.ThemeLight {
 		o.Theme = string(cfg.UI.Theme)

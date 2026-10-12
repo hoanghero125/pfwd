@@ -214,9 +214,10 @@ func TestEngineOptionsResilience(t *testing.T) {
 	want := []engine.ForwardSpec{
 		{Kind: engine.Local, LocalPort: 5432, RemotePort: 5432},
 		{Kind: engine.Local, BindAddr: "0.0.0.0", LocalPort: 15432, RemoteHost: "db.internal", RemotePort: 5432},
+		{Kind: engine.Dynamic, LocalPort: 1080},
 	}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("config forwards = %+v, want %+v (the -D entry waits for v0.4.0)", got, want)
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Errorf("config forwards = %+v, want %+v", got, want)
 	}
 	if fs := o.Settings("gpu").Forwards; len(fs) != 0 {
 		t.Errorf("a host without forwards got %+v", fs)
@@ -246,5 +247,66 @@ func TestKeepaliveFromConfig(t *testing.T) {
 	hc := &sshx.HostConfig{ServerAliveInterval: 5 * time.Second, ServerAliveCountMax: 2}
 	if k := keepaliveFor(hc, cfg); k.Interval != 5*time.Second || k.CountMax != 2 {
 		t.Errorf("keepalive = %+v, want the ssh config's 5s/2", k)
+	}
+}
+
+func TestEngineOptionsM4(t *testing.T) {
+	cfg := config.Default()
+	cfg.Forward.AllowLANSocks = true
+	cfg.Forward.PrivilegedOffset = 20000
+	var rules []config.ForwardRule
+	for _, raw := range []string{"-R 9000:3000", "-D 1080"} {
+		r, err := config.ParseForward(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, r)
+	}
+	cfg.Hosts = map[string]config.Host{"devbox": {Forwards: rules}}
+	o := engineOptions(cfg, nil, nil)
+	if !o.AllowLANSocks || o.PrivilegedOffset != 20000 {
+		t.Errorf("AllowLANSocks %v, PrivilegedOffset %d", o.AllowLANSocks, o.PrivilegedOffset)
+	}
+	got := o.Settings("devbox").Forwards
+	want := []engine.ForwardSpec{
+		{Kind: engine.Remote, RemotePort: 9000, LocalPort: 3000},
+		{Kind: engine.Dynamic, LocalPort: 1080},
+	}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("config forwards = %+v, want %+v", got, want)
+	}
+	cfg.Forward.PrivilegedOffset = 0
+	if o := engineOptions(cfg, nil, nil); o.PrivilegedOffset >= 0 {
+		t.Errorf("privileged_offset = 0 gave %d, want mapping off", o.PrivilegedOffset)
+	}
+}
+
+func TestSSHConfigForwardsJoinConfigOnes(t *testing.T) {
+	cfg := config.Default()
+	r, err := config.ParseForward("5432")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Hosts = map[string]config.Host{"devbox": {Forwards: []config.ForwardRule{r}}}
+	o := engineOptions(cfg, nil, nil)
+	hc := &sshx.HostConfig{LocalForwards: []string{"8080 localhost:80", "/tmp/s localhost:1"}, DynamicForwards: []string{"1080"}}
+	var logs []string
+	addSSHForwards(&o, "devbox", hc, func(msg string) { logs = append(logs, msg) })
+	got := o.Settings("devbox").Forwards
+	if len(got) != 3 || got[1] != (engine.ForwardSpec{Kind: engine.Local, LocalPort: 8080, RemoteHost: "localhost", RemotePort: 80}) ||
+		got[2] != (engine.ForwardSpec{Kind: engine.Dynamic, LocalPort: 1080}) {
+		t.Errorf("forwards = %+v", got)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "/tmp/s") {
+		t.Errorf("logs = %q, want one note about the unix socket forward", logs)
+	}
+	if fs := o.Settings("other").Forwards; len(fs) != 0 {
+		t.Errorf("another host got %+v", fs)
+	}
+}
+
+func TestTUIOptionsListLocalPorts(t *testing.T) {
+	if tuiOptions(config.Default(), func(string) string { return "" }, "linux").LocalPorts == nil {
+		t.Error("the Reverse tab has no way to list local ports")
 	}
 }

@@ -104,6 +104,91 @@ func ParseForward(spec string) (ForwardRule, error) {
 	return r, nil
 }
 
+// ParseSSHForward parses the value of an ssh config's LocalForward,
+// RemoteForward or DynamicForward (kind, lowercase, as ssh -G prints it):
+// "[bind:]port host:hostport", or "[bind:]port" for DynamicForward. A
+// RemoteForward's target is on this machine. Unix-socket forwards are not
+// supported.
+func ParseSSHForward(kind, value string) (ForwardRule, error) {
+	bad := fmt.Errorf("unsupported %s %q: pfwd takes [bind:]port host:port, TCP only", kind, value)
+	f := strings.Fields(value)
+	if strings.Contains(value, "/") {
+		return ForwardRule{}, bad
+	}
+	listen := func(s string) (string, uint16, bool) {
+		parts := splitOutsideBrackets(s)
+		switch len(parts) {
+		case 1:
+			p, ok := parsePort(parts[0])
+			return "", p, ok
+		case 2:
+			h, hok := parseHost(parts[0])
+			if h == "*" {
+				h = "0.0.0.0"
+			}
+			p, pok := parsePort(parts[1])
+			return h, p, hok && pok
+		}
+		return "", 0, false
+	}
+	target := func(s string) (string, uint16, bool) {
+		parts := splitOutsideBrackets(s)
+		if len(parts) != 2 {
+			return "", 0, false
+		}
+		h, hok := parseHost(parts[0])
+		p, pok := parsePort(parts[1])
+		return h, p, hok && pok
+	}
+	r := ForwardRule{Raw: value}
+	switch kind {
+	case "localforward", "remoteforward":
+		if len(f) != 2 {
+			return ForwardRule{}, bad
+		}
+		bind, lport, ok1 := listen(f[0])
+		host, tport, ok2 := target(f[1])
+		if !ok1 || !ok2 {
+			return ForwardRule{}, bad
+		}
+		r.Bind, r.RemoteHost = bind, host
+		if kind == "localforward" {
+			r.Kind, r.Local, r.Remote = "local", lport, tport
+		} else {
+			r.Kind, r.Remote, r.Local = "remote", lport, tport
+		}
+	case "dynamicforward":
+		if len(f) != 1 {
+			return ForwardRule{}, bad
+		}
+		bind, port, ok := listen(f[0])
+		if !ok {
+			return ForwardRule{}, bad
+		}
+		r.Kind, r.Bind, r.Local = "dynamic", bind, port
+	default:
+		return ForwardRule{}, bad
+	}
+	return r, nil
+}
+
+// parsePort parses a port from 1 to 65535.
+func parsePort(p string) (uint16, bool) {
+	n, err := strconv.ParseUint(p, 10, 16)
+	return uint16(n), err == nil && n > 0
+}
+
+// parseHost takes a host, removing the brackets around an IPv6 address.
+func parseHost(h string) (string, bool) {
+	if strings.HasPrefix(h, "[") {
+		if !strings.HasSuffix(h, "]") {
+			return "", false
+		}
+		h = h[1 : len(h)-1]
+	}
+	return h, h != "" && !strings.ContainsAny(h, " \t[]")
+}
+
 // splitOutsideBrackets splits on ':' except inside [...].
 func splitOutsideBrackets(s string) []string {
 	var parts []string
