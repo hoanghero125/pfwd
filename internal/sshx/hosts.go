@@ -56,6 +56,9 @@ func ConfigHosts(path string, env Env) ([]string, error) {
 						continue
 					}
 					for _, m := range matches {
+						if info, err := os.Stat(m); err == nil && info.IsDir() {
+							continue // OpenSSH reads a directory as empty
+						}
 						if err := read(m, depth+1); err != nil {
 							return err
 						}

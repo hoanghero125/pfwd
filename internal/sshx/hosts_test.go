@@ -54,3 +54,19 @@ func TestConfigHostsFileFlagAndLoops(t *testing.T) {
 		t.Errorf("without a config file: %q, %v; want none and no error", got, err)
 	}
 }
+
+// TestConfigHostsSkipsDirectories: an Include glob that also matches a
+// directory reads it as empty, as OpenSSH does.
+func TestConfigHostsSkipsDirectories(t *testing.T) {
+	env := testEnv(t)
+	sshDir := filepath.Join(env.Home, ".ssh")
+	writeFile(t, filepath.Join(sshDir, "conf.d", "work"), "Host gpu-node\n")
+	if err := os.MkdirAll(filepath.Join(sshDir, "conf.d", "old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(sshDir, "config"), "Include conf.d/*\nHost devbox\n")
+	got, err := ConfigHosts("", env)
+	if want := []string{"gpu-node", "devbox"}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("ConfigHosts = %q, %v; want %q", got, err, want)
+	}
+}
