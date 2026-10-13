@@ -40,8 +40,12 @@ Specs use ssh's -L syntax:
   LOCAL:HOST:PORT       local LOCAL to HOST:PORT, as the server sees it
   BIND:LOCAL:HOST:PORT  the same, listening on BIND
 -R PORT[:LOCAL] exposes a local port on the server, and -D PORT starts a
-SOCKS proxy. Auto-forward is off unless you pass --auto. With --detach the
-daemon keeps the forwards after the command returns.`,
+SOCKS proxy. Auto-forward is off unless you pass --auto.
+
+With --detach the daemon keeps the forwards after the command returns. It
+works like the TUI: it follows config.toml (auto-forward included, unless
+--auto or --no-auto) and reads hosts from your ssh config, so -p, -l, -i,
+-J and -F are refused there.`,
 		Example:           "  pfwd fwd devbox 5432 8080:3000\n  pfwd fwd devbox -R 9000 -D 1080\n  pfwd fwd devbox 5432 --json",
 		Args:              usageArgs(cobra.MinimumNArgs(1)),
 		ValidArgsFunction: completeHosts(f, true),

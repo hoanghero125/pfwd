@@ -4,9 +4,12 @@ package e2e
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,24 +33,29 @@ func buildPfwd(t *testing.T, dir string) string {
 	return bin
 }
 
-// pfwdCmd runs bin with its config, state and log in dir, and an ssh
-// config naming the ss container e2e-ss.
+// pfwdCmd runs bin with dir as its home: config, state, log, and an ssh
+// config at ~/.ssh/config naming the ss container e2e-ss, which pfwd reads
+// itself (use_openssh_config = false), so no command needs -F.
 func pfwdCmd(t *testing.T, bin, dir string, args ...string) *exec.Cmd {
 	t.Helper()
-	cfg := filepath.Join(dir, "ssh_config")
+	cfg := filepath.Join(dir, ".ssh", "config")
 	if _, err := os.Stat(cfg); err != nil {
 		config := fmt.Sprintf("Host e2e-ss\n  HostName 127.0.0.1\n  Port %d\n  User pfwd\n  IdentityFile %s\n  IdentitiesOnly yes\n  IdentityAgent none\n  UserKnownHostsFile %s\n  StrictHostKeyChecking accept-new\n",
 			sshPort(t, "ss"), filepath.ToSlash(keyPath), filepath.ToSlash(filepath.Join(dir, "known_hosts")))
+		if err := os.MkdirAll(filepath.Dir(cfg), 0o700); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(cfg, []byte(config), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[ui]\nnotifications = false\n"), 0o600); err != nil {
+		settings := "[ssh]\nuse_openssh_config = false\n\n[ui]\nnotifications = false\n"
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(settings), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command(bin, append(args, "-F", cfg)...)
-	cmd.Env = append(os.Environ(), "HOME="+dir, "XDG_STATE_HOME="+filepath.Join(dir, "state"), "APPDATA="+filepath.Join(dir, "appdata"),
-		"PFWD_CONFIG="+filepath.Join(dir, "config.toml"))
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), "HOME="+dir, "USERPROFILE="+dir, "XDG_STATE_HOME="+filepath.Join(dir, "state"),
+		"APPDATA="+filepath.Join(dir, "appdata"), "PFWD_CONFIG="+filepath.Join(dir, "config.toml"))
 	return cmd
 }
 
@@ -157,38 +165,40 @@ func TestE2EDoctor(t *testing.T) {
 	}
 }
 
-// TestE2EDaemon: the real binary's daemon keeps a forward to the ss
-// container after pfwd fwd --detach returns; ls lists it, stop ends it,
-// and daemon stop ends the daemon.
+// TestE2EDaemon: pfwd fwd --detach starts the real binary's daemon, which
+// keeps the forward to the ss container after the command returns; ls
+// lists it, stop ends it, and daemon stop ends the daemon.
 func TestE2EDaemon(t *testing.T) {
 	dir := t.TempDir()
 	bin := buildPfwd(t, dir)
-	socket := filepath.Join(dir, "d", "pfwd.sock")
-	if runtime.GOOS == "windows" {
-		socket = `\.\pipe\pfwd-e2e-` + filepath.Base(dir)
-	} else if len(socket) > 100 {
-		short, err := os.MkdirTemp("", "pf") //nolint:usetesting // t.TempDir is too long for a socket path on macOS
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.RemoveAll(short) })
-		socket = filepath.Join(short, "d", "pfwd.sock")
-	}
+	socket := e2eSocket(t)
 	cmd := func(args ...string) *exec.Cmd {
 		c := pfwdCmd(t, bin, dir, args...)
 		c.Env = append(c.Env, "PFWD_SOCKET="+socket)
 		return c
 	}
-	t.Cleanup(func() { _ = cmd("daemon", "stop").Run() })
+	t.Cleanup(func() {
+		out, err := cmd("daemon", "status", "--json").Output()
+		var st struct {
+			Running bool `json:"running"`
+			PID     int  `json:"pid"`
+		}
+		if err != nil || json.Unmarshal(out, &st) != nil || !st.Running {
+			return
+		}
+		if cmd("daemon", "stop").Run() != nil {
+			if p, err := os.FindProcess(st.PID); err == nil {
+				_ = p.Kill()
+			}
+		}
+	})
 	startServer(t, "ss", "8141")
 
-	if out, err := cmd("daemon", "start").CombinedOutput(); err != nil {
-		t.Fatalf("pfwd daemon start: %v\n%s", err, out)
-	}
 	local := freePort(t)
 	out, err := cmd("fwd", "e2e-ss", fmt.Sprintf("%d:8141", local), "--detach").CombinedOutput()
-	if err != nil || !strings.Contains(string(out), fmt.Sprintf("Forwarded :8141 to localhost:%d", local)) {
-		t.Fatalf("pfwd fwd --detach: %v\n%s", err, out)
+	if err != nil || !strings.Contains(string(out), fmt.Sprintf("Forwarded :8141 to localhost:%d", local)) ||
+		!strings.Contains(string(out), "Started the pfwd daemon") {
+		t.Fatalf("pfwd fwd --detach without a daemon: %v\n%s", err, out)
 	}
 	get(t, fmt.Sprint(local))
 
@@ -208,10 +218,32 @@ func TestE2EDaemon(t *testing.T) {
 	if out, err := cmd("stop", fmt.Sprintf("e2e-ss:%d", local)).CombinedOutput(); err != nil {
 		t.Fatalf("pfwd stop: %v\n%s", err, out)
 	}
+	if c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", local), 2*time.Second); err == nil {
+		_ = c.Close()
+		t.Error("the stopped forward still accepts connections")
+	}
 	if out, err := cmd("daemon", "stop").CombinedOutput(); err != nil || !strings.Contains(string(out), "stopped") {
 		t.Fatalf("pfwd daemon stop: %v\n%s", err, out)
 	}
 	if err := cmd("daemon", "status").Run(); err == nil {
 		t.Error("pfwd daemon status succeeds after stop")
 	}
+}
+
+// e2eSocket is a fresh daemon socket, or named pipe on Windows.
+func e2eSocket(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		return `\\.\pipe\pfwd-e2e-` + hex.EncodeToString(b)
+	}
+	dir, err := os.MkdirTemp("", "pf") //nolint:usetesting // t.TempDir is too long for a socket path on macOS
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "d", "pfwd.sock")
 }

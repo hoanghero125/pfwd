@@ -106,7 +106,7 @@ On Linux, a local port below 1024, such as 80, needs root. When pfwd isn't allow
 
 ## Scripting
 
-Every command works without a terminal. Results go to stdout, errors to stderr with a suggested fix, and `--json` prints JSON instead of text.
+`pfwd ls`, `pfwd fwd`, `pfwd stop`, `pfwd hosts`, `pfwd doctor` and the `daemon` commands work without a terminal (the TUI and `pfwd attach` need one). Results go to stdout, errors to stderr with a suggested fix, and `--json` prints JSON instead of text.
 
 ```sh
 pfwd ls devbox                  # the ports listening on devbox, once
@@ -115,9 +115,11 @@ pfwd fwd devbox 5432 8080:3000  # forward until Ctrl+C, reconnecting when the co
 pfwd fwd devbox -R 9000 -D 1080
 ```
 
-`pfwd fwd` takes ssh's `-L` syntax (`PORT`, `LOCAL:PORT`, `LOCAL:HOST:PORT`, `BIND:LOCAL:HOST:PORT`), plus `-R PORT[:LOCAL]` and `-D PORT`, each repeatable. It creates only what you name: no remembered or configured forwards, and no auto-forward unless you pass `--auto`. A taken local port follows `forward.on_conflict`, with `ask` acting as `next`. With `--json` it prints one JSON object per line as forwards change.
+`pfwd fwd` takes ssh's `-L` syntax (`PORT`, `LOCAL:PORT`, `LOCAL:HOST:PORT`, `BIND:LOCAL:HOST:PORT`), plus `-R PORT[:LOCAL]` and `-D PORT`, each repeatable. It creates only what you name: no remembered or configured forwards, and no auto-forward unless you pass `--auto`. A taken local port follows `forward.on_conflict`, with `ask` acting as `next`.
 
-`pfwd ls --json` prints `{"hosts": [{"host", "state", "os", "ports": [...], "forwards": [...]}]}`. Each port has `port`, `addrs`, `process`, `pid`, `label` and `ignored`. Each forward has `id`, `host`, `kind`, `bind`, `local`, `remote_host`, `remote`, `state`, `pause`, `error`, `pinned`, `auto`, `conns`, `bytes_in`, `bytes_out` and `started_at`.
+With `--json`, `pfwd fwd` prints one JSON object per line: `{"event": "forward", "forward": {...}}` when a forward starts or changes state, and `{"event": "session", "host", "state", "error"}` when the connection drops or comes back.
+
+`pfwd ls --json` prints `{"hosts": [{"host", "state", "os", "ports": [...], "forwards": [...]}]}`. Each port has `port`, `addrs`, `process`, `pid`, `label` and `ignored`. Each forward has `id`, `host`, `kind` (`local`, `remote` or `dynamic`), `bind`, `local`, `remote_host`, `remote`, `state`, `pause`, `error`, `pinned`, `auto`, `config`, `label`, `scheme`, `mapped_from`, `conns`, `bytes_in`, `bytes_out` and `started_at`. For a `remote` forward, `bind` and `remote` are on the server and `remote_host` and `local` on this machine. `pfwd hosts --json` lists `{"host", "last_used", "forwards"}` (`last_used` is null for a host never used), and `pfwd stop --json` prints `{"stopped": [ids]}`.
 
 An unknown host key or a passphrase is asked on the terminal. Without one, the command stops with the fix: run `pfwd <host>` or `ssh <host>` once, pass `--accept-new`, or add the key to ssh-agent.
 
@@ -146,11 +148,13 @@ pfwd daemon status          # exit code 1 when none runs
 pfwd daemon stop            # ends the daemon and its forwards
 ```
 
-`pfwd daemon start` starts it on its own. It listens on a Unix socket only you can open (in `$XDG_RUNTIME_DIR`, else your own directory under the system temp directory), or on Windows a named pipe only you can open; `PFWD_SOCKET` names another. When the daemon needs a host-key confirmation or a passphrase, `pfwd fwd --detach` asks on your terminal. The daemon logs to `pfwd.log`.
+`pfwd daemon start` starts it on its own; `pfwd daemon start -F file` gives it another ssh config. It listens on a Unix socket only you can open (in `$XDG_RUNTIME_DIR`, else your own directory under the system temp directory), or on Windows a named pipe only you can open; `PFWD_SOCKET` names another. The daemon logs to `pfwd.log`.
+
+The daemon works like the TUI: it follows `config.toml`, so auto-forward is on unless the config turns it off (`--auto` or `--no-auto` on `pfwd fwd --detach` sets it for that host), and it restores pinned and configured forwards. It reads hosts from your ssh config, so `pfwd fwd --detach` refuses `-p`, `-l`, `-i`, `-J` and `-F`: put them in `~/.ssh/config`. `--bind` sets the address of the forwards you name. When the daemon needs a host-key confirmation or a passphrase, `pfwd fwd --detach` asks on your terminal, or with `--accept-new` trusts a new host key.
 
 ## When something doesn't work
 
-`pfwd doctor devbox` checks each step in order and says how to fix the first one that fails: how the ssh config resolves the host, whether it answers, its host key, the login, port detection, `-L` and `-R` forwarding on the server, and listening on this machine. It never writes `known_hosts`. Its exit code is 3, 4 or 5 when the connection, the login or the host key fails, as for the other commands.
+`pfwd doctor devbox` checks each step in order and says how to fix the first one that fails: how the ssh config resolves the host, whether it answers, its host key, the login, port detection, `-L` and `-R` forwarding on the server, and listening on this machine. It never writes `known_hosts`: with `StrictHostKeyChecking accept-new` or `--accept-new`, it trusts a new key for the check only and says so. Its exit code is 3, 4 or 5 when the connection, the login or the host key fails, as for the other commands.
 
 `pfwd doctor --bundle devbox` also writes `pfwd-doctor-<time>.zip` for a bug report: the version, your config file, how many forwards are remembered per host, the end of the log, and the report. Secrets and your home directory are taken out, but look inside before you attach it.
 
