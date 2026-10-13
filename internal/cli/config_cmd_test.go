@@ -30,6 +30,17 @@ func TestMain(m *testing.M) {
 	if err := os.Setenv("PFWD_CONFIG", cfg); err != nil {
 		panic(err)
 	}
+	// The state, the log, the ssh config and the daemon are the test's own:
+	// a test that forgets to set them up never touches the user's.
+	socket := filepath.Join(dir, "d", "pfwd.sock")
+	if runtime.GOOS == "windows" {
+		socket = `\\.\pipe\pfwd-test-` + filepath.Base(dir)
+	}
+	for k, v := range map[string]string{"APPDATA": dir, "XDG_STATE_HOME": dir, "HOME": dir, "USERPROFILE": dir, "PFWD_SOCKET": socket} {
+		if err := os.Setenv(k, v); err != nil {
+			panic(err)
+		}
+	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
@@ -306,5 +317,24 @@ func TestConfigFlagHelp(t *testing.T) {
 	_, out, _ := run(t, "--help")
 	if !strings.Contains(out, "--config path") || strings.Contains(out, "--config pfwd") {
 		t.Errorf("--config help should name its value path:\n%s", out)
+	}
+}
+
+// TestTestsStayOffTheUsersFiles: the package's tests never read or write
+// the user's state, log, ssh config or daemon.
+func TestTestsStayOffTheUsersFiles(t *testing.T) {
+	path, err := config.StatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := os.TempDir()
+	for name, p := range map[string]string{"state": path, "home": home, "socket": os.Getenv("PFWD_SOCKET")} {
+		if p == "" || (!strings.HasPrefix(filepath.Clean(p), filepath.Clean(tmp)) && !strings.HasPrefix(p, `\\.\pipe\pfwd-test-`)) {
+			t.Errorf("%s is %q, outside the temp directory %s", name, p, tmp)
+		}
 	}
 }
