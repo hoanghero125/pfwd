@@ -170,6 +170,9 @@ type Model struct {
 	hosts []engine.HostID
 	views map[engine.HostID]*hostView
 	*hostView
+	// tab is the host on screen. host differs from it only while an event
+	// or a key for another host is applied; the table is always tab's.
+	tab engine.HostID
 	// all shows every host's rows, with a HOST column (ctrl+a).
 	all    bool
 	picker pickerState
@@ -188,6 +191,8 @@ type Model struct {
 	rows     []row
 	cursor   int
 	selected string
+	// selectedHost is the selected row's host, for the all view.
+	selectedHost engine.HostID
 	// selectedPort is the selected row's remote port, so the cursor can
 	// follow it between the forwards and the detected ports.
 	selectedPort uint16
@@ -205,6 +210,7 @@ type Model struct {
 	// reverseOpen shows the Reverse tab: this machine's listening ports
 	// (local), to expose one on the server.
 	reverseOpen  bool
+	reverseHost  engine.HostID
 	local        []detect.RemotePort
 	localErr     error
 	localLoading bool
@@ -235,6 +241,7 @@ func NewHosts(e Engine, hosts []engine.HostID, opts Options) Model {
 	return Model{
 		eng:        e,
 		host:       hosts[0],
+		tab:        hosts[0],
 		hosts:      slices.Clone(hosts),
 		views:      views,
 		hostView:   views[hosts[0]],
@@ -427,7 +434,11 @@ func (m *Model) applyEvent(ev engine.Event) {
 	if h, ok := eventHost(ev); ok && h != m.host {
 		v := m.views[h]
 		if v == nil {
-			return // a host this window doesn't show
+			// A host the engine serves without a tab yet, such as one a
+			// daemon connected for another client: it gets a tab.
+			v = &hostView{}
+			m.views[h] = v
+			m.hosts = append(m.hosts, h)
 		}
 		host, view := m.host, m.hostView
 		m.host, m.hostView = h, v
@@ -598,7 +609,6 @@ func (m *Model) closePrompts(host engine.HostID) {
 		clear(m.modal.secret[:cap(m.modal.secret)])
 		m.modal = modalState{}
 	}
-	m.creds = nil
 }
 
 func (m *Model) applyForwardChanged(f engine.Forward) {
@@ -771,7 +781,7 @@ func portKey(host engine.HostID, p uint16) string { return "p:" + string(host) +
 func (m *Model) rebuild() {
 	m.total, m.hidden = 0, 0
 	var fwdRows, portRows []row
-	hosts := []engine.HostID{m.host}
+	hosts := []engine.HostID{m.tab}
 	if m.all {
 		hosts = m.hosts
 	}
@@ -785,7 +795,7 @@ func (m *Model) rebuild() {
 	idx := slices.IndexFunc(rows, func(r row) bool { return r.key == m.selected })
 	if idx < 0 && m.selectedPort != 0 {
 		// The port was forwarded or stopped, so its row moved group.
-		idx = slices.IndexFunc(rows, func(r row) bool { return r.remotePort() == m.selectedPort })
+		idx = slices.IndexFunc(rows, func(r row) bool { return r.remotePort() == m.selectedPort && r.host == m.selectedHost })
 	}
 	if idx < 0 {
 		idx = min(m.cursor, len(rows)-1)
@@ -908,6 +918,7 @@ func (m *Model) setCursor(i int) {
 	m.cursor = max(0, min(i, len(m.rows)-1))
 	m.selected = m.rows[m.cursor].key
 	m.selectedPort = m.rows[m.cursor].remotePort()
+	m.selectedHost = m.rows[m.cursor].host
 	m.scrollToCursor()
 }
 

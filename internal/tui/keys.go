@@ -37,7 +37,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case m.logOpen:
 		return m.handleLogKey(k)
 	case m.reverseOpen:
-		return m.handleReverseKey(k)
+		return m.onHost(m.reverseHost, func(m Model) (tea.Model, tea.Cmd) { return m.handleReverseKey(k) })
 	}
 
 	switch k {

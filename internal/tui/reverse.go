@@ -23,6 +23,7 @@ type localPortsMsg struct {
 // openReverse opens the Reverse tab and lists this machine's ports.
 func (m Model) openReverse() (Model, tea.Cmd) {
 	m.reverseOpen, m.localLoading, m.revCursor = true, true, 0
+	m.reverseHost = m.host // the selected row's host in the all view
 	load := m.opts.LocalPorts
 	if load == nil {
 		return m, func() tea.Msg {
@@ -78,7 +79,7 @@ func (m Model) localSelected() (detect.RemotePort, bool) {
 // exactly h lines.
 func (m Model) reversePane(w, h int) []string {
 	th := m.th
-	host := safetext.Clean(string(m.host))
+	host := safetext.Clean(string(m.reverseHost))
 	lines := []string{th.faint.Render("  This machine's listening ports. enter exposes one on " + host + ".")}
 	switch {
 	case m.localLoading:

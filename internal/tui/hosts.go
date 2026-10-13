@@ -48,7 +48,7 @@ func (m Model) onHost(h engine.HostID, fn func(Model) (tea.Model, tea.Cmd)) (tea
 func (m *Model) switchHost(i int) {
 	n := len(m.hosts)
 	h := m.hosts[((i%n)+n)%n]
-	m.host, m.hostView = h, m.views[h]
+	m.host, m.tab, m.hostView = h, h, m.views[h]
 	m.all, m.selected, m.selectedPort, m.cursor, m.offset = false, "", 0, 0, 0
 	m.reverseOpen = false
 	m.rebuild()
