@@ -48,8 +48,8 @@ func newHostDialer(cfg config.Config, f *rootFlags, logger *slog.Logger) *hostDi
 func (d *hostDialer) close() { d.keys.Clear() }
 
 // add resolves target (an alias or user@alias) and returns its host ID.
-// withFlags applies -p, -l, -i and -J, which name the first host given on
-// the command line.
+// withFlags applies -p, -l, -i and -J, as for the hosts named on the
+// command line; hosts added later (with +, or by the daemon) get none.
 func (d *hostDialer) add(ctx context.Context, target string, withFlags bool) (engine.HostID, error) {
 	o := sshx.Overrides{ConfigFile: d.f.sshConfig}
 	if withFlags {

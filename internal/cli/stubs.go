@@ -7,9 +7,8 @@ import (
 )
 
 // stubCmds returns the planned subcommands whose behavior lands in later
-// releases. Their positional arguments are
-// validated already (bad ones exit 2); flags such as `stop --all` and
-// `fwd -R/-D/--detach` arrive with each command's implementation.
+// releases. Their positional arguments are validated already (bad ones
+// exit 2).
 func stubCmds() []*cobra.Command {
 	return []*cobra.Command{
 		stub("ui [host...]", "Open the web UI in the browser", "v0.6.0", cobra.ArbitraryArgs,
