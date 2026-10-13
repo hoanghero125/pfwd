@@ -156,3 +156,62 @@ func TestE2EDoctor(t *testing.T) {
 		}
 	}
 }
+
+// TestE2EDaemon: the real binary's daemon keeps a forward to the ss
+// container after pfwd fwd --detach returns; ls lists it, stop ends it,
+// and daemon stop ends the daemon.
+func TestE2EDaemon(t *testing.T) {
+	dir := t.TempDir()
+	bin := buildPfwd(t, dir)
+	socket := filepath.Join(dir, "d", "pfwd.sock")
+	if runtime.GOOS == "windows" {
+		socket = `\.\pipe\pfwd-e2e-` + filepath.Base(dir)
+	} else if len(socket) > 100 {
+		short, err := os.MkdirTemp("", "pf") //nolint:usetesting // t.TempDir is too long for a socket path on macOS
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(short) })
+		socket = filepath.Join(short, "d", "pfwd.sock")
+	}
+	cmd := func(args ...string) *exec.Cmd {
+		c := pfwdCmd(t, bin, dir, args...)
+		c.Env = append(c.Env, "PFWD_SOCKET="+socket)
+		return c
+	}
+	t.Cleanup(func() { _ = cmd("daemon", "stop").Run() })
+	startServer(t, "ss", "8141")
+
+	if out, err := cmd("daemon", "start").CombinedOutput(); err != nil {
+		t.Fatalf("pfwd daemon start: %v\n%s", err, out)
+	}
+	local := freePort(t)
+	out, err := cmd("fwd", "e2e-ss", fmt.Sprintf("%d:8141", local), "--detach").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), fmt.Sprintf("Forwarded :8141 to localhost:%d", local)) {
+		t.Fatalf("pfwd fwd --detach: %v\n%s", err, out)
+	}
+	get(t, fmt.Sprint(local))
+
+	out, err = cmd("ls", "--json").Output()
+	var listed struct {
+		Hosts []struct {
+			Host     string `json:"host"`
+			Forwards []struct {
+				Local int `json:"local"`
+			} `json:"forwards"`
+		} `json:"hosts"`
+	}
+	if err != nil || json.Unmarshal(out, &listed) != nil || len(listed.Hosts) != 1 || len(listed.Hosts[0].Forwards) != 1 ||
+		listed.Hosts[0].Forwards[0].Local != int(local) {
+		t.Fatalf("pfwd ls --json: %v\n%s", err, out)
+	}
+	if out, err := cmd("stop", fmt.Sprintf("e2e-ss:%d", local)).CombinedOutput(); err != nil {
+		t.Fatalf("pfwd stop: %v\n%s", err, out)
+	}
+	if out, err := cmd("daemon", "stop").CombinedOutput(); err != nil || !strings.Contains(string(out), "stopped") {
+		t.Fatalf("pfwd daemon stop: %v\n%s", err, out)
+	}
+	if err := cmd("daemon", "status").Run(); err == nil {
+		t.Error("pfwd daemon status succeeds after stop")
+	}
+}
