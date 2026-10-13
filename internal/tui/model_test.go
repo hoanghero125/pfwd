@@ -25,6 +25,7 @@ type fakeEngine struct {
 	forwardErr error
 	forwards   []engine.Forward
 	specs      []engine.ForwardSpec
+	hosts      []engine.HostID // the host of each Forward call
 	stopped    []string
 	auto       []bool
 	nextID     int
@@ -44,6 +45,7 @@ func (f *fakeEngine) Forward(host engine.HostID, spec engine.ForwardSpec) (engin
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.specs = append(f.specs, spec)
+	f.hosts = append(f.hosts, host)
 	if err := f.forwardErr; err != nil {
 		f.forwardErr = nil
 		return engine.Forward{}, err

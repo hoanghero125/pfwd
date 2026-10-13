@@ -26,18 +26,6 @@ func TestStubsAreNotImplementedYet(t *testing.T) {
 		args []string
 		path string // the command that must report itself, not the root TUI
 	}{
-		{[]string{"fwd", "devbox", "5432"}, "pfwd fwd"},
-		{[]string{"fwd", "devbox", "5432", "15432:db.internal:5432"}, "pfwd fwd"},
-		{[]string{"ls"}, "pfwd ls"},
-		{[]string{"ls", "devbox"}, "pfwd ls"},
-		{[]string{"stop", "devbox:5432"}, "pfwd stop"},
-		{[]string{"hosts"}, "pfwd hosts"},
-		{[]string{"daemon", "start"}, "pfwd daemon start"},
-		{[]string{"daemon", "stop"}, "pfwd daemon stop"},
-		{[]string{"daemon", "status"}, "pfwd daemon status"},
-		{[]string{"attach"}, "pfwd attach"},
-		{[]string{"doctor"}, "pfwd doctor"},
-		{[]string{"doctor", "devbox"}, "pfwd doctor"},
 		{[]string{"ui"}, "pfwd ui"},
 		{[]string{"ui", "devbox", "gpu-node"}, "pfwd ui"},
 	} {
@@ -76,7 +64,7 @@ func TestStubUsageErrorsExit2(t *testing.T) {
 // TestEveryCommandRejectsBadUsage fails when a command is missing here, so
 // each new command has to declare its usage errors.
 var badArgs = map[string][]string{
-	"pfwd":                       {"a", "b"}, // one host at a time until M5
+	"pfwd":                       {"@devbox"}, // an empty user
 	"pfwd attach":                {"extra"},
 	"pfwd completion":            {"bsh"},
 	"pfwd completion bash":       {"extra"},
@@ -89,6 +77,7 @@ var badArgs = map[string][]string{
 	"pfwd config validate":       {"extra"},
 	"pfwd daemon":                {"bogus"},
 	"pfwd daemon start":          {"extra"},
+	"pfwd daemon run":            {"extra"},
 	"pfwd daemon status":         {"extra"},
 	"pfwd daemon stop":           {"extra"},
 	"pfwd doctor":                {"a", "b"},

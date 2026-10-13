@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"runtime"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -57,115 +57,95 @@ func (f *rootFlags) register(fs *pflag.FlagSet) {
 	fs.BoolVar(&f.allowLANSocks, "allow-lan-socks", false, "let a SOCKS proxy listen on a non-loopback --bind, instead of forward.allow_lan_socks")
 }
 
-// hostArgs accepts exactly one host, as "alias" or "user@alias".
+// hostArgs accepts one host or more, each as "alias" or "user@alias".
 func hostArgs(_ *cobra.Command, args []string) error {
-	switch len(args) {
-	case 0:
+	if len(args) == 0 {
 		return &usageError{errors.New("missing host: run pfwd <host> with a host from ~/.ssh/config, like: pfwd devbox")}
-	case 1:
-		if _, _, err := sshx.SplitTarget(args[0]); err != nil {
+	}
+	for _, a := range args {
+		if _, _, err := sshx.SplitTarget(a); err != nil {
 			return &usageError{err}
 		}
-		return nil
-	default:
-		return &usageError{errors.New("one host at a time for now; several hosts in one window arrive in v0.5.0")}
 	}
+	return nil
 }
 
-// runTUI connects to target and runs the terminal UI until the user quits.
-func runTUI(cmd *cobra.Command, target string, f *rootFlags) error {
-	level := f.logLevel
-	if level == "" {
-		level = os.Getenv("PFWD_LOG")
-		if _, err := parseLogLevel(level); err != nil {
-			return fmt.Errorf("invalid PFWD_LOG %q: use debug, info, warn or error, or unset it", level)
-		}
-	}
-	if _, err := parseLogLevel(level); err != nil {
-		return &usageError{fmt.Errorf("invalid --log-level %q: use debug, info, warn or error", level)}
-	}
-	if f.port < 0 || f.port > 65535 {
-		return &usageError{fmt.Errorf("invalid port %d: use a number from 1 to 65535", f.port)}
-	}
-	cfg, cfgPath, err := loadConfig(cmd)
+// runTUI connects to targets, a tab each, and runs the terminal UI until
+// the user quits. The ssh flags (-p, -l, -i, -J) apply to every host named
+// here, not to hosts added later with +.
+func runTUI(cmd *cobra.Command, targets []string, f *rootFlags) error {
+	c, err := loadCommon(cmd, f)
 	if err != nil {
 		return err
-	}
-	auto, err := f.applyTo(&cfg, cmd.Flags().Changed)
-	if err != nil {
-		return &usageError{err}
 	}
 	in, out, ok := terminal(cmd.InOrStdin(), cmd.OutOrStdout())
 	if !ok {
-		return errors.New("pfwd needs an interactive terminal; the scriptable commands (pfwd ls, pfwd fwd) arrive in v0.5.0")
+		return errors.New("pfwd needs an interactive terminal; in scripts, use pfwd ls or pfwd fwd")
 	}
 
-	logger, closeLog, err := openLog(level)
-	if err != nil {
-		// Printed before the TUI takes the screen, so it stays readable.
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v; continuing without a log file\n", err)
-		logger, closeLog = slog.New(slog.DiscardHandler), func() {}
-	}
+	// Printed before the TUI takes the screen, so a warning stays readable.
+	logger, closeLog := headlessLog(c.level, cmd.ErrOrStderr())
 	defer closeLog()
 
 	ctx := cmd.Context()
-	hc, err := sshx.Resolve(ctx, target, sshx.Overrides{
-		User: f.login, Port: f.port, Identities: f.identities, ConfigFile: f.sshConfig, Jump: f.jump,
-	}, sshEnv(cfg))
-	if err != nil {
-		return err
+	d := newHostDialer(c.cfg, f, logger)
+	defer d.close()
+	var hosts []engine.HostID
+	for _, target := range targets {
+		host, err := d.add(ctx, target, true)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+		}
+		hc := d.hostConfig(host)
+		logger.Info("starting", "version", version.Get().Version, "host", hc.Alias, "hostname", hc.HostName, "port", hc.Port,
+			"config", c.cfgPath, "not_applied_yet", c.cfg.Unapplied())
 	}
-	applySSHConfig(hc, cfg)
-	logger.Info("starting", "version", version.Get().Version, "host", hc.Alias, "hostname", hc.HostName, "port", hc.Port,
-		"config", cfgPath, "not_applied_yet", cfg.Unapplied())
 
 	var notifier engine.Notifier
-	if cfg.UI.Notifications {
+	if c.cfg.UI.Notifications {
 		notifier = notify.New("pfwd")
 	}
-	o := engineOptions(cfg, auto, notifier)
-	addSSHForwards(&o, engine.HostID(hc.Alias), hc, func(msg string) { logger.Warn(msg) })
+	o := engineOptions(c.cfg, c.auto, notifier)
+	o.Settings = d.settings(o.Settings)
 	o.Logger = logger
-	o.State = stateStore(cfg, logger)
-	// Decrypted keys and the password live as long as this run, so
-	// reconnects don't ask again.
-	keys := sshx.NewKeyCache()
-	defer keys.Clear()
-	keepalive := keepaliveFor(hc, cfg)
-	o.Dial = func(ctx context.Context, _ engine.HostID, p engine.Prompts) (engine.Conn, error) {
-		c, err := sshx.Dial(ctx, hc, sshx.DialOptions{
-			Prompter: p, Credentials: p, Keys: keys, Keepalive: keepalive,
-			AcceptNew: f.acceptNew, Logger: logger,
-			// Jump hosts resolve from the same ssh config, without the -p, -l
-			// and -i that apply to the target.
-			Resolve: func(ctx context.Context, target string) (*sshx.HostConfig, error) {
-				hop, err := sshx.Resolve(ctx, target, sshx.Overrides{ConfigFile: f.sshConfig}, sshEnv(cfg))
-				if err == nil {
-					applySSHConfig(hop, cfg)
-				}
-				return hop, err
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		return c, nil
-	}
+	o.State = stateStore(c.cfg, logger)
+	o.Dial = d.Dial
 	eng := engine.New(o)
 	defer func() {
 		if err := eng.Close(); err != nil {
 			logger.Warn("engine shutdown", "err", err)
 		}
 	}()
-	host := engine.HostID(hc.Alias)
-	eng.Connect(host)
+	for _, h := range hosts {
+		eng.Connect(h)
+	}
+	topts := tuiOptions(c.cfg, os.Getenv, runtime.GOOS)
+	topts.Hosts = func(context.Context) ([]tui.HostChoice, error) {
+		rows, err := listHosts(f.sshConfig)
+		choices := make([]tui.HostChoice, 0, len(rows))
+		for _, r := range rows {
+			choices = append(choices, tui.HostChoice{Name: r.Host, LastUsed: r.LastUsed})
+		}
+		return choices, err
+	}
+	topts.Connect = func(ctx context.Context, name string) (engine.HostID, error) {
+		h, err := d.add(ctx, name, false)
+		if err != nil {
+			return "", err
+		}
+		eng.Connect(h)
+		return h, nil
+	}
 
 	opts := []tea.ProgramOption{tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out)}
 	if noColor(os.Getenv("NO_COLOR"), f.noColor) {
 		// Bubble Tea only honors NO_COLOR values such as 1 or true.
 		opts = append(opts, tea.WithColorProfile(colorprofile.Ascii))
 	}
-	prog := tea.NewProgram(tui.New(eng, host, tuiOptions(cfg, os.Getenv, runtime.GOOS)), opts...)
+	prog := tea.NewProgram(tui.NewHosts(eng, hosts, topts), opts...)
 	final, err := prog.Run()
 	if err != nil {
 		return fmt.Errorf("run the terminal UI: %w", err)

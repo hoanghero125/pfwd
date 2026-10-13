@@ -28,6 +28,9 @@ func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.WindowTitle = "pfwd: " + safetext.Clean(string(m.host))
+	if m.all {
+		v.WindowTitle = "pfwd: all hosts"
+	}
 	if m.opts.Mouse {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
@@ -126,17 +129,58 @@ func (m Model) hostBar(w int) string {
 
 	host := safetext.Clean(string(m.host))
 	head := " " + th.bold.Render("pfwd") + "  "
+	if m.all {
+		head += th.bold.Render("all hosts")
+		state = ""
+	}
+	current := host + " " + state
+	if m.all {
+		current = ""
+	} else if len(m.hosts) > 1 {
+		host = th.bold.Render(host)
+	}
 	// A long host name is cut before any badge goes.
 	room := w - ansi.StringWidth(head) - 1 - ansi.StringWidth(state) - 1 - ansi.StringWidth(right)
-	if room < ansi.StringWidth(host) {
+	if !m.all && room < ansi.StringWidth(host) {
 		host = ansi.Truncate(host, max(1, room), g.ellipsis)
 	}
-	left := head + host + " " + state
+	if !m.all {
+		current = host + " " + state
+	}
+	left := head + current
+	// The other hosts follow as far as they fit, each with its state glyph.
+	for _, h := range m.hosts {
+		if h == m.host && !m.all {
+			continue
+		}
+		tab := th.faint.Render(safetext.Clean(string(h))) + " " + m.tabGlyph(m.views[h])
+		if strings.TrimSpace(ansi.Strip(left)) != "pfwd" {
+			tab = "  " + tab
+		}
+		if ansi.StringWidth(left)+ansi.StringWidth(tab)+1+ansi.StringWidth(right) > w {
+			break
+		}
+		left += tab
+	}
 	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 1 {
 		return left
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// tabGlyph is a host tab's state glyph.
+func (m Model) tabGlyph(v *hostView) string {
+	th, g := m.th, m.th.g
+	switch v.session {
+	case engine.Connected:
+		return th.ok.Render(g.active)
+	case engine.SessionFailed:
+		return th.bad.Render(g.failed)
+	case engine.Closed:
+		return th.faint.Render(g.closed)
+	}
+	return th.warn.Render(g.connecting)
 }
 
 // reconnectText counts down to the next reconnect attempt, in whole
@@ -204,6 +248,9 @@ type hintItem struct {
 // hintItems are the hints for what is on screen, in display order.
 func (m Model) hintItems() []hintItem {
 	help, quit := hintItem{"?", "help", 0}, hintItem{"q", "quit", 0}
+	if m.opts.Detach {
+		quit = hintItem{"q", "detach", 0}
+	}
 	auto, filter, log := hintItem{"a", "auto", 2}, hintItem{"/", "filter", 4}, hintItem{"L", "log", 1}
 	switch {
 	case m.filtering:
@@ -334,7 +381,7 @@ func (m Model) unavailable() []string {
 // columns is the table layout for a width; 0 means the column is not
 // shown.
 type columns struct {
-	state, remote, local, process, label, conn, traffic int
+	host, state, remote, local, process, label, conn, traffic int
 }
 
 // minProcess is the narrowest PROCESS column before optional columns go.
@@ -352,7 +399,13 @@ func (m Model) columns(w int) columns {
 	if w >= 100 {
 		c.label = 18
 	}
-	fixed := 2 + c.state + c.remote + c.local
+	if m.all {
+		for _, h := range m.hosts {
+			c.host = max(c.host, ansi.StringWidth(safetext.Clean(string(h)))+2)
+		}
+		c.host = min(max(c.host, 6), 16)
+	}
+	fixed := 2 + c.host + c.state + c.remote + c.local
 	for {
 		rest := w - fixed - c.label - c.conn - c.traffic
 		switch {
@@ -375,7 +428,7 @@ func (m Model) columns(w int) columns {
 func (m Model) table(w, h int) []string {
 	th := m.th
 	c := m.columns(w)
-	header := "  " + th.cell("STATE", c.state) + th.cell("REMOTE", c.remote) + th.cell("LOCAL", c.local) + th.cell("PROCESS", c.process) +
+	header := "  " + th.cell("HOST", c.host) + th.cell("STATE", c.state) + th.cell("REMOTE", c.remote) + th.cell("LOCAL", c.local) + th.cell("PROCESS", c.process) +
 		th.cell("LABEL", c.label) + th.cell("CONN", c.conn)
 	if c.traffic > 0 {
 		header += "TRAFFIC"
@@ -437,6 +490,7 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 		cursor = th.accent.Render(g.cursor) + " "
 	}
 	dash := th.faint.Render(g.none)
+	cursor += th.cell(safetext.Clean(string(r.host)), c.host)
 
 	if r.fwd == nil && r.port.Ignored {
 		// Shown only while h is on, and quiet: never auto-forwarded.

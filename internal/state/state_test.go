@@ -216,3 +216,24 @@ func TestLockTimeoutAdvice(t *testing.T) {
 		t.Errorf("err = %v; want it to name the other pfwd, without advising to delete the lock file (the OS frees it when that pfwd exits)", err)
 	}
 }
+
+func TestStoreHosts(t *testing.T) {
+	s, _ := newStore(t)
+	if got, err := s.Hosts(); err != nil || len(got) != 0 {
+		t.Fatalf("Hosts without a file = %v, %v; want none", got, err)
+	}
+	if err := s.Save("devbox", sample); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save("gpu", nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Hosts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]HostInfo{"devbox": {LastUsed: t0, Forwards: 2}, "gpu": {LastUsed: t0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Hosts = %+v, want %+v", got, want)
+	}
+}

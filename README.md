@@ -29,6 +29,7 @@ pfwd devbox            # an alias from ~/.ssh/config
 pfwd alice@10.0.0.5    # or user@host, like ssh
 pfwd devbox -p 2222 -i ~/.ssh/id_work -F ./ssh_config
 pfwd devbox -J bastion # through a jump host, like ssh -J
+pfwd devbox gpu-node   # several hosts, a tab each
 ```
 
 The first time you connect to a server, pfwd shows its host key fingerprint and asks before saving it to `known_hosts`, the way `ssh` does. Then the table fills in:
@@ -63,6 +64,9 @@ The first time you connect to a server, pfwd shows its host key fingerprint and 
 | `r` | list this machine's ports, to expose one on the server |
 | `d` | start or stop a SOCKS proxy on port 1080 |
 | `c` | reconnect now |
+| `tab`, `shift+tab` | next or previous host, with several open |
+| `ctrl+a` | every host in one table, with a HOST column; keys act on the selected row's host |
+| `+` | connect another host from your ssh config |
 | `?` | help |
 | `q` or `ctrl+c` | quit (asks first while forwards are active) |
 
@@ -99,6 +103,71 @@ Forwards listed under `[hosts.<alias>]` in the config file are always on, like p
 `d` starts a SOCKS5 proxy on `localhost:1080` that makes its connections from the server, so a browser set to use it reaches what the server reaches. `d` again stops it. In the config, it is `"-D 1080"`. A SOCKS proxy only listens on loopback: on any other address, anyone on your network could reach everything the server can. `forward.allow_lan_socks = true` or `--allow-lan-socks` allows it anyway.
 
 On Linux, a local port below 1024, such as 80, needs root. When pfwd isn't allowed to listen on one, it uses that port plus 10000 instead (`localhost:10080`), and the LOCAL column shows the port it used. `forward.privileged_offset` changes the 10000; 0 turns this off.
+
+## Scripting
+
+`pfwd ls`, `pfwd fwd`, `pfwd stop`, `pfwd hosts`, `pfwd doctor` and the `daemon` commands work without a terminal (the TUI and `pfwd attach` need one). Results go to stdout, errors to stderr with a suggested fix, and `--json` prints JSON instead of text.
+
+```sh
+pfwd ls devbox                  # the ports listening on devbox, once
+pfwd ls devbox --json
+pfwd fwd devbox 5432 8080:3000  # forward until Ctrl+C, reconnecting when the connection drops
+pfwd fwd devbox -R 9000 -D 1080
+```
+
+`pfwd fwd` takes ssh's `-L` syntax (`PORT`, `LOCAL:PORT`, `LOCAL:HOST:PORT`, `BIND:LOCAL:HOST:PORT`), plus `-R PORT[:LOCAL]` and `-D PORT`, each repeatable. It creates only what you name: no remembered or configured forwards, and no auto-forward unless you pass `--auto`. A taken local port follows `forward.on_conflict`, with `ask` acting as `next`.
+
+With `--json`, `pfwd fwd` prints one JSON object per line: `{"event": "forward", "forward": {...}}` when a forward starts or changes state, and `{"event": "session", "host", "state", "error"}` when the connection drops or comes back.
+
+`pfwd ls --json` prints `{"hosts": [{"host", "state", "os", "ports": [...], "forwards": [...]}]}`. Each port has `port`, `addrs`, `process`, `pid`, `label` and `ignored`. Each forward has `id`, `host`, `kind` (`local`, `remote` or `dynamic`), `bind`, `local`, `remote_host`, `remote`, `state`, `pause`, `error`, `pinned`, `auto`, `config`, `label`, `scheme`, `mapped_from`, `conns`, `bytes_in`, `bytes_out` and `started_at`. For a `remote` forward, `bind` and `remote` are on the server and `remote_host` and `local` on this machine. `pfwd hosts --json` lists `{"host", "last_used", "forwards"}` (`last_used` is null for a host never used), and `pfwd stop --json` prints `{"stopped": [ids]}`.
+
+An unknown host key or a passphrase is asked on the terminal. Without one, the command stops with the fix: run `pfwd <host>` or `ssh <host>` once, pass `--accept-new`, or add the key to ssh-agent.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | OK |
+| 1 | Another error |
+| 2 | Bad usage: an unknown flag, a missing argument |
+| 3 | The host could not be reached |
+| 4 | Authentication failed |
+| 5 | The host key changed, or an unknown one could not be confirmed |
+| 6 | A forward could not listen, here or on the server |
+| 130 | Interrupted with Ctrl+C |
+
+## Background daemon
+
+`pfwd fwd --detach` hands forwards to a background daemon, starting it when none runs, and returns once they listen. The daemon keeps them up, reconnecting as the TUI does, after the terminal closes:
+
+```sh
+pfwd fwd devbox 5432 8080:3000 --detach
+pfwd ls                     # every host the daemon serves, with its ports and forwards
+pfwd stop devbox:5432       # by host and local (or server) port; or by the ID pfwd ls --json shows
+pfwd stop --all devbox
+pfwd attach                 # the TUI on the daemon's hosts; q detaches and leaves the forwards running
+pfwd daemon status          # exit code 1 when none runs
+pfwd daemon stop            # ends the daemon and its forwards
+```
+
+`pfwd daemon start` starts it on its own; `pfwd daemon start -F file` gives it another ssh config. It listens on a Unix socket only you can open (in `$XDG_RUNTIME_DIR`, else your own directory under the system temp directory), or on Windows a named pipe only you can open; `PFWD_SOCKET` names another. The daemon logs to `pfwd.log`.
+
+The daemon works like the TUI: it follows `config.toml`, so auto-forward is on unless the config turns it off (`--auto` or `--no-auto` on `pfwd fwd --detach` sets it for that host), and it restores pinned and configured forwards. It reads hosts from your ssh config, so `pfwd fwd --detach` refuses `-p`, `-l`, `-i`, `-J` and `-F`: put them in `~/.ssh/config`. `--bind` sets the address of the forwards you name. When the daemon needs a host-key confirmation or a passphrase, `pfwd fwd --detach` asks on your terminal, or with `--accept-new` trusts a new host key.
+
+## When something doesn't work
+
+`pfwd doctor devbox` checks each step in order and says how to fix the first one that fails: how the ssh config resolves the host, whether it answers, its host key, the login, port detection, `-L` and `-R` forwarding on the server, and listening on this machine. It never writes `known_hosts`: with `StrictHostKeyChecking accept-new` or `--accept-new`, it trusts a new key for the check only and says so. Its exit code is 3, 4 or 5 when the connection, the login or the host key fails, as for the other commands.
+
+`pfwd doctor --bundle devbox` also writes `pfwd-doctor-<time>.zip` for a bug report: the version, your config file, how many forwards are remembered per host, the end of the log, and the report. Secrets and your home directory are taken out, but look inside before you attach it.
+
+## Hosts and shell completion
+
+`pfwd hosts` lists the hosts in your ssh config, and the ones you have used pfwd with, most recent first (`--json` for scripts). Tab completion offers the same names:
+
+```sh
+pfwd completion bash > ~/.local/share/bash-completion/completions/pfwd
+pfwd completion zsh > "${fpath[1]}/_pfwd"
+pfwd completion fish > ~/.config/fish/completions/pfwd.fish
+pfwd completion powershell | Out-String | Invoke-Expression   # add this line to $PROFILE to keep it
+```
 
 ## Configuration
 
@@ -145,14 +214,13 @@ Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux,
 
 ## Not supported yet
 
-- Several hosts in one window, and the scripting commands `pfwd ls` and `pfwd fwd` (v0.5.0).
 - Unix-socket forwards, and a SOCKS proxy on the server side (`ssh -R` with only a port).
 
 ## Why pfwd
 
 - It needs no agent on the server, so it works on locked-down, shared and university machines where you can't upload anything.
 - It is one static Go binary for Linux, macOS and Windows, and doesn't need OpenSSH at runtime.
-- Scripting commands (`pfwd fwd`, `pfwd ls --json`) and several hosts in one window are planned for v0.5.0.
+- Scripts get the same engine as the TUI: `pfwd fwd` keeps forwards up through dropped connections, and `pfwd ls --json` lists what a server listens on.
 
 ## Contributing
 

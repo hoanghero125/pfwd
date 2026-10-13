@@ -7,26 +7,10 @@ import (
 )
 
 // stubCmds returns the planned subcommands whose behavior lands in later
-// releases. Their positional arguments are
-// validated already (bad ones exit 2); flags such as `stop --all` and
-// `fwd -R/-D/--detach` arrive with each command's implementation.
+// releases. Their positional arguments are validated already (bad ones
+// exit 2).
 func stubCmds() []*cobra.Command {
 	return []*cobra.Command{
-		stub("fwd <host> <spec>...", "Create forwards on a host", "v0.5.0", cobra.MinimumNArgs(2),
-			"  pfwd fwd devbox 5432 8080:3000"),
-		stub("ls [host]", "List detected ports and forwards", "v0.5.0", cobra.MaximumNArgs(1),
-			"  pfwd ls devbox --json"),
-		stub("stop <id|host:port>...", "Stop forwards in the daemon", "v0.5.0", cobra.MinimumNArgs(1),
-			"  pfwd stop devbox:5432"),
-		stub("hosts", "List hosts from ssh config with last-used time", "v0.5.0", cobra.NoArgs, ""),
-		group("daemon", "Run the engine in the background",
-			stub("start", "Start the daemon", "v0.5.0", cobra.NoArgs, ""),
-			stub("stop", "Stop the daemon and all its forwards", "v0.5.0", cobra.NoArgs, ""),
-			stub("status", "Show whether the daemon is running", "v0.5.0", cobra.NoArgs, ""),
-		),
-		stub("attach", "Open the TUI on the running daemon", "v0.5.0", cobra.NoArgs, ""),
-		stub("doctor [host]", "Diagnose config, auth, detection and port binding for a host", "v0.5.0", cobra.MaximumNArgs(1),
-			"  pfwd doctor devbox"),
 		stub("ui [host...]", "Open the web UI in the browser", "v0.6.0", cobra.ArbitraryArgs,
 			"  pfwd ui devbox"),
 	}
