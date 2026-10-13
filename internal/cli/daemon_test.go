@@ -153,7 +153,7 @@ func TestFwdDetachLsStop(t *testing.T) {
 	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(ssLine(echo, "echo"))}, true)
 	startDaemon(t, "-F", h.sshConfig)
 	local := freeLocalPort(t)
-	code, out, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", local, echo), "--detach", "-F", h.sshConfig)
+	code, out, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", local, echo), "--detach")
 	if want := fmt.Sprintf("Forwarded :%d to localhost:%d", echo, local); code != 0 || !strings.Contains(out, want) {
 		t.Fatalf("pfwd fwd --detach: code %d, stdout %q, stderr %q", code, out, errOut)
 	}
@@ -192,7 +192,7 @@ func TestFwdDetachUnknownHostKeyWithoutTerminal(t *testing.T) {
 	headlessEnv(t)
 	h := newTestHost(t, sshtest.Options{Exec: fakeLinux()}, false)
 	startDaemon(t, "-F", h.sshConfig)
-	code, _, errOut := run(t, "fwd", "testbox", "5432", "--detach", "-F", h.sshConfig)
+	code, _, errOut := run(t, "fwd", "testbox", "5432", "--detach")
 	if code != 5 || !strings.Contains(errOut, "--accept-new") {
 		t.Errorf("pfwd fwd --detach with an unknown key: code %d, stderr %q", code, errOut)
 	}
@@ -254,7 +254,7 @@ func TestAttachEngine(t *testing.T) {
 	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(ssLine(echo, "echo"))}, true)
 	path := startDaemon(t, "-F", h.sshConfig)
 	local := freeLocalPort(t)
-	if code, _, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", local, echo), "--detach", "-F", h.sshConfig); code != 0 {
+	if code, _, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", local, echo), "--detach"); code != 0 {
 		t.Fatalf("pfwd fwd --detach: code %d, stderr %q", code, errOut)
 	}
 	eng := attached(t, path)
@@ -297,6 +297,47 @@ func TestAttachAnswersHostKeyPrompt(t *testing.T) {
 	}
 	p.Answer(true)
 	nextEvent(t, eng, func(s engine.SessionChanged) bool { return s.Host == "testbox" && s.State == engine.Connected })
+	if data, _ := os.ReadFile(h.knownHosts); len(data) == 0 {
+		t.Error("the accepted key wasn't saved")
+	}
+}
+
+// TestFwdDetachRefusesHostFlags: the daemon resolves hosts from the ssh
+// config, so per-host flags would be ignored; they are refused instead.
+func TestFwdDetachRefusesHostFlags(t *testing.T) {
+	headlessEnv(t)
+	for _, flag := range [][]string{{"-p", "2222"}, {"-l", "bob"}, {"-J", "bastion"}, {"-i", "key"}, {"-F", "cfg"}, {"--allow-lan-socks"}} {
+		args := append([]string{"fwd", "devbox", "5432", "--detach"}, flag...)
+		if code, _, errOut := run(t, args...); code != 2 || !strings.Contains(errOut, "--detach") {
+			t.Errorf("pfwd %q: code %d, stderr %q; want 2", args, code, errOut)
+		}
+	}
+}
+
+// TestFwdDetachInterrupted: an interrupt while the daemon works exits 130.
+func TestFwdDetachInterrupted(t *testing.T) {
+	headlessEnv(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux()}, true)
+	startDaemon(t, "-F", h.sshConfig)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var out, errOut bytes.Buffer
+	if code := executeContext(ctx, []string{"fwd", "testbox", "5432", "--detach"}, &out, &errOut); code != 130 {
+		t.Errorf("pfwd fwd --detach interrupted: code %d, stderr %q; want 130", code, errOut.String())
+	}
+}
+
+// TestFwdDetachAcceptNew: with --accept-new, the client trusts the new
+// host key the daemon asks about.
+func TestFwdDetachAcceptNew(t *testing.T) {
+	headlessEnv(t)
+	echo := echoListener(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(ssLine(echo, "echo"))}, false)
+	startDaemon(t, "-F", h.sshConfig)
+	code, _, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", freeLocalPort(t), echo), "--detach", "--accept-new")
+	if code != 0 {
+		t.Fatalf("pfwd fwd --detach --accept-new: code %d, stderr %q", code, errOut)
+	}
 	if data, _ := os.ReadFile(h.knownHosts); len(data) == 0 {
 		t.Error("the accepted key wasn't saved")
 	}

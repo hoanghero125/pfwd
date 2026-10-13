@@ -22,9 +22,9 @@ import (
 	"github.com/hoanghero125/pfwd/internal/sshx"
 )
 
-// spawnDaemon starts `pfwd daemon run` in the background with the flags
-// the command line set, and waits until it answers.
-func spawnDaemon(cmd *cobra.Command, path string) (statusJSON, error) {
+// spawnDaemon starts `pfwd daemon run` in the background, passing on the
+// flags in pass that the command line set, and waits until it answers.
+func spawnDaemon(cmd *cobra.Command, path string, pass []string) (statusJSON, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return statusJSON{}, fmt.Errorf("find the pfwd binary: %w", err)
@@ -35,7 +35,7 @@ func spawnDaemon(cmd *cobra.Command, path string) (statusJSON, error) {
 		return statusJSON{}, errors.New("pfwd daemon start must run from the pfwd binary, not a test binary")
 	}
 	args := []string{"daemon", "run"}
-	for _, name := range daemonFlags {
+	for _, name := range pass {
 		if fl := cmd.Flags().Lookup(name); fl != nil && fl.Changed {
 			args = append(args, "--"+name+"="+fl.Value.String())
 		}
@@ -56,68 +56,129 @@ func spawnDaemon(cmd *cobra.Command, path string) (statusJSON, error) {
 
 // remotePrompter answers, on this terminal, the daemon's prompts for one
 // host. Without a terminal it declines them, and err then says why, with
-// the fix.
+// the fix. With acceptNew it trusts a new host key without asking.
 type remotePrompter struct {
-	t    *textPrompter
-	path string
-	host string
-	mu   sync.Mutex
-	err  error
+	t         *textPrompter
+	path      string
+	host      string
+	acceptNew bool
+	mu        sync.Mutex
+	err       error
+	// cancelAsk ends the question on screen, once another client answered
+	// the prompt with this ID.
+	askingID  string
+	cancelAsk context.CancelFunc
 }
 
-// run watches the daemon and answers host's prompts until ctx ends.
+// run watches the daemon and answers host's prompts until ctx ends. The
+// terminal is read in its own goroutine, so the watch keeps going: a
+// prompt another client answers ends the question here.
 func (r *remotePrompter) run(ctx context.Context) {
 	answers, err := ipc.Dial(ctx, r.path)
 	if err != nil {
 		return
 	}
 	defer answers.Close()
+	prompts := make(chan promptJSON, 16)
+	asked := make(chan struct{})
+	go func() {
+		defer close(asked)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case p := <-prompts:
+				r.answer(ctx, answers, p)
+			}
+		}
+	}()
 	_ = ipc.Watch(ctx, r.path, func(ev ipc.Event) {
-		if ev.Event != "prompt" {
-			return
-		}
-		var p promptJSON
-		if json.Unmarshal(ev.Data, &p) != nil || p.Session != r.host {
-			return
-		}
-		a := r.ask(p)
-		_ = answers.Call(ctx, "answer", a, nil)
-		if a.Secret != nil {
-			*a.Secret = ""
+		switch ev.Event {
+		case "prompt":
+			var p promptJSON
+			if json.Unmarshal(ev.Data, &p) == nil && p.Session == r.host {
+				select {
+				case prompts <- p:
+				default:
+				}
+			}
+		case "prompt_done":
+			var done struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(ev.Data, &done) == nil {
+				r.mu.Lock()
+				if r.askingID == done.ID && r.cancelAsk != nil {
+					r.cancelAsk()
+				}
+				r.mu.Unlock()
+			}
 		}
 	})
+	<-asked
 }
 
-// ask asks the user one prompt, with the same questions as pfwd fwd.
-func (r *remotePrompter) ask(p promptJSON) answerJSON {
-	a := answerJSON{ID: p.ID}
-	host := engine.HostID(p.Session)
-	if p.Kind == "host_key" {
-		reply := make(chan bool, 1)
-		r.t.hostKey(engine.NewHostKeyPrompt(host, sshx.HostKeyQuestion{Host: p.Host, KeyType: p.KeyType, Fingerprint: p.Fingerprint, Saves: p.Saves}, reply))
-		a.Accept = <-reply
-	} else {
-		kind := map[string]sshx.CredentialKind{"passphrase": sshx.Passphrase, "password": sshx.Password}[p.Kind]
-		if p.Kind == "code" {
-			kind = sshx.Code
-		}
-		reply := make(chan engine.CredentialAnswer, 1)
-		r.t.credential(engine.NewCredentialPrompt(host, sshx.CredentialQuestion{Host: p.Host, Kind: kind, Prompt: p.Prompt,
-			Instruction: p.Instruction, Echo: p.Echo, Retry: p.Retry}, reply))
-		ans := <-reply
-		if ans.Canceled {
-			a.Cancel = true
-		} else {
-			secret := string(ans.Secret)
-			clear(ans.Secret)
-			a.Secret = &secret
-		}
-	}
+// answer asks one prompt and sends the answer, unless another client
+// answered it first or ctx ended.
+func (r *remotePrompter) answer(ctx context.Context, answers *ipc.Client, p promptJSON) {
+	askCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	r.mu.Lock()
+	r.askingID, r.cancelAsk = p.ID, cancel
+	r.mu.Unlock()
+	a := r.ask(askCtx, p)
+	r.mu.Lock()
+	r.askingID, r.cancelAsk = "", nil
+	answeredElsewhere := askCtx.Err() != nil && ctx.Err() == nil
+	if answeredElsewhere && errors.Is(r.t.err, errInterrupted) {
+		r.t.err = nil // not an interrupt: the prompt went away
+	}
 	if r.t.err != nil && r.err == nil {
 		r.err = r.t.err
 	}
 	r.mu.Unlock()
+	if answeredElsewhere {
+		fmt.Fprintln(r.t.out, "Another pfwd answered that.")
+		return
+	}
+	if ctx.Err() == nil {
+		_ = answers.Call(ctx, "answer", a, nil)
+	}
+	if a.Secret != nil {
+		*a.Secret = ""
+	}
+}
+
+// ask asks the user one prompt, with the same questions as pfwd fwd.
+func (r *remotePrompter) ask(ctx context.Context, p promptJSON) answerJSON {
+	a := answerJSON{ID: p.ID}
+	host := engine.HostID(p.Session)
+	if p.Kind == "host_key" {
+		if r.acceptNew {
+			fmt.Fprintf(r.t.out, "Trusting %s's new host key (%s %s): --accept-new.\n", safetext.Clean(p.Host), p.KeyType, p.Fingerprint)
+			a.Accept = true
+			return a
+		}
+		reply := make(chan bool, 1)
+		r.t.hostKey(ctx, engine.NewHostKeyPrompt(host, sshx.HostKeyQuestion{Host: p.Host, KeyType: p.KeyType, Fingerprint: p.Fingerprint, Saves: p.Saves}, reply))
+		a.Accept = <-reply
+		return a
+	}
+	kind := map[string]sshx.CredentialKind{"passphrase": sshx.Passphrase, "password": sshx.Password}[p.Kind]
+	if p.Kind == "code" {
+		kind = sshx.Code
+	}
+	reply := make(chan engine.CredentialAnswer, 1)
+	r.t.credential(ctx, engine.NewCredentialPrompt(host, sshx.CredentialQuestion{Host: p.Host, Kind: kind, Prompt: p.Prompt,
+		Instruction: p.Instruction, Echo: p.Echo, Retry: p.Retry}, reply))
+	ans := <-reply
+	if ans.Canceled {
+		a.Cancel = true
+	} else {
+		secret := string(ans.Secret)
+		clear(ans.Secret)
+		a.Secret = &secret
+	}
 	return a
 }
 
@@ -127,34 +188,59 @@ func (r *remotePrompter) declined() error {
 	return r.err
 }
 
+// detachRefused are the flags pfwd fwd --detach can't pass on: the daemon
+// reads hosts from the ssh config, and its LAN SOCKS setting from the
+// config file.
+var detachRefused = []string{"port", "login", "identity", "jump", "ssh-config", "allow-lan-socks"}
+
 // fwdDetached hands the forwards to the daemon, starting it if needed,
 // and returns once each one listens or failed.
 func fwdDetached(cmd *cobra.Command, f *rootFlags, target string, specs []engine.ForwardSpec) error {
-	if _, err := loadCommon(cmd, f); err != nil {
+	for _, name := range detachRefused {
+		if fl := cmd.Flags().Lookup(name); fl != nil && fl.Changed {
+			return &usageError{fmt.Errorf("--%s doesn't work with --detach: the daemon reads hosts from your ssh config (and LAN SOCKS from config.toml); set it there, or run pfwd fwd without --detach", name)}
+		}
+	}
+	c, err := loadCommon(cmd, f)
+	if err != nil {
 		return err
+	}
+	if cmd.Flags().Changed("bind") {
+		for i := range specs {
+			if specs[i].Kind != engine.Remote && specs[i].BindAddr == "" {
+				specs[i].BindAddr = c.cfg.Forward.Bind
+			}
+		}
 	}
 	ctx, stop := interruptible(cmd.Context())
 	defer stop()
 	path := ipc.DefaultPath()
-	c, err := ipc.Dial(ctx, path)
+	client, err := ipc.Dial(ctx, path)
 	if errors.Is(err, ipc.ErrNotRunning) {
-		if _, err := spawnDaemon(cmd, path); err != nil {
+		// The daemon serves later commands too, so it gets only the
+		// settings every one of them shares.
+		if _, err := spawnDaemon(cmd, path, []string{"config", "log-level", "interval"}); err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), "Started the pfwd daemon.")
-		c, err = ipc.Dial(ctx, path)
+		client, err = ipc.Dial(ctx, path)
 	}
 	if err != nil {
-		return err
+		return interrupted(ctx, err)
 	}
-	defer c.Close()
+	defer client.Close()
 	var res struct {
 		Host string `json:"host"`
 	}
-	if err := c.Call(ctx, "connect", connectParams{Target: target}, &res); err != nil {
-		return err
+	if err := client.Call(ctx, "connect", connectParams{Target: target}, &res); err != nil {
+		return interrupted(ctx, err)
 	}
-	rp := &remotePrompter{t: newTextPrompter(cmd.InOrStdin(), cmd.ErrOrStderr()), path: path, host: res.Host}
+	if c.auto != nil {
+		if err := client.Call(ctx, "set_auto", autoParams{Host: res.Host, On: *c.auto}, nil); err != nil {
+			return interrupted(ctx, err)
+		}
+	}
+	rp := &remotePrompter{t: newTextPrompter(cmd.InOrStdin(), cmd.ErrOrStderr()), path: path, host: res.Host, acceptNew: f.acceptNew}
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	watched := make(chan struct{})
 	go func() {
@@ -171,14 +257,17 @@ func fwdDetached(cmd *cobra.Command, f *rootFlags, target string, specs []engine
 	for _, spec := range specs {
 		callCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		var fj forwardJSON
-		err := c.Call(callCtx, "forward", forwardParams{Host: res.Host, Spec: toSpecJSON(spec)}, &fj)
+		err := client.Call(callCtx, "forward", forwardParams{Host: res.Host, Spec: toSpecJSON(spec)}, &fj)
 		cancel()
 		if err != nil {
+			if ctx.Err() != nil {
+				return errInterrupted
+			}
 			if declined := rp.declined(); declined != nil {
 				return declined
 			}
 			var ie *ipc.Error
-			if errors.As(err, &ie) && ie.Code != ipc.CodeBind {
+			if !errors.As(err, &ie) || ie.Code != ipc.CodeBind {
 				return err // the connection failed: the other forwards would too
 			}
 			failed = append(failed, err)
@@ -194,6 +283,14 @@ func fwdDetached(cmd *cobra.Command, f *rootFlags, target string, specs []engine
 		fmt.Fprintln(cmd.ErrOrStderr(), "The daemon keeps them; pfwd ls lists them and pfwd stop ends them.")
 	}
 	return nil
+}
+
+// interrupted is errInterrupted when ctx was interrupted, else err.
+func interrupted(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return errInterrupted
+	}
+	return err
 }
 
 // fromForwardJSON is the engine forward a forwardJSON describes.

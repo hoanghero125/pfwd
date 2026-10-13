@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,6 +21,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/hoanghero125/pfwd/internal/engine"
+	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/sshx/sshtest"
 )
 
@@ -271,4 +274,33 @@ func freeLocalPort(t *testing.T) int {
 		t.Fatal(err)
 	}
 	return port
+}
+
+// TestSecretPromptInterrupted: Ctrl+C while a passphrase is typed ends the
+// prompt at once, without waiting for Enter, and cancels it.
+func TestSecretPromptInterrupted(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	var out bytes.Buffer
+	tp := &textPrompter{interactive: true, out: &out,
+		readSecret: func() ([]byte, error) { <-block; return nil, io.EOF },
+		readLine:   func() (string, error) { <-block; return "", io.EOF },
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	reply := make(chan engine.CredentialAnswer, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tp.credential(ctx, engine.NewCredentialPrompt("devbox", sshx.CredentialQuestion{Host: "devbox", Kind: sshx.Passphrase, Prompt: "id_ed25519"}, reply))
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the prompt kept waiting for Enter after the interrupt")
+	}
+	if a := <-reply; !a.Canceled || !errors.Is(tp.err, errInterrupted) {
+		t.Errorf("answer %+v, err %v; want canceled and interrupted", a, tp.err)
+	}
 }

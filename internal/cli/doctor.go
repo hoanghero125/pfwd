@@ -98,6 +98,9 @@ Secrets and your home directory are taken out; check it before sharing.`,
 				ctx, stop := interruptible(cmd.Context())
 				defer stop()
 				r := runDoctor(ctx, cmd, f, c, args[0])
+				if ctx.Err() != nil {
+					return errInterrupted
+				}
 				report = &r
 				printDoctor(io.MultiWriter(cmd.OutOrStdout(), &text), r, wantJSON(cmd) && !df.bundle)
 			}
@@ -139,21 +142,22 @@ func printDoctor(w io.Writer, r doctorReport, asJSON bool) {
 }
 
 // doctorPrompts answers what a doctor login needs: secrets on the
-// terminal, and never trust in an unknown host key, so known_hosts stays
-// as it is.
+// terminal, and an unknown host key trusted only when ssh would add it
+// anyway (accept-new), for this check only.
 type doctorPrompts struct {
-	t     *textPrompter
-	asked bool
+	t        *textPrompter
+	trustNew bool
+	asked    bool
 }
 
 func (p *doctorPrompts) ConfirmHostKey(context.Context, sshx.HostKeyQuestion) (bool, error) {
 	p.asked = true
-	return false, nil
+	return p.trustNew, nil
 }
 
 func (p *doctorPrompts) AskCredential(ctx context.Context, q sshx.CredentialQuestion) ([]byte, error) {
 	reply := make(chan engine.CredentialAnswer, 1)
-	p.t.credential(engine.NewCredentialPrompt(engine.HostID(q.Host), q, reply))
+	p.t.credential(ctx, engine.NewCredentialPrompt(engine.HostID(q.Host), q, reply))
 	select {
 	case a := <-reply:
 		if a.Canceled {
@@ -186,7 +190,8 @@ func runDoctor(ctx context.Context, cmd *cobra.Command, f *rootFlags, c common, 
 	if hc.ProxyJump == "" && hc.ProxyCommand == "" {
 		addr := net.JoinHostPort(hc.HostName, strconv.Itoa(hc.Port))
 		start := time.Now()
-		nc, err := net.DialTimeout("tcp", addr, hc.ConnectTimeout)
+		dialer := net.Dialer{Timeout: hc.ConnectTimeout}
+		nc, err := dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			r.fail("reach", fmt.Sprintf("%s doesn't answer: %v", addr, err), "check the host name and port, your network or VPN, and that sshd runs there", exitConnect)
 			return r
@@ -197,10 +202,19 @@ func runDoctor(ctx context.Context, cmd *cobra.Command, f *rootFlags, c common, 
 		r.add("reach", checkOK, "through the jump host or ProxyCommand; the login below tests it", "")
 	}
 
-	prompts := &doctorPrompts{t: newTextPrompter(cmd.InOrStdin(), cmd.ErrOrStderr())}
+	// Doctor never writes known_hosts: every unknown key comes to the
+	// prompter, which trusts it for this check only when ssh would have
+	// added it (accept-new, or --accept-new).
+	trustNew := f.acceptNew || hc.StrictHostKeyChecking == "accept-new" || hc.StrictHostKeyChecking == "no"
+	prompts := &doctorPrompts{t: newTextPrompter(cmd.InOrStdin(), cmd.ErrOrStderr()), trustNew: trustNew}
 	start := time.Now()
-	conn, err := d.Dial(ctx, host, prompts)
+	conn, err := dialWithoutSaving(ctx, d, hc, prompts)
 	switch {
+	case err == nil && prompts.asked:
+		defer func() { _ = conn.Close() }()
+		r.add("host key", checkWarn, "not in known_hosts; trusted for this check only (accept-new)",
+			fmt.Sprintf("pfwd %s or ssh %s saves it on the first real connection", host, host))
+		r.add("login", checkOK, fmt.Sprintf("logged in as %s (%d ms)", hc.User, time.Since(start).Milliseconds()), "")
 	case err == nil:
 		defer func() { _ = conn.Close() }()
 		r.add("host key", checkOK, "matches known_hosts", "")
@@ -225,6 +239,32 @@ func runDoctor(ctx context.Context, cmd *cobra.Command, f *rootFlags, c common, 
 	doctorForwards(ctx, conn, ports, &r)
 	doctorBind(c, &r)
 	return r
+}
+
+// dialWithoutSaving dials hc the way d does, but with known_hosts read
+// only: unknown keys go to the prompter and nothing is saved, for the
+// host or its jump hosts.
+func dialWithoutSaving(ctx context.Context, d *hostDialer, hc *sshx.HostConfig, p *doctorPrompts) (engine.Conn, error) {
+	readOnly := func(hc *sshx.HostConfig) *sshx.HostConfig {
+		c := *hc
+		c.StrictHostKeyChecking, c.NoUserKnownHosts = "ask", true
+		return &c
+	}
+	conn, err := sshx.Dial(ctx, readOnly(hc), sshx.DialOptions{
+		Prompter: p, Credentials: p, Keys: d.keys, Keepalive: keepaliveFor(hc, d.cfg), Logger: d.logger,
+		Resolve: func(ctx context.Context, target string) (*sshx.HostConfig, error) {
+			hop, err := sshx.Resolve(ctx, target, sshx.Overrides{ConfigFile: d.f.sshConfig}, sshEnv(d.cfg))
+			if err != nil {
+				return nil, err
+			}
+			applySSHConfig(hop, d.cfg)
+			return readOnly(hop), nil
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
 }
 
 // configDetail says where the host resolves to and with what.

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"archive/zip"
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -152,5 +154,37 @@ func TestRedact(t *testing.T) {
 	}
 	if !strings.Contains(got, "~/x") {
 		t.Errorf("redact = %q", got)
+	}
+}
+
+// TestDoctorDoesNotSaveKeys: with StrictHostKeyChecking accept-new, doctor
+// checks an unknown host for this run only and leaves known_hosts alone.
+func TestDoctorDoesNotSaveKeys(t *testing.T) {
+	headlessEnv(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(), AllowRemoteForward: true}, false)
+	f, err := os.OpenFile(h.sshConfig, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("  StrictHostKeyChecking accept-new\n")
+	_ = f.Close()
+	code, out, _ := run(t, "doctor", "testbox", "-F", h.sshConfig)
+	if code != 0 || !strings.Contains(checkLine(out, "host key"), "!") || !strings.Contains(checkLine(out, "login"), "✓") {
+		t.Errorf("pfwd doctor with accept-new: code %d:\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(h.knownHosts); len(data) != 0 {
+		t.Errorf("doctor saved the key: %q", data)
+	}
+}
+
+// TestDoctorInterrupted: an interrupt during the checks exits 130.
+func TestDoctorInterrupted(t *testing.T) {
+	headlessEnv(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux()}, true)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var out, errOut bytes.Buffer
+	if code := executeContext(ctx, []string{"doctor", "testbox", "-F", h.sshConfig}, &out, &errOut); code != 130 {
+		t.Errorf("pfwd doctor interrupted: code %d; want 130", code)
 	}
 }

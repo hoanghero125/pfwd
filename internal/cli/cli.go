@@ -49,7 +49,7 @@ func executeContext(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err == nil {
 		return exitOK
 	}
-	if errors.Is(err, errInterrupted) {
+	if errors.Is(err, errInterrupted) || errors.Is(err, context.Canceled) {
 		return exitInterrupted // the user knows; nothing to explain
 	}
 	var quiet *silentExit

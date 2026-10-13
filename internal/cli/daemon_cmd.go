@@ -128,7 +128,7 @@ func daemonStart(cmd *cobra.Command) error {
 		_ = c.Close()
 		return ipc.ErrRunning
 	}
-	st, err := spawnDaemon(cmd, path)
+	st, err := spawnDaemon(cmd, path, daemonFlags)
 	if err != nil {
 		return err
 	}
