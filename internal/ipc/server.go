@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
 )
 
@@ -60,23 +60,63 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 // serveConn answers one connection's calls in order. A watch call turns
-// the connection into an event stream until either side ends it.
+// the connection into an event stream until either side ends it. When the
+// client hangs up, the call it is waiting for is canceled.
 func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
 	defer stop()
-	defer func() { _ = c.Close() }()
 	if err := s.checkPeer(c); err != nil {
 		s.log.Warn("ipc peer refused", "err", err)
+		_ = c.Close()
 		return
 	}
-	sc := bufio.NewScanner(c)
-	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
+	lines := make(chan []byte)
+	var tooLong bool
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		defer close(lines)
+		sc := bufio.NewScanner(c)
+		sc.Buffer(make([]byte, 0, 64<<10), maxLine)
+		for sc.Scan() {
+			select {
+			case lines <- slices.Clone(sc.Bytes()):
+			case <-ctx.Done():
+				return
+			}
+		}
+		// Closing lines tells the loop below; a request that is too long
+		// gets an answer first.
+		tooLong = errors.Is(sc.Err(), bufio.ErrTooLong)
+		if !tooLong {
+			cancel() // the client hung up: end what it asked for
+		}
+	}()
+	defer func() {
+		cancel()
+		_ = c.Close()
+		<-read
+	}()
+
 	enc := json.NewEncoder(c)
-	for sc.Scan() {
+	for {
+		var line []byte
+		var ok bool
+		select {
+		case line, ok = <-lines:
+		case <-ctx.Done():
+			return
+		}
+		if !ok {
+			if tooLong {
+				_ = enc.Encode(Response{Error: Errorf(CodeUsage, "a request is longer than 1 MiB")})
+			}
+			return
+		}
 		var req Request
-		if err := json.Unmarshal(sc.Bytes(), &req); err != nil {
+		if err := json.Unmarshal(line, &req); err != nil {
 			_ = enc.Encode(Response{Error: Errorf(CodeUsage, "malformed request: %v", err)})
 			return
 		}
@@ -87,7 +127,22 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 		}
 		if req.Method == "watch" {
 			if err := enc.Encode(Response{ID: req.ID, Result: json.RawMessage(`{"watching":true}`)}); err == nil {
-				s.watch(ctx, c, enc)
+				// Lines the client sends now are read and dropped; its
+				// hanging up ends the watch.
+				drained := make(chan struct{})
+				go func() {
+					defer close(drained)
+					for range lines {
+						continue
+					}
+				}()
+				if err := s.h.Watch(ctx, func(ev Event) error { return enc.Encode(ev) }); err != nil && ctx.Err() == nil {
+					s.log.Debug("ipc watch ended", "err", err)
+				}
+				cancel()
+				_ = c.Close()
+				<-read
+				<-drained
 			}
 			return
 		}
@@ -103,25 +158,4 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 			return
 		}
 	}
-	if errors.Is(sc.Err(), bufio.ErrTooLong) {
-		_ = enc.Encode(Response{Error: Errorf(CodeUsage, "a request is longer than 1 MiB")})
-	}
-}
-
-// watch streams the handler's events on c until the handler stops, ctx
-// ends, or the client hangs up.
-func (s *Server) watch(ctx context.Context, c net.Conn, enc *json.Encoder) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	gone := make(chan struct{})
-	go func() {
-		defer close(gone)
-		defer cancel()
-		_, _ = io.Copy(io.Discard, c) // ends when the client closes
-	}()
-	if err := s.h.Watch(ctx, func(ev Event) error { return enc.Encode(ev) }); err != nil && ctx.Err() == nil {
-		s.log.Debug("ipc watch ended", "err", err)
-	}
-	_ = c.Close()
-	<-gone
 }

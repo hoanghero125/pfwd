@@ -212,3 +212,45 @@ func TestPeerRefused(t *testing.T) {
 		t.Error("a refused peer got an answer")
 	}
 }
+
+// waitHandler blocks "wait" calls until their context ends, and reports
+// that on canceled.
+type waitHandler struct {
+	fakeHandler
+	canceled chan struct{}
+}
+
+func (h *waitHandler) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	if method == "wait" {
+		<-ctx.Done()
+		h.canceled <- struct{}{}
+		return nil, ctx.Err()
+	}
+	return h.fakeHandler.Handle(ctx, method, params)
+}
+
+// TestHangUpCancelsTheCall: a client that gives up ends the call on the
+// server, and the same Client works for the next call.
+func TestHangUpCancelsTheCall(t *testing.T) {
+	h := &waitHandler{canceled: make(chan struct{}, 1)}
+	path := serve(t, h)
+	c, err := Dial(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	if err := c.Call(ctx, "wait", nil, nil); err == nil {
+		t.Fatal("a call past its deadline succeeded")
+	}
+	select {
+	case <-h.canceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the server kept running the call the client gave up on")
+	}
+	var got map[string]any
+	if err := c.Call(t.Context(), "echo", map[string]any{"n": 1}, &got); err != nil || got["n"] != float64(1) {
+		t.Errorf("the next call = %v, %v", got, err)
+	}
+}

@@ -34,7 +34,11 @@ func Listen(path string) (net.Listener, error) {
 		return nil, fmt.Errorf("find the current user's SID: %w", err)
 	}
 	// This user owns the pipe, and only this user may open it.
-	ln, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: "O:" + sid + "D:P(A;;GA;;;" + sid + ")"})
+	ln, err := winio.ListenPipe(path, &winio.PipeConfig{
+		SecurityDescriptor: "O:" + sid + "D:P(A;;GA;;;" + sid + ")",
+		InputBufferSize:    64 << 10,
+		OutputBufferSize:   64 << 10,
+	})
 	if err != nil {
 		if c, derr := dial(context.Background(), path); derr == nil {
 			_ = c.Close()
