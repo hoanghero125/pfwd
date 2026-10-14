@@ -88,6 +88,12 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read the config file %s: %w", path, err)
 	}
+	return Parse(path, data)
+}
+
+// Parse reads a config file's contents; path names the file in problems.
+// Unknown keys and bad values come back together as *Problems.
+func Parse(path string, data []byte) (Config, error) {
 	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
 
 	idx := buildIndex(data)

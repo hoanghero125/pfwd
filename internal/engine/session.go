@@ -26,6 +26,8 @@ type session struct {
 	retry chan struct{}
 	// cancel ends the loop; StopRetrying calls it.
 	cancel context.CancelFunc
+	// disconnecting is set by Disconnect: the loop then ends Closed.
+	disconnecting bool
 }
 
 // errStoppedRetrying ends a session the user stopped retrying.
@@ -255,9 +257,17 @@ func (e *Engine) sleep(ctx context.Context, s *session, d time.Duration) bool {
 }
 
 // ended handles a session whose context ended: nothing more when the engine
-// is closing, else the user stopped retrying.
+// is closing, Closed after Disconnect, else the user stopped retrying.
 func (e *Engine) ended(host HostID, s *session) {
 	if e.ctx.Err() != nil {
+		return
+	}
+	e.mu.Lock()
+	disconnecting := s.disconnecting
+	e.mu.Unlock()
+	if disconnecting {
+		e.setState(s, Closed)
+		e.emit(SessionChanged{Host: host, State: Closed})
 		return
 	}
 	e.setState(s, SessionFailed)
