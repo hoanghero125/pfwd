@@ -21,22 +21,6 @@ func TestHelpListsEveryCommand(t *testing.T) {
 	}
 }
 
-func TestStubsAreNotImplementedYet(t *testing.T) {
-	for _, tc := range []struct {
-		args []string
-		path string // the command that must report itself, not the root TUI
-	}{
-		{[]string{"ui"}, "pfwd ui"},
-		{[]string{"ui", "devbox", "gpu-node"}, "pfwd ui"},
-	} {
-		code, out, errOut := run(t, tc.args...)
-		want := `"` + tc.path + `" is not implemented yet`
-		if code != 1 || out != "" || !strings.Contains(errOut, want) {
-			t.Errorf("pfwd %v: code %d, stdout %q, stderr %q; want 1, empty stdout, %s", tc.args, code, out, errOut, want)
-		}
-	}
-}
-
 func TestStubUsageErrorsExit2(t *testing.T) {
 	for _, args := range [][]string{
 		{"fwd"},

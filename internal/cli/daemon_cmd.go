@@ -89,7 +89,7 @@ func daemonRun(cmd *cobra.Command, f *rootFlags) error {
 	eng := engine.New(o)
 
 	h := newDaemonHandler(eng, d, path, logger)
-	h.cfgPath = c.cfgPath
+	h.cfgPath, h.ctx = c.cfgPath, ctx
 	ran := make(chan struct{})
 	go func() {
 		defer close(ran)
@@ -110,6 +110,9 @@ func daemonRun(cmd *cobra.Command, f *rootFlags) error {
 	cancel()
 	<-ran
 	<-stopper
+	h.webMu.Lock() // no web UI starts after this
+	h.webDone.Wait()
+	h.webMu.Unlock()
 	if err := eng.Close(); err != nil {
 		logger.Warn("engine shutdown", "err", err)
 	}
