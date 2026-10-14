@@ -9,7 +9,7 @@ The VS Code Ports panel for any terminal. Agentless, one binary, every OS.
 
 `pfwd devbox` connects to a host from your `~/.ssh/config` and shows a live table of the TCP ports listening on it. Start `npm run dev` on the server and, a few seconds later, `localhost:5173` on your laptop reaches it. You don't press anything.
 
-> **Status: v0.4.0, early.** One host at a time. Scripting commands, several hosts in one window and a web UI come in later releases.
+> **Status: v0.6.0, early.** The TUI, scripting commands, a background daemon and a web UI work; expect rough edges until v1.0.
 
 ## Install
 
@@ -151,6 +151,25 @@ pfwd daemon stop            # ends the daemon and its forwards
 `pfwd daemon start` starts it on its own; `pfwd daemon start -F file` gives it another ssh config. It listens on a Unix socket only you can open (in `$XDG_RUNTIME_DIR`, else your own directory under the system temp directory), or on Windows a named pipe only you can open; `PFWD_SOCKET` names another. The daemon logs to `pfwd.log`.
 
 The daemon works like the TUI: it follows `config.toml`, so auto-forward is on unless the config turns it off (`--auto` or `--no-auto` on `pfwd fwd --detach` sets it for that host), and it restores pinned and configured forwards. It reads hosts from your ssh config, so `pfwd fwd --detach` refuses `-p`, `-l`, `-i`, `-J` and `-F`: put them in `~/.ssh/config`. `--bind` sets the address of the forwards you name. When the daemon needs a host-key confirmation or a passphrase, `pfwd fwd --detach` asks on your terminal, or with `--accept-new` trusts a new host key.
+
+## Web UI
+
+`pfwd ui` opens the same controls in a browser tab:
+
+```sh
+pfwd ui                     # starts the daemon if none runs, and opens the browser
+pfwd ui devbox gpu-node     # connects these hosts first
+pfwd ui --no-open           # prints the login link instead of opening it
+pfwd ui --url               # prints only the link, for scripts
+```
+
+The web UI is a front end of the daemon, like `pfwd attach`, so the browser, the TUI and the CLI show the same forwards. Closing the tab leaves them running; `pfwd daemon stop` ends them and the web UI.
+
+Each host has its forwarded and detected ports, with Forward, Open and Copy URL on every row and a menu to pin, label, see the details (state history, connections, traffic over the last five minutes) or stop. Reverse forwards and the SOCKS proxy have their own tabs. There is an event log, and a settings page: a form for the common keys, or the whole `config.toml`. Nothing is saved until the daemon has checked the file, and the daemon uses saved settings after a restart. Host-key questions, passphrases and passwords show up in the page. The keys follow the TUI: `j`/`k`, `Enter`, `o`, `y`, `x`, `p`, `a`, `/` and `?`.
+
+The web UI listens on 127.0.0.1 only, on a random port; `--port` picks one. The login link works once, for ten minutes, and `pfwd ui` prints a new one each time. It sets a session cookie and hands the page a token that every request must also carry. The page keeps the token in the tab, so another program listening on 127.0.0.1 can't use the cookie. Requests from other sites, or with another `Host`, are refused, and the page loads nothing from the internet. `pfwd daemon status` shows the web UI's address.
+
+Like `pfwd fwd --detach`, `pfwd ui` refuses `-l`, `-i`, `-J` and `-F`: the daemon reads hosts from your ssh config.
 
 ## When something doesn't work
 
