@@ -8,6 +8,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/coder/websocket v1.8.14
 	github.com/creack/pty v1.1.24
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/kevinburke/ssh_config v1.6.0
