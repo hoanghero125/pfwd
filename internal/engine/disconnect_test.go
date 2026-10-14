@@ -2,11 +2,28 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hoanghero125/pfwd/internal/sshx"
 )
+
+// forwardOnFreePort forwards spec on devbox from a free local port, trying
+// another when one is taken between freePort and the forward (Windows
+// hands out recently freed ports to outgoing connections).
+func forwardOnFreePort(t *testing.T, e *Engine, spec ForwardSpec) (Forward, error) {
+	t.Helper()
+	var err error
+	for range 5 {
+		spec.LocalPort = freePort(t)
+		var f Forward
+		if f, err = e.Forward("devbox", spec); err == nil || !strings.Contains(err.Error(), "already in use") {
+			return f, err
+		}
+	}
+	return Forward{}, err
+}
 
 // freshDial hands out a new fake connection, serving frame, on each dial.
 func freshDial(frame string) DialFunc {
@@ -20,11 +37,11 @@ func TestDisconnectClosesAndRestoresPinned(t *testing.T) {
 	o.Dial, o.State = freshDial(listen(echo, "python3")), storeAt(dir)
 	e := newEngineWith(t, o)
 	connected(t, e, "devbox")
-	keep, err := e.Forward("devbox", ForwardSpec{LocalPort: freePort(t), RemotePort: echo})
+	keep, err := forwardOnFreePort(t, e, ForwardSpec{RemotePort: echo})
 	if err != nil {
 		t.Fatal(err)
 	}
-	drop, err := e.Forward("devbox", ForwardSpec{LocalPort: freePort(t), RemotePort: echo + 7})
+	drop, err := forwardOnFreePort(t, e, ForwardSpec{RemotePort: echo + 7})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +98,7 @@ func TestSetLabel(t *testing.T) {
 	o.State = storeAt(dir)
 	e := newEngineWith(t, o)
 	connected(t, e, "devbox")
-	f, err := e.Forward("devbox", ForwardSpec{LocalPort: freePort(t), RemotePort: echo})
+	f, err := forwardOnFreePort(t, e, ForwardSpec{RemotePort: echo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +142,7 @@ func TestDisconnectThenCloseKeepsPins(t *testing.T) {
 	o.Dial, o.State = freshDial(listen(echo, "python3")), storeAt(dir)
 	e := New(o)
 	connected(t, e, "devbox")
-	f, err := e.Forward("devbox", ForwardSpec{LocalPort: freePort(t), RemotePort: echo, Pinned: true})
+	f, err := forwardOnFreePort(t, e, ForwardSpec{RemotePort: echo, Pinned: true})
 	if err != nil {
 		t.Fatal(err)
 	}
