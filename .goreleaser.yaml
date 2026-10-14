@@ -126,10 +126,11 @@ homebrew_casks:
         private_key: '{{ envOrDefault "HOMEBREW_TAP_DEPLOY_KEY" "" }}'
     hooks:
       post:
-        # The binary isn't notarized yet, so clear the quarantine flag
-        # Gatekeeper would otherwise block it with.
+        # The binary isn't notarized yet, so on macOS clear the quarantine
+        # flag Gatekeeper would otherwise block it with. Linux has no xattr
+        # command, and running a missing one fails the install there.
         install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+          if OS.mac? && File.exist?("/usr/bin/xattr")
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/pfwd"]
           end
 

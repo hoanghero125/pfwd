@@ -56,7 +56,7 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
           brew install hoanghero125/tap/pfwd
           pfwd version | tee version.txt
-          grep -F "${TAG}" version.txt
+          grep -F "pfwd ${TAG#v} " version.txt
 
   scoop:
     needs: tag
@@ -75,7 +75,8 @@ jobs:
           scoop install pfwd/pfwd
           $out = pfwd version
           $out
-          if (-not ($out -match [regex]::Escape($env:TAG))) { throw "pfwd version doesn't say $env:TAG" }
+          $want = "pfwd $($env:TAG.TrimStart('v')) "
+          if (-not "$out".StartsWith($want)) { throw "pfwd version doesn't say $want" }
 
   go-install:
     needs: tag
@@ -91,7 +92,8 @@ jobs:
       - name: go install
         run: |
           go install "github.com/hoanghero125/pfwd/cmd/pfwd@${TAG}"
-          "$(go env GOPATH)/bin/pfwd" version
+          "$(go env GOPATH)/bin/pfwd" version | tee version.txt
+          grep -F "${TAG#v}" version.txt
 
   packages:
     needs: tag
@@ -124,5 +126,5 @@ jobs:
             BASE="https://github.com/hoanghero125/pfwd/releases/download/${TAG}"
             eval "$INSTALL"
             pfwd version | tee /tmp/version.txt
-            grep -F "$TAG" /tmp/version.txt
+            grep -F "pfwd $VERSION " /tmp/version.txt
           '
