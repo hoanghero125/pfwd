@@ -167,9 +167,9 @@ The web UI is a front end of the daemon, like `pfwd attach`, so the browser, the
 
 Each host has its forwarded and detected ports, with Forward, Open and Copy URL on every row and a menu to pin, label, see the details (state history, connections, traffic over the last five minutes) or stop. Reverse forwards and the SOCKS proxy have their own tabs. There is an event log, and a settings page: a form for the common keys, or the whole `config.toml`. Nothing is saved until the daemon has checked the file, and the daemon uses saved settings after a restart. Host-key questions, passphrases and passwords show up in the page. The keys follow the TUI: `j`/`k`, `Enter`, `o`, `y`, `x`, `p`, `a`, `/` and `?`.
 
-The web UI listens on 127.0.0.1 only, on a random port; `--port` picks one. The login link works once, for ten minutes, and `pfwd ui` prints a new one each time. It sets a session cookie and hands the page a token that every request must also carry. The page keeps the token in the tab, so another program listening on 127.0.0.1 can't use the cookie. Requests from other sites, or with another `Host`, are refused, and the page loads nothing from the internet. `pfwd daemon status` shows the web UI's address.
+The web UI listens on 127.0.0.1 only, on a random port; `--port` picks the port when the daemon starts the web UI. A login link works once, for ten minutes, and every `pfwd ui` makes a new one: run it again to open the web UI in another tab or browser. The link sets a session cookie and hands the page a token that every request must also carry. The page keeps the token in its tab, so another program listening on 127.0.0.1 can't use the cookie. Requests from other sites, or with another `Host`, are refused, and the page loads nothing from the internet. `pfwd daemon status` shows the web UI's address.
 
-Like `pfwd fwd --detach`, `pfwd ui` refuses `-l`, `-i`, `-J` and `-F`: the daemon reads hosts from your ssh config.
+The daemon reads hosts from your ssh config and follows `config.toml`, so `pfwd ui` refuses `-l`, `-i`, `-J`, `-F`, `--auto`, `--no-auto`, `--bind` and `--accept-new`. Switch auto-forward per host in the page, and answer host-key questions there.
 
 ## When something doesn't work
 

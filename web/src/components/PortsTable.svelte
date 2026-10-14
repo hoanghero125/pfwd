@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { exposed, formatRate, localAddr, pauseText, url } from "../lib/format";
+  import { exposed, formatRate, localAddr, pauseText, target } from "../lib/format";
   import { forwardsOf } from "../lib/reduce";
   import { app } from "../lib/store.svelte";
   import type { Forward, Port } from "../lib/types";
@@ -16,10 +16,15 @@
 
   let filter = $state("");
   let showHidden = $state(false);
-  let selected = $state("");
+  // The cursor: the row's key, and its port and place, so it stays on the
+  // port when the row moves between the groups (as forwarding does), and
+  // on the same line when its row goes.
+  let sel = $state({ key: "", port: 0, index: 0 });
   let menu = $state("");
   let details = $state("");
   let custom = $state<Port | null>(null);
+  // back is the "More actions" button focus returns to after a dialog.
+  let back = $state("");
   let labeling = $state<Forward | null>(null);
 
   const session = $derived(app.model.sessions[host]);
@@ -52,7 +57,22 @@
       .filter((r) => r.kind === "detected" && matches(`:${r.port.port} ${r.port.process} ${r.port.label}`)),
   );
   const rows = $derived([...forwarded, ...detected]);
-  const current = $derived(rows.find((r) => r.key === selected) ?? rows[0]);
+  const current = $derived(
+    rows.find((r) => r.key === sel.key) ??
+      (sel.port ? rows.find((r) => portOf(r) === sel.port) : undefined) ??
+      rows[Math.min(sel.index, rows.length - 1)],
+  );
+
+  // portOf is the server port a row stands for: a detected port, or a
+  // forward of one. Forwards to other machines have none.
+  function portOf(r: Row): number {
+    if (r.kind === "detected") return r.port.port;
+    return local(r.f.remote_host) ? r.f.remote : 0;
+  }
+
+  function select(r: Row) {
+    sel = { key: r.key, port: portOf(r), index: Math.max(0, rows.indexOf(r)) };
+  }
   const detailed = $derived(details ? app.model.forwards[details] : undefined);
 
   // Rows that appear after the table first drew fade in.
@@ -82,7 +102,8 @@
   }
 
   function open(f: Forward) {
-    window.open(url(f), "_blank", "noopener,noreferrer");
+    const t = target(f);
+    if (t.web) window.open(t.text, "_blank", "noopener,noreferrer");
   }
 
   function primary(r: Row) {
@@ -94,13 +115,13 @@
     if (!rows.length) return;
     const i = Math.max(0, rows.findIndex((r) => r.key === current?.key));
     const next = rows[Math.min(rows.length - 1, Math.max(0, i + by))];
-    selected = next.key;
+    select(next);
     document.getElementById(`row-${next.key}`)?.scrollIntoView({ block: "nearest" });
   }
 
   function onkeydown(e: KeyboardEvent) {
     const t = e.target as HTMLElement | null;
-    if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input, textarea, select, dialog, .menu-list") || details) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input, textarea, select, dialog, .menu-list") || detailed) return;
     const r = current;
     switch (e.key) {
       case "j":
@@ -131,7 +152,7 @@
         if (r?.kind === "forward") open(r.f);
         break;
       case "y":
-        if (r?.kind === "forward") void app.copy(url(r.f));
+        if (r?.kind === "forward") void app.copy(target(r.f).text);
         break;
       case "p":
         if (r?.kind === "forward" && !r.f.config) void app.pin(r.f, !r.f.pinned);
@@ -170,7 +191,8 @@
     class:new={isNew(r.key)}
     role="listitem"
     aria-current={current?.key === r.key ? "true" : undefined}
-    onclick={() => (selected = r.key)}
+    onclick={() => select(r)}
+    onfocusin={() => select(r)}
   >
     {@render stateCell(f)}
     <span class="patch">
@@ -183,20 +205,22 @@
     <span class="label">{f.label || r.port?.label || ""}{#if f.pinned} <span class="badge pin">pinned</span>{/if}</span>
     <span class="traffic" title={f.state === "failed" ? f.error : undefined}>{traffic(f)}</span>
     <span class="acts">
-      {#if f.state === "active" || f.state === "paused"}
+      {#if (f.state === "active" || f.state === "paused") && target(f).web}
         <button class="btn small wide" onclick={() => open(f)}>Open</button>
-        <button class="btn small wide" onclick={() => app.copy(url(f))}>Copy URL</button>
+      {/if}
+      {#if f.state === "active" || f.state === "paused"}
+        <button class="btn small wide" onclick={() => app.copy(target(f).text)}>{target(f).web ? "Copy URL" : "Copy address"}</button>
       {/if}
       <span class="menu">
-        <button class="btn small icon" aria-label="More actions for :{f.remote}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
+        <button id="more-{r.key}" class="btn small icon" aria-label="More actions for :{f.remote}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
         {#if menu === r.key}
           <span class="menu-list" role="menu">
-            <button role="menuitem" onclick={() => ((details = f.id), (menu = ""))}>Details</button>
-            <button role="menuitem" onclick={() => (open(f), (menu = ""))}>Open in the browser</button>
-            <button role="menuitem" onclick={() => (app.copy(url(f)), (menu = ""))}>Copy URL</button>
+            <button role="menuitem" onclick={() => ((details = f.id), (back = `more-${r.key}`), (menu = ""))}>Details</button>
+            {#if target(f).web}<button role="menuitem" onclick={() => (open(f), (menu = ""))}>Open in the browser</button>{/if}
+            <button role="menuitem" onclick={() => (app.copy(target(f).text), (menu = ""))}>{target(f).web ? "Copy URL" : "Copy address"}</button>
             {#if !f.config}
               <button role="menuitem" onclick={() => (app.pin(f, !f.pinned), (menu = ""))}>{f.pinned ? "Unpin" : "Pin"}</button>
-              <button role="menuitem" onclick={() => ((labeling = f), (menu = ""))}>Label…</button>
+              <button role="menuitem" onclick={() => ((labeling = f), (back = `more-${r.key}`), (menu = ""))}>Label…</button>
             {/if}
             <button role="menuitem" onclick={() => (app.stop(f), (menu = ""))}>Stop</button>
           </span>
@@ -215,7 +239,8 @@
     class:new={isNew(r.key)}
     role="listitem"
     aria-current={current?.key === r.key ? "true" : undefined}
-    onclick={() => (selected = r.key)}
+    onclick={() => select(r)}
+    onfocusin={() => select(r)}
   >
     <span class="st muted"><span aria-hidden="true">—</span><span class="visually-hidden">not forwarded</span></span>
     <span class="patch"><span class="jack">:{p.port}</span></span>
@@ -225,10 +250,10 @@
     <span class="acts">
       <button class="btn small" onclick={() => forwardPort(p)}>Forward</button>
       <span class="menu">
-        <button class="btn small icon" aria-label="More actions for :{p.port}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
+        <button id="more-{r.key}" class="btn small icon" aria-label="More actions for :{p.port}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
         {#if menu === r.key}
           <span class="menu-list" role="menu">
-            <button role="menuitem" onclick={() => ((custom = p), (menu = ""))}>Forward to another local port…</button>
+            <button role="menuitem" onclick={() => ((custom = p), (back = `more-${r.key}`), (menu = ""))}>Forward to another local port…</button>
           </span>
         {/if}
       </span>
@@ -278,11 +303,11 @@
 {/if}
 
 {#if detailed}
-  <Details f={detailed} onclose={() => (details = "")} />
+  <Details f={detailed} onclose={() => (details = "")} returnTo={back} />
 {/if}
 {#if custom}
-  <ForwardDialog {host} port={custom} onclose={() => (custom = null)} />
+  <ForwardDialog {host} port={custom} onclose={() => (custom = null)} returnTo={back} />
 {/if}
 {#if labeling}
-  <LabelDialog f={labeling} onclose={() => (labeling = null)} />
+  <LabelDialog f={labeling} onclose={() => (labeling = null)} returnTo={back} />
 {/if}

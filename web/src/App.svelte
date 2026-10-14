@@ -46,7 +46,7 @@
   </div>
 {/if}
 
-<div class="shell" class:stale={app.link !== "up"}>
+<div class="shell" inert={app.link !== "up"}>
   <Sidebar onhelp={() => (help = true)} />
   <main>
     {#if app.view.kind === "host"}

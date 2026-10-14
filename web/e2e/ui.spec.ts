@@ -67,11 +67,13 @@ test("the details drawer", async ({ page }) => {
   const row = page.getByRole("list", { name: "Forwarded ports" }).getByRole("listitem").filter({ hasText: "localhost:5173" });
   await row.getByRole("button", { name: "More actions for :5173" }).click();
   await page.getByRole("menuitem", { name: "Details" }).click();
-  const drawer = page.getByRole("complementary", { name: "Forward details" });
+  const drawer = page.getByRole("dialog", { name: ":5173 on devbox" });
   await expect(drawer.getByText("2 open")).toBeVisible();
   await expect(drawer.getByRole("img", { name: /Traffic rate/ })).toBeVisible();
+  await expect(drawer.getByRole("listitem").filter({ hasText: /\d active$/ })).toBeVisible(); // the history from the snapshot
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "More actions for :5173" })).toBeFocused();
 });
 
 test("host key and password prompts are answered in the page", async ({ page }) => {
@@ -135,6 +137,7 @@ test("a banner when the daemon goes away, and back", async ({ page }) => {
   const d = await open(page);
   await d.ws?.close();
   await expect(page.getByRole("alert").filter({ hasText: "Lost the connection to the pfwd daemon" })).toBeVisible();
+  await axe(page, "banner");
   await expect(page.getByText("localhost:5173", { exact: true })).toBeVisible(); // the last state stays on screen
   await page.getByRole("button", { name: "Retry now" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Lost the connection" })).toHaveCount(0);
@@ -146,6 +149,61 @@ test("a tab without a login says how to get one", async ({ page }) => {
   await d.install();
   await page.goto("/");
   await expect(page.getByRole("alert")).toContainText("pfwd ui");
+  await axe(page, "logged out");
+});
+
+test("the cursor stays on a port the keyboard forwards", async ({ page }) => {
+  const d = await open(page);
+  const current = page.locator('.row[aria-current="true"]');
+  await page.keyboard.press("G");
+  await page.keyboard.press("k");
+  await expect(current).toContainText("redis-server");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => d.last("POST", "/api/forwards")?.body).toMatchObject({ spec: { remote: 6379 } });
+  d.push("forward_changed", forward({ id: "9", local: 6379, remote: 6379, label: "Redis", auto: false, scheme: "none" }));
+  await expect(current).toContainText("localhost:6379");
+  await page.keyboard.press("x");
+  await expect.poll(() => d.last("DELETE", "/api/forwards/9")).toBeTruthy();
+  expect(d.last("DELETE", "/api/forwards/1")).toBeUndefined();
+});
+
+test("focus inside a row selects it", async ({ page }) => {
+  const d = await open(page);
+  await page.getByRole("button", { name: "More actions for :8888" }).focus();
+  await page.keyboard.press("x");
+  await expect.poll(() => d.last("DELETE", "/api/forwards/2")).toBeTruthy();
+  expect(d.last("DELETE", "/api/forwards/1")).toBeUndefined();
+});
+
+test("Open only for web servers, at localhost", async ({ page }) => {
+  const d = await open(page);
+  await page.evaluate(() => {
+    const w = window as unknown as { opened: string[] };
+    w.opened = [];
+    window.open = (u?: string | URL) => (w.opened.push(String(u)), null);
+  });
+  const postgres = page.getByRole("list", { name: "Forwarded ports" }).getByRole("listitem").filter({ hasText: "localhost:15432" });
+  await expect(postgres.getByRole("button", { name: "Open" })).toHaveCount(0);
+  await expect(postgres.getByRole("button", { name: "Copy address" })).toBeVisible();
+  d.push("forward_changed", forward({ id: "8", bind: "0.0.0.0", local: 8080, remote: 8080, label: "", auto: false }));
+  const lan = page.getByRole("list", { name: "Forwarded ports" }).getByRole("listitem").filter({ hasText: "0.0.0.0:8080" });
+  await lan.getByRole("button", { name: "Open" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { opened: string[] }).opened)).toEqual(["http://localhost:8080"]);
+});
+
+test("a reconnect keeps the log and doesn't replay old news", async ({ page }) => {
+  const d = await open(page);
+  await expect(page.locator(".toast", { hasText: "Forwarded :5173" })).toHaveCount(0);
+  d.push("forward_changed", forward({ state: "paused", pause: "port closed" }));
+  await expect(page.locator(".toast")).toHaveCount(0);
+  await d.ws?.close();
+  await page.getByRole("button", { name: "Retry now" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Lost the connection" })).toHaveCount(0);
+  await page.goto("/#/events");
+  const log = page.getByRole("log");
+  await expect(log.getByText("Paused :5173: port closed")).toHaveCount(1);
+  await expect(log.getByText(/Forwarded :5173/)).toHaveCount(0);
+  await expect(page.locator(".toast")).toHaveCount(0);
 });
 
 test("reverse and SOCKS", async ({ page }) => {

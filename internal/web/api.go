@@ -112,7 +112,7 @@ func (s *Server) authorized(next http.Handler) http.Handler {
 			// Browsers can't set headers on a WebSocket.
 			got = r.URL.Query().Get("token")
 		}
-		if !tokenOK(sess, got) {
+		if !s.tokenOK(sess, got) {
 			writeStatus(w, http.StatusForbidden, "login", "This tab has no pfwd login. Run `pfwd ui` for a new login link.")
 			return
 		}
@@ -129,9 +129,15 @@ func (s *Server) sessionInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := map[string]string{"version": s.o.Version}
-	if token, first := s.claim(sess); first {
+	// A page with a token only checks it; a page without one takes one.
+	if got := r.Header.Get(tokenHeader); got != "" {
+		if !s.tokenOK(sess, got) {
+			writeStatus(w, http.StatusForbidden, "login", "This tab's pfwd login has ended. Run `pfwd ui` for a new login link.")
+			return
+		}
+	} else if token, ok := s.claim(sess); ok {
 		info["token"] = token
-	} else if !tokenOK(sess, r.Header.Get(tokenHeader)) {
+	} else {
 		writeStatus(w, http.StatusForbidden, "login", "This tab has no pfwd login. Run `pfwd ui` for a new login link.")
 		return
 	}

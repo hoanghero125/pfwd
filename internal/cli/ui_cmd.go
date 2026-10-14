@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -50,7 +53,7 @@ Like pfwd fwd --detach, the daemon reads hosts from your ssh config, so
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeHosts(f, false),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUI(cmd, args, port, noOpen, printURL)
+			return runUI(cmd, args, uiOptions{port: port, noOpen: noOpen, printURL: printURL, open: desktop.OpenURL})
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 0, "`port` for the web UI on 127.0.0.1 when the daemon starts it (default: any free port)")
@@ -59,13 +62,26 @@ Like pfwd fwd --detach, the daemon reads hosts from your ssh config, so
 	return cmd
 }
 
-func runUI(cmd *cobra.Command, hosts []string, port int, noOpen, printURL bool) error {
+// uiOptions are pfwd ui's flags, and how it opens the browser.
+type uiOptions struct {
+	port             int
+	noOpen, printURL bool
+	open             func(ctx context.Context, url string) error
+}
+
+func runUI(cmd *cobra.Command, hosts []string, o uiOptions) error {
+	port, noOpen, printURL := o.port, o.noOpen, o.printURL
 	for _, name := range detachRefused {
 		if name == "port" {
 			continue // pfwd ui's own --port is the web UI's
 		}
 		if fl := cmd.Flags().Lookup(name); fl != nil && fl.Changed {
 			return &usageError{fmt.Errorf("--%s doesn't work with pfwd ui: the daemon reads hosts from your ssh config (and LAN SOCKS from config.toml); set it there", name)}
+		}
+	}
+	for _, name := range []string{"auto", "no-auto", "bind", "accept-new"} {
+		if fl := cmd.Flags().Lookup(name); fl != nil && fl.Changed {
+			return &usageError{fmt.Errorf("--%s doesn't work with pfwd ui: the daemon follows config.toml; switch auto-forward per host in the page, answer host keys there, or change the setting in config.toml", name)}
 		}
 	}
 	if port < 0 || port > 65535 {
@@ -93,6 +109,12 @@ func runUI(cmd *cobra.Command, hosts []string, port int, noOpen, printURL bool) 
 	}
 	var res uiJSON
 	if err := client.Call(ctx, "ui", uiParams{Port: port}, &res); err != nil {
+		var ie *ipc.Error
+		if errors.As(err, &ie) && ie.Code == ipc.CodeUsage && strings.Contains(ie.Message, "unknown method") {
+			var st statusJSON
+			_ = client.Call(ctx, "status", nil, &st)
+			return fmt.Errorf("the running pfwd daemon (%s) is older than this pfwd and has no web UI; run `pfwd daemon stop`, then `pfwd ui` again", cmp.Or(st.Version, "an older version"))
+		}
 		return interrupted(ctx, err)
 	}
 	out := cmd.OutOrStdout()
@@ -104,7 +126,7 @@ func runUI(cmd *cobra.Command, hosts []string, port int, noOpen, printURL bool) 
 		fmt.Fprintf(cmd.ErrOrStderr(), "The web UI already runs at %s; --port applies when the daemon starts it.\n", res.Address)
 	}
 	if !noOpen {
-		err := desktop.OpenURL(ctx, res.URL)
+		err := o.open(ctx, res.URL)
 		if err == nil {
 			fmt.Fprintf(out, "Opened the pfwd web UI (%s) in your browser.\n", res.Address)
 			return nil

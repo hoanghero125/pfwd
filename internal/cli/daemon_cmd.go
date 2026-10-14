@@ -223,6 +223,9 @@ func daemonStatus(cmd *cobra.Command) error {
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "pfwd daemon %s running (pid %d) since %s on %s\n", st.Version, st.PID, st.StartedAt.Local().Format("15:04:05"), st.Socket)
 	fmt.Fprintf(w, "%d forwards\n", st.Forwards)
+	if st.Web != "" {
+		fmt.Fprintf(w, "web UI at %s (pfwd ui opens it)\n", st.Web)
+	}
 	for _, h := range st.Hosts {
 		fmt.Fprintf(w, "  %s: %s\n", safetext.Clean(h.Host), h.State)
 	}

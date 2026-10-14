@@ -37,16 +37,32 @@ export interface Model {
   history: Record<string, { at: number; text: string }[]>;
   // notices are what a toast shows: auto-forwards and failures.
   notices: LogLine[];
+  // syncing is true while the daemon replays what it knows, from the
+  // stream's start to its synced event: that is not news, so it isn't
+  // logged. seen keeps what the replay named, so what ended while the
+  // page was away can go.
+  syncing: boolean;
+  seen: { forwards: Record<string, true>; prompts: Record<string, true> };
 }
 
 export const maxLog = 500;
 export const historyPoints = 300;
 
 export function emptyModel(): Model {
-  return { sessions: {}, ports: {}, forwards: {}, auto: {}, prompts: [], log: [], rates: {}, history: {}, notices: [] };
+  return {
+    sessions: {}, ports: {}, forwards: {}, auto: {}, prompts: [], log: [], rates: {}, history: {}, notices: [],
+    syncing: false, seen: { forwards: {}, prompts: {} },
+  };
+}
+
+// startSync begins a replay: the event stream (re)opened.
+export function startSync(m: Model) {
+  m.syncing = true;
+  m.seen = { forwards: {}, prompts: {} };
 }
 
 function log(m: Model, line: LogLine, notice = false) {
+  if (m.syncing) return;
   m.log.push(line);
   if (m.log.length > maxLog) m.log.splice(0, m.log.length - maxLog);
   if (notice) m.notices.push(line);
@@ -100,6 +116,7 @@ export function apply(m: Model, ev: WireEvent, now: number) {
     }
     case "forward_changed": {
       const f = ev.data as Forward;
+      if (m.syncing) m.seen.forwards[f.id] = true;
       const before = m.forwards[f.id];
       const changed = !before || before.state !== f.state || before.pause !== f.pause || before.error !== f.error;
       if (changed) {
@@ -107,7 +124,7 @@ export function apply(m: Model, ev: WireEvent, now: number) {
         // Svelte state proxy, and only changes made through it show.
         if (!m.history[f.id]) m.history[f.id] = [];
         const h = m.history[f.id];
-        h.unshift({ at: now, text: stateText(f) + (f.auto && !before ? " (auto-forward)" : "") });
+        h.unshift({ at: now, text: stateText(f) + (f.auto && !before && !m.syncing ? " (auto-forward)" : "") });
         if (h.length > 50) h.length = 50;
       }
       if (f.state === "stopped") {
@@ -149,7 +166,20 @@ export function apply(m: Model, ev: WireEvent, now: number) {
     }
     case "prompt": {
       const p = ev.data as Prompt;
+      if (m.syncing) m.seen.prompts[p.id] = true;
       if (!m.prompts.some((q) => q.id === p.id)) m.prompts.push(p);
+      return;
+    }
+    case "synced": {
+      for (const id of Object.keys(m.forwards)) {
+        if (!m.seen.forwards[id]) {
+          delete m.forwards[id];
+          delete m.rates[id];
+          delete m.history[id];
+        }
+      }
+      m.prompts = m.prompts.filter((p) => m.seen.prompts[p.id]);
+      m.syncing = false;
       return;
     }
     case "prompt_done": {

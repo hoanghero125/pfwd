@@ -1,7 +1,7 @@
 import { describe as group, expect, it } from "vitest";
 
-import { formatRate, localAddr, url } from "./format";
-import { apply, emptyModel, forwardsOf, historyPoints } from "./reduce";
+import { formatRate, localAddr, target } from "./format";
+import { apply, emptyModel, forwardsOf, historyPoints, startSync } from "./reduce";
 import type { Forward } from "./types";
 
 function fwd(over: Partial<Forward>): Forward {
@@ -85,6 +85,42 @@ group("format", () => {
   it("names local addresses", () => {
     expect(localAddr(fwd({}))).toBe("localhost:5173");
     expect(localAddr(fwd({ bind: "0.0.0.0", local: 8080 }))).toBe("0.0.0.0:8080");
-    expect(url(fwd({ scheme: "https", local: 8443 }))).toBe("https://localhost:8443");
+    expect(target(fwd({ scheme: "https", local: 8443 }))).toEqual({ text: "https://localhost:8443", web: true });
+    expect(target(fwd({ scheme: "none", local: 15432 }))).toEqual({ text: "localhost:15432", web: false });
+    expect(target(fwd({ bind: "0.0.0.0", local: 8080 }))).toEqual({ text: "http://localhost:8080", web: true });
+    expect(target(fwd({ kind: "dynamic", local: 1080 }))).toEqual({ text: "socks5h://localhost:1080", web: false });
+  });
+});
+
+group("snapshots", () => {
+  it("takes the first snapshot quietly", () => {
+    const m = emptyModel();
+    startSync(m);
+    apply(m, { event: "session_changed", data: { host: "devbox", state: "connected", error: "", retry_at: null, attempt: 0 } }, 1);
+    apply(m, { event: "forward_changed", data: fwd({ state: "active", auto: true }) }, 1);
+    apply(m, { event: "forward_changed", data: fwd({ id: "2", state: "failed", error: "refused" }) }, 1);
+    apply(m, { event: "synced", data: null }, 1);
+    expect(m.log).toEqual([]);
+    expect(m.notices).toEqual([]);
+    expect(Object.keys(m.forwards)).toEqual(["1", "2"]);
+    expect(m.history["1"].map((h) => h.text)).toEqual(["active"]);
+    apply(m, { event: "forward_changed", data: fwd({ state: "paused", pause: "port closed" }) }, 2);
+    expect(m.log.map((l) => l.text)).toEqual(["Paused :5173: port closed"]);
+  });
+
+  it("keeps the log over a reconnect and drops what ended meanwhile", () => {
+    const m = emptyModel();
+    apply(m, { event: "forward_changed", data: fwd({ state: "active", auto: true }) }, 1);
+    apply(m, { event: "forward_changed", data: fwd({ id: "2", remote: 8888, local: 8888 }) }, 1);
+    apply(m, { event: "prompt", data: { id: "7", session: "devbox", host: "devbox", kind: "password" } }, 1);
+    const logged = m.log.length;
+    const noticed = m.notices.length;
+    startSync(m);
+    apply(m, { event: "forward_changed", data: fwd({ state: "active", auto: true }) }, 2);
+    apply(m, { event: "synced", data: null }, 2);
+    expect(Object.keys(m.forwards)).toEqual(["1"]);
+    expect(m.prompts).toEqual([]);
+    expect(m.log.length).toBe(logged);
+    expect(m.notices.length).toBe(noticed);
   });
 });

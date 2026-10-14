@@ -3,7 +3,7 @@
   import type { Forward } from "../lib/types";
   import Dialog from "./Dialog.svelte";
 
-  let { f, onclose }: { f: Forward; onclose: () => void } = $props();
+  let { f, onclose, returnTo = "" }: { f: Forward; onclose: () => void; returnTo?: string } = $props();
   // svelte-ignore state_referenced_locally
   let label = $state(f.label);
 
@@ -13,7 +13,7 @@
   }
 </script>
 
-<Dialog title="Label :{f.remote}" {onclose}>
+<Dialog title="Label :{f.remote}" {onclose} {returnTo}>
   <form onsubmit={submit}>
     <div class="field">
       <label for="label-text">Label</label>

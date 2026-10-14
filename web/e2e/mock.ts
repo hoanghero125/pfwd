@@ -32,7 +32,7 @@ export function snapshot() {
     { event: "session_changed", data: { host: "gpu-node", state: "reconnecting", error: "connection to gpu-node was lost (broken pipe)", retry_at: new Date(Date.now() + 4000).toISOString(), attempt: 1 } },
     { event: "forward_changed", data: forward({}) },
     { event: "forward_changed", data: forward({ id: "2", local: 8888, remote: 8888, label: "Jupyter", auto: false, pinned: true, conns: 0, bytes_in: 0, bytes_out: 0 }) },
-    { event: "forward_changed", data: forward({ id: "3", local: 15432, remote: 5432, label: "Postgres", state: "paused", pause: "port closed", auto: false, scheme: "" }) },
+    { event: "forward_changed", data: forward({ id: "3", local: 15432, remote: 5432, label: "Postgres", state: "paused", pause: "port closed", auto: false, scheme: "none" }) },
   ];
 }
 
@@ -49,6 +49,7 @@ export class Daemon {
     await this.page.routeWebSocket(/\/api\/events/, (ws) => {
       this.ws = ws;
       for (const e of events) ws.send(JSON.stringify(e));
+      ws.send(JSON.stringify({ event: "synced" }));
     });
   }
 
@@ -108,6 +109,8 @@ export class Daemon {
       const b = body as { host: string; spec: { remote: number; local?: number } };
       return json(forward({ id: "9", host: b.host, remote: b.spec.remote, local: b.spec.local || b.spec.remote, state: "starting", auto: false }));
     }
+    const connect = path.match(/^\/api\/hosts\/([^/]+)\/connect$/);
+    if (connect && method === "POST") return json({ host: decodeURIComponent(connect[1]) });
     return json({ ok: true });
   }
 }

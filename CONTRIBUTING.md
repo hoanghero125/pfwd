@@ -22,7 +22,7 @@ Thanks for helping. Before you change an area, read its package doc comment and 
 | `make soak` | An hour of forwards kept up through connection drops, against the same sshd; nightly CI runs it. `PFWD_SOAK_DURATION=3m PFWD_SOAK_DROP_EVERY=20s make soak` is a quick local run |
 | `make snapshot` | GoReleaser build of every platform into `dist/` |
 | `make web` | Installs, type-checks, unit-tests and builds the web UI into `web/dist`, then checks its size budget (150 KB gzipped) |
-| `make web-e2e` | Playwright against the built web UI with the daemon mocked in the browser: every screen, the keys, axe accessibility checks, and screenshots in light and dark at 1280 and 390 px (in `web/test-results/screens`). `PW_CHANNEL=chrome` uses your installed Chrome instead of downloading one |
+| `make web-e2e` | Playwright against the built web UI with the daemon mocked in the browser: every screen, the keys, axe accessibility checks, and screenshots in light and dark at 1280 and 390 px (in `web/test-results/screens`). `PW_CHANNEL=chrome` uses your installed Chrome; otherwise run `npx playwright install chromium` in `web/` once |
 
 ## Making a change
 

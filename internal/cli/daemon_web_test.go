@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +139,30 @@ func TestDaemonConfigMethods(t *testing.T) {
 	raw, _ := json.Marshal(saved)
 	if strings.Contains(string(raw), "null") {
 		t.Errorf("config_put result has nulls: %s", raw)
+	}
+}
+
+// TestWatchMarksTheSnapshotEnd: a watcher learns where the snapshot of
+// what the daemon knows ends, so the web UI doesn't take it for news.
+func TestWatchMarksTheSnapshotEnd(t *testing.T) {
+	headlessEnv(t)
+	echo := echoListener(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(ssLine(echo, "echo"))}, true)
+	path := startDaemon(t, "-F", h.sshConfig)
+	if code, _, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", freeLocalPort(t), echo), "--detach"); code != 0 {
+		t.Fatalf("pfwd fwd --detach: code %d, stderr %q", code, errOut)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var got []string
+	_ = ipc.Watch(ctx, path, func(e ipc.Event) {
+		got = append(got, e.Event)
+		if e.Event == "synced" {
+			cancel()
+		}
+	})
+	i := slices.Index(got, "synced")
+	if i < 0 || !slices.Contains(got[:i], "forward_changed") || !slices.Contains(got[:i], "session_changed") {
+		t.Errorf("watch events = %v; want the snapshot, then synced", got)
 	}
 }

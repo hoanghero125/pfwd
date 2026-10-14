@@ -16,10 +16,15 @@ const loginTTL = 10 * time.Minute
 // cookieName is the session cookie.
 const cookieName = "pfwd_session"
 
-// session is one logged-in browser tab.
+// session is one browser's login: a cookie, and a token per tab. Each
+// login link adds a token, which one page takes, once; every API call
+// carries its tab's token.
 type session struct {
-	// token must come with every API call; the page gets it once.
-	token   string
+	tokens []tabToken
+}
+
+type tabToken struct {
+	value   string
 	claimed bool
 }
 
@@ -65,19 +70,31 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "This login link has expired or was used already. Run `pfwd ui` for a new one.")
 		return
 	}
-	id, err := randomToken()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	token, err := randomToken()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.mu.Lock()
-	s.sessions[sha256.Sum256([]byte(id))] = &session{token: token}
-	s.mu.Unlock()
+	// A browser that is logged in already keeps its cookie, so its other
+	// tabs keep working; the new tab gets a token of its own.
+	id := ""
+	if c, err := r.Cookie(cookieName); err == nil {
+		if sess, ok := s.session(r); ok {
+			id = c.Value
+			s.mu.Lock()
+			sess.tokens = append(sess.tokens, tabToken{value: token})
+			s.mu.Unlock()
+		}
+	}
+	if id == "" {
+		if id, err = randomToken(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.mu.Lock()
+		s.sessions[sha256.Sum256([]byte(id))] = &session{tokens: []tabToken{{value: token}}}
+		s.mu.Unlock()
+	}
 	// Not Secure: the server is plain HTTP on 127.0.0.1, where browsers
 	// don't all keep Secure cookies.
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: id, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode}) //nolint:gosec // see above
@@ -97,18 +114,31 @@ func (s *Server) session(r *http.Request) (*session, bool) {
 	return sess, ok
 }
 
-// claim hands the session's token to the page, the first time only.
+// claim hands a token no page has taken yet to the page asking.
 func (s *Server) claim(sess *session) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if sess.claimed {
-		return "", false
+	for i := range sess.tokens {
+		if !sess.tokens[i].claimed {
+			sess.tokens[i].claimed = true
+			return sess.tokens[i].value, true
+		}
 	}
-	sess.claimed = true
-	return sess.token, true
+	return "", false
 }
 
-// tokenOK reports whether the request carries the session's token.
-func tokenOK(sess *session, got string) bool {
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(sess.token)) == 1
+// tokenOK reports whether got is one of the session's tokens.
+func (s *Server) tokenOK(sess *session, got string) bool {
+	if got == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ok := false
+	for _, t := range sess.tokens {
+		if subtle.ConstantTimeCompare([]byte(got), []byte(t.value)) == 1 {
+			ok = true
+		}
+	}
+	return ok
 }

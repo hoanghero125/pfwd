@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -48,14 +49,22 @@ func Copy(ctx context.Context, text string) error {
 	return runHelper(ctx, h, text)
 }
 
+// loginQuery is the query of pfwd ui's login link: one base64url token.
+var loginQuery = regexp.MustCompile(`^token=[A-Za-z0-9_-]{1,128}$`)
+
 // checkURL accepts only what pfwd builds: http or https, localhost or an
-// IP address, a port, and no path, query or user. Openers such as
-// rundll32 would launch other kinds of URL as programs or files.
+// IP address, a port, and no path, query or user, except pfwd ui's login
+// link (/login?token=...). Openers such as rundll32 would launch other
+// kinds of URL as programs or files.
 func checkURL(s string) error {
 	bad := fmt.Errorf("refusing to open %q: pfwd only opens http or https URLs of forwarded ports", s)
 	u, err := url.Parse(s)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Opaque != "" || u.User != nil ||
-		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		u.ForceQuery || u.Fragment != "" {
+		return bad
+	}
+	login := u.Path == "/login" && loginQuery.MatchString(u.RawQuery)
+	if !login && ((u.Path != "" && u.Path != "/") || u.RawQuery != "") {
 		return bad
 	}
 	if host := u.Hostname(); host != "localhost" && net.ParseIP(host) == nil {

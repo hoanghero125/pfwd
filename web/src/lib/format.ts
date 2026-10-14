@@ -32,10 +32,26 @@ export function remoteAddr(f: Pick<Forward, "remote_host" | "remote">): string {
   return `${host}:${f.remote}`;
 }
 
-// url is the address a browser opens for a local forward.
-export function url(f: Pick<Forward, "kind" | "bind" | "remote_host" | "local" | "scheme">): string {
-  const scheme = f.scheme === "https" ? "https" : "http";
-  return `${scheme}://${localAddr(f)}`;
+// target is what Copy URL copies and Open opens, as in the TUI: a web
+// address when the forward may serve HTTP (web is true), else the bare
+// address. A forward listening on every address is reached at localhost.
+export function target(f: Pick<Forward, "kind" | "bind" | "remote_host" | "local" | "scheme">): { text: string; web: boolean } {
+  const b = f.bind ?? "";
+  const host = loopback.has(b) || b === "0.0.0.0" || b === "::" ? "localhost" : b;
+  const addr = host.includes(":") ? `[${host}]:${f.local}` : `${host}:${f.local}`;
+  switch (f.kind) {
+    case "dynamic":
+      return { text: `socks5h://${addr}`, web: false };
+    case "remote":
+      return { text: localAddr(f), web: false };
+  }
+  switch (f.scheme) {
+    case "none":
+      return { text: addr, web: false };
+    case "https":
+      return { text: `https://${addr}`, web: true };
+  }
+  return { text: `http://${addr}`, web: true };
 }
 
 // exposed is true for a forward that listens beyond this machine.

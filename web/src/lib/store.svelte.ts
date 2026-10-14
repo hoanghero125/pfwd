@@ -2,7 +2,7 @@
 // daemon, the current view and the actions every view shares.
 
 import * as api from "./api";
-import { apply, emptyModel, type LogLine, type Model } from "./reduce";
+import { apply, emptyModel, startSync, type LogLine, type Model } from "./reduce";
 import type { Forward, HostInfo, Spec } from "./types";
 
 export type View =
@@ -104,16 +104,14 @@ class App {
     this.#ws?.close();
     const ws = new WebSocket(api.eventsURL());
     this.#ws = ws;
-    let fresh = true;
+    ws.onopen = () => {
+      // The daemon starts with what it knows now, up to a synced event;
+      // the model keeps the log and history it has.
+      startSync(this.model);
+      this.link = "up";
+      this.#attempt = 0;
+    };
     ws.onmessage = (msg) => {
-      if (fresh) {
-        // The daemon starts with what it knows now.
-        this.model = emptyModel();
-        this.#noticesSeen = 0;
-        fresh = false;
-        this.link = "up";
-        this.#attempt = 0;
-      }
       try {
         apply(this.model, JSON.parse(String(msg.data)), Date.now());
       } catch {

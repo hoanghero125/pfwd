@@ -18,7 +18,7 @@ export interface Forward {
   auto: boolean;
   config: boolean;
   label: string;
-  scheme: string; // http, https or ""
+  scheme: string; // http or https (the probe answered), none (it found no web server), or "" (not probed)
   mapped_from: number;
   conns: number;
   bytes_in: number;

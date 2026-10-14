@@ -129,6 +129,59 @@ func TestE2EWebUI(t *testing.T) {
 		return false
 	})
 
+	// useForward checks the active forward of 8142 answers, stops it, and
+	// checks it is gone.
+	useForward := func(how string) {
+		t.Helper()
+		hp := waitFor("an active forward of 8142 ("+how+")", func(hp hostPorts) bool {
+			return len(hp.Forwards) == 1 && hp.Forwards[0].Remote == 8142 && hp.Forwards[0].State == "active"
+		})
+		local := hp.Forwards[0].Local
+		get(t, fmt.Sprint(local))
+		if code := call("DELETE", "/api/forwards/"+hp.Forwards[0].ID, session.Token, "", nil); code != 200 {
+			t.Fatalf("DELETE the forward: %d", code)
+		}
+		waitFor("no forwards", func(hp hostPorts) bool { return len(hp.Forwards) == 0 })
+		if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", local), 2*time.Second); err == nil {
+			_ = conn.Close()
+			t.Errorf("the forward stopped through the API still accepts connections (%s)", how)
+		}
+	}
+
+	// Through the API, watching the event stream.
+	ws := "ws://127.0.0.1:" + port + "/api/events?token=" + session.Token
+	conn, resp, err := websocket.Dial(t.Context(), ws, &websocket.DialOptions{HTTPClient: c, HTTPHeader: http.Header{"Origin": {base}}})
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("the event stream: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	if code := call("POST", "/api/forwards", session.Token, `{"host":"e2e-ss","spec":{"kind":"local","remote":8142}}`, nil); code != 200 {
+		t.Fatalf("POST /api/forwards: %d", code)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	for {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("no active forward on the event stream: %v", err)
+		}
+		var e struct {
+			Event string `json:"event"`
+			Data  struct {
+				Remote int    `json:"remote"`
+				State  string `json:"state"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(data, &e) == nil && e.Event == "forward_changed" && e.Data.Remote == 8142 && e.Data.State == "active" {
+			break
+		}
+	}
+	useForward("the API")
+
+	// Then in a real browser, when CI provides one.
 	if os.Getenv("PFWD_E2E_BROWSER") == "1" {
 		out, err := cmd("ui", "--url").Output()
 		if err != nil {
@@ -137,55 +190,14 @@ func TestE2EWebUI(t *testing.T) {
 		pw := exec.Command("npx", "playwright", "test", "--project=real", "--reporter=line")
 		pw.Dir = filepath.Join("..", "..", "web")
 		pw.Env = append(os.Environ(), "PFWD_UI_URL="+strings.TrimSpace(string(out)), "PFWD_E2E_HOST=e2e-ss", "PFWD_E2E_PORT=8142")
-		if out, err := pw.CombinedOutput(); err != nil {
+		out, err = pw.CombinedOutput()
+		// A skipped test passes too: require that it ran.
+		if err != nil || !strings.Contains(string(out), "1 passed") {
 			t.Fatalf("Playwright in a real browser: %v\n%s", err, out)
 		}
-	} else {
-		ws := "ws://127.0.0.1:" + port + "/api/events?token=" + session.Token
-		conn, resp, err := websocket.Dial(t.Context(), ws, &websocket.DialOptions{HTTPClient: c, HTTPHeader: http.Header{"Origin": {base}}})
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-		}
-		if err != nil {
-			t.Fatalf("the event stream: %v", err)
-		}
-		defer func() { _ = conn.CloseNow() }()
-		if code := call("POST", "/api/forwards", session.Token, `{"host":"e2e-ss","spec":{"kind":"local","remote":8142}}`, nil); code != 200 {
-			t.Fatalf("POST /api/forwards: %d", code)
-		}
-		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-		defer cancel()
-		for {
-			_, data, err := conn.Read(ctx)
-			if err != nil {
-				t.Fatalf("no active forward on the event stream: %v", err)
-			}
-			var e struct {
-				Event string `json:"event"`
-				Data  struct {
-					Remote int    `json:"remote"`
-					State  string `json:"state"`
-				} `json:"data"`
-			}
-			if json.Unmarshal(data, &e) == nil && e.Event == "forward_changed" && e.Data.Remote == 8142 && e.Data.State == "active" {
-				break
-			}
-		}
+		useForward("the browser")
 	}
 
-	hp := waitFor("an active forward of 8142", func(hp hostPorts) bool {
-		return len(hp.Forwards) == 1 && hp.Forwards[0].Remote == 8142 && hp.Forwards[0].State == "active"
-	})
-	local := hp.Forwards[0].Local
-	get(t, fmt.Sprint(local))
-	if code := call("DELETE", "/api/forwards/"+hp.Forwards[0].ID, session.Token, "", nil); code != 200 {
-		t.Fatalf("DELETE the forward: %d", code)
-	}
-	waitFor("no forwards", func(hp hostPorts) bool { return len(hp.Forwards) == 0 })
-	if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", local), 2*time.Second); err == nil {
-		_ = conn.Close()
-		t.Error("the stopped forward still accepts connections")
-	}
 	if out, err := cmd("daemon", "stop").CombinedOutput(); err != nil {
 		t.Fatalf("pfwd daemon stop: %v\n%s", err, out)
 	}

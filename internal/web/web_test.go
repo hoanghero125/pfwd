@@ -451,3 +451,30 @@ func TestServeEndsWithOpenStream(t *testing.T) {
 		t.Fatal("Serve didn't return with a stream open")
 	}
 }
+
+// TestSecondLoginKeepsOtherTabs: a second pfwd ui link in the same browser
+// adds a tab; the first tab's token keeps working, and a tab checking its
+// own token never takes the new tab's.
+func TestSecondLoginKeepsOtherTabs(t *testing.T) {
+	ts := start(t)
+	c, first := ts.loggedIn(t)
+	u, _ := ts.LoginURL()
+	if resp, _ := do(t, c, "GET", u, "", nil); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("second login: %d", resp.StatusCode)
+	}
+	// The first tab checks its session (as after a dropped stream) before
+	// the second tab asks for its token.
+	if resp, body := do(t, c, "GET", ts.base+"/api/session", "", map[string]string{tokenHeader: first}); resp.StatusCode != 200 || strings.Contains(body, "token") {
+		t.Errorf("first tab's check: %d %s", resp.StatusCode, body)
+	}
+	resp, body := do(t, c, "GET", ts.base+"/api/session", "", nil)
+	var info struct{ Token string }
+	if err := json.Unmarshal([]byte(body), &info); err != nil || resp.StatusCode != 200 || info.Token == "" || info.Token == first {
+		t.Fatalf("second tab's token: %d %s", resp.StatusCode, body)
+	}
+	for _, token := range []string{first, info.Token} {
+		if resp, _ := do(t, c, "GET", ts.base+"/api/hosts", "", map[string]string{tokenHeader: token}); resp.StatusCode != 200 {
+			t.Errorf("a tab's token stopped working after another login: %d", resp.StatusCode)
+		}
+	}
+}

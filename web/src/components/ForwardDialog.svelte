@@ -5,7 +5,7 @@
 
   // A local forward with every field: a new one, or a detected port on
   // another local port.
-  let { host, port, onclose }: { host: string; port?: Port; onclose: () => void } = $props();
+  let { host, port, onclose, returnTo = "" }: { host: string; port?: Port; onclose: () => void; returnTo?: string } = $props();
   // The fields start from the port; the dialog doesn't follow it later.
   // svelte-ignore state_referenced_locally
   let local = $state(port ? String(port.port) : "");
@@ -38,7 +38,7 @@
   }
 </script>
 
-<Dialog title={port ? `Forward :${port.port} to another local port` : `New forward on ${host}`} {onclose}>
+<Dialog title={port ? `Forward :${port.port} to another local port` : `New forward on ${host}`} {onclose} {returnTo}>
   <form onsubmit={submit}>
     <div class="fields">
       {#if !port}

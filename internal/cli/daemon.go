@@ -133,7 +133,8 @@ func (h *daemonHandler) broadcastLocked(e ipc.Event) {
 }
 
 // Watch sends what the daemon knows now (sessions, ports, forwards,
-// waiting prompts), then every event, until ctx ends or send fails.
+// waiting prompts), a synced event, then every event, until ctx ends or
+// send fails.
 func (h *daemonHandler) Watch(ctx context.Context, send func(ipc.Event) error) error {
 	ch := make(chan ipc.Event, watchBuffer)
 	h.mu.Lock()
@@ -175,6 +176,8 @@ func (h *daemonHandler) Watch(ctx context.Context, send func(ipc.Event) error) e
 			snapshot = append(snapshot, e)
 		}
 	}
+	// synced ends the snapshot: what follows is news.
+	snapshot = append(snapshot, ipc.Event{Event: "synced"})
 	for _, e := range snapshot {
 		if err := send(e); err != nil {
 			return err

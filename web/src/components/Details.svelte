@@ -2,12 +2,13 @@
   import { clock, formatRate, localAddr, remoteAddr } from "../lib/format";
   import { app } from "../lib/store.svelte";
   import type { Forward } from "../lib/types";
+  import Dialog from "./Dialog.svelte";
   import State from "./State.svelte";
 
   // The forward details drawer: mapping, state history, connections,
-  // bytes and a five-minute rate sparkline.
-  let { f, onclose }: { f: Forward; onclose: () => void } = $props();
-  let closeButton: HTMLButtonElement;
+  // bytes and a five-minute rate sparkline. It is a modal dialog, so the
+  // page under it can't take focus.
+  let { f, onclose, returnTo = "" }: { f: Forward; onclose: () => void; returnTo?: string } = $props();
 
   const rate = $derived(app.model.rates[f.id]);
   const history = $derived(app.model.history[f.id] ?? []);
@@ -20,22 +21,11 @@
   const peak = $derived(Math.max(0, ...(rate?.history ?? [0])));
   const origin = $derived([f.config ? "config.toml" : f.auto ? "auto-forward" : "manual", f.pinned ? "pinned" : ""].filter(Boolean).join(", "));
 
-  $effect(() => closeButton.focus());
-
-  function onkeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") onclose();
-  }
 </script>
 
-<svelte:window {onkeydown} />
-
-<aside class="drawer" aria-label="Forward details">
-  <div class="head">
-    <h2>{f.kind === "dynamic" ? "SOCKS proxy" : `:${f.remote}`} on {f.host}</h2>
-    <div class="tools"><button class="btn small" aria-label="Close details" bind:this={closeButton} onclick={onclose}>✕</button></div>
-  </div>
+<Dialog title="{f.kind === 'dynamic' ? 'SOCKS proxy' : `:${f.remote}`} on {f.host}" {onclose} {returnTo} drawer>
   <span class="patch">
-    <span class="jack">{f.host}{remoteAddr(f)}</span>
+    <span class="jack">{f.host}{remoteAddr(f).startsWith(":") ? "" : " "}{remoteAddr(f)}</span>
     <span class="cable g-{f.state} {f.state}" aria-hidden="true"></span>
     <span class="jack">{localAddr(f)}</span>
   </span>
@@ -73,4 +63,4 @@
     {#if !f.config}<button class="btn" onclick={() => app.pin(f, !f.pinned)}>{f.pinned ? "Unpin" : "Pin"}</button>{/if}
     <button class="btn danger" onclick={() => (app.stop(f), onclose())}>Stop</button>
   </div>
-</aside>
+</Dialog>
