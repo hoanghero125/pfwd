@@ -42,8 +42,26 @@ func openLogAt(path, level string) (*slog.Logger, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("open the log file: %w", err)
 	}
-	logger := slog.New(slog.NewJSONHandler(f, &slog.HandlerOptions{Level: lvl}))
+	logger := slog.New(slog.NewJSONHandler(f, &slog.HandlerOptions{Level: lvl, ReplaceAttr: redactAttr}))
 	return logger, func() { _ = f.Close() }, nil
+}
+
+// redactAttr takes anything that looks like a secret out of a log line's
+// message and attributes, at every level: passwords, passphrases, tokens
+// (the web UI's login link carries one) and private keys.
+func redactAttr(_ []string, a slog.Attr) slog.Attr {
+	switch v := a.Value; v.Kind() {
+	case slog.KindString:
+		a.Value = slog.StringValue(redact(v.String(), ""))
+	case slog.KindAny:
+		switch x := v.Any().(type) {
+		case error:
+			a.Value = slog.StringValue(redact(x.Error(), ""))
+		case fmt.Stringer:
+			a.Value = slog.StringValue(redact(x.String(), ""))
+		}
+	}
+	return a
 }
 
 // rotateLog shifts pfwd.log to pfwd.log.1 (and so on) when it is too big.

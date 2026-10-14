@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,5 +67,34 @@ func TestParseLogLevel(t *testing.T) {
 	}
 	if _, err := parseLogLevel("loud"); err == nil {
 		t.Error("parseLogLevel(loud) accepted")
+	}
+}
+
+// TestLogRedactsSecrets: secret-looking text never reaches the log file,
+// even at debug level, in the message or any attribute.
+func TestLogRedactsSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pfwd.log")
+	logger, closeLog, err := openLogAt(path, "debug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAkey\n-----END OPENSSH PRIVATE KEY-----"
+	logger.Debug("retrying with password=hunter2",
+		"url", "http://127.0.0.1:41234/login?token=Tok3nValue",
+		"err", errors.New(`bad "passphrase": "s3cret"`),
+		slog.Group("g", "secret", "secret=inner1"),
+		"key", key)
+	closeLog()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leaked := range []string{"hunter2", "Tok3nValue", "s3cret", "inner1", "AAAAkey"} {
+		if strings.Contains(string(data), leaked) {
+			t.Errorf("the log kept %q:\n%s", leaked, data)
+		}
+	}
+	if !strings.Contains(string(data), "retrying with") {
+		t.Errorf("the log lost the message:\n%s", data)
 	}
 }

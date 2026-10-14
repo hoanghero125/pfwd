@@ -11,7 +11,7 @@ interval = "2s"            # how often to list the server's ports (at least 500m
 http_probe = true          # check whether forwarded ports speak HTTP or HTTPS
 debounce_scans = 2         # snapshots a new port must appear in before it is auto-forwarded
 ignore_ports = [22]        # ports or ranges like "9000-9100": hidden, never auto-forwarded
-ignore_processes = ["sshd", "systemd-resolved", "cupsd", "rpcbind", "containerd", "dnsmasq", "chronyd"]
+ignore_processes = ["sshd", "systemd-resolved", "cupsd", "rpcbind", "containerd", "dnsmasq", "chronyd"] # their ports are hidden and never auto-forwarded
 
 [forward]
 auto = true                # forward new ports automatically

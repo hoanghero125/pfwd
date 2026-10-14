@@ -192,7 +192,7 @@ pfwd completion powershell | Out-String | Invoke-Expression   # add this line to
 
 pfwd works without a config file. To change its defaults, run `pfwd config edit`: it creates the file with every setting at its default, commented, and opens it in `$VISUAL`, `$EDITOR`, or notepad on Windows and vi elsewhere. `pfwd config validate` checks the file and points at the line and column of anything it doesn't accept; pfwd refuses to start with a broken config, so you never get silent defaults.
 
-The file lives at `~/.config/pfwd/config.toml` on Linux, `~/Library/Application Support/pfwd/config.toml` on macOS and `%AppData%\pfwd\config.toml` on Windows. `pfwd config path` prints it. `PFWD_CONFIG` or `--config` points pfwd at another file.
+The file lives at `~/.config/pfwd/config.toml` on Linux, `~/Library/Application Support/pfwd/config.toml` on macOS and `%AppData%\pfwd\config.toml` on Windows. `pfwd config path` prints it. `PFWD_CONFIG` or `--config` points pfwd at another file. [docs/config.md](docs/config.md) describes every setting.
 
 ```toml
 [detect]
@@ -240,6 +240,10 @@ Logs go to `pfwd.log` in pfwd's state directory: `~/.local/state/pfwd` on Linux,
 - It needs no agent on the server, so it works on locked-down, shared and university machines where you can't upload anything.
 - It is one static Go binary for Linux, macOS and Windows, and doesn't need OpenSSH at runtime.
 - Scripts get the same engine as the TUI: `pfwd fwd` keeps forwards up through dropped connections, and `pfwd ls --json` lists what a server listens on.
+
+## Documentation
+
+[docs/](docs/README.md) has the install options (with checking a download), common jobs step by step, every setting, troubleshooting and a FAQ.
 
 ## Contributing
 
