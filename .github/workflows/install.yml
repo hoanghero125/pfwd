@@ -1,0 +1,128 @@
+name: install
+
+# Installs a published release on clean runners through every channel and
+# checks that `pfwd version` reports it. Runs after the release workflow,
+# by hand for any tag, and on changes to this file (for the latest
+# release).
+on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to install, such as v0.6.0 (default the latest)
+        required: false
+  pull_request:
+    paths: [.github/workflows/install.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: which release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM_RUN: ${{ github.event.workflow_run.head_branch }}
+          FROM_INPUT: ${{ inputs.tag }}
+        run: |
+          tag="${FROM_RUN:-$FROM_INPUT}"
+          if [ -z "$tag" ]; then tag=$(gh api repos/${{ github.repository }}/releases/latest --jq .tag_name); fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Installing $tag"
+
+  homebrew:
+    needs: tag
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    name: Homebrew (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - name: brew install
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
+          brew install hoanghero125/tap/pfwd
+          pfwd version | tee version.txt
+          grep -F "${TAG}" version.txt
+
+  scoop:
+    needs: tag
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    name: Scoop (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: scoop install
+        shell: pwsh
+        run: |
+          iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
+          $env:PATH = "$env:USERPROFILE\scoop\shims;$env:PATH"
+          scoop bucket add pfwd https://github.com/hoanghero125/scoop-bucket
+          scoop install pfwd/pfwd
+          $out = pfwd version
+          $out
+          if (-not ($out -match [regex]::Escape($env:TAG))) { throw "pfwd version doesn't say $env:TAG" }
+
+  go-install:
+    needs: tag
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    name: go install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: go install
+        run: |
+          go install "github.com/hoanghero125/pfwd/cmd/pfwd@${TAG}"
+          "$(go env GOPATH)/bin/pfwd" version
+
+  packages:
+    needs: tag
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: .deb on Ubuntu
+            image: ubuntu:24.04
+            install: apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null && curl -fsSLo /tmp/pfwd.deb "$BASE/pfwd_${VERSION}_amd64.deb" && apt-get install -y -qq /tmp/pfwd.deb
+          - name: .rpm on Fedora
+            image: fedora:41
+            install: dnf install -y -q "$BASE/pfwd-${VERSION}-1.x86_64.rpm"
+          - name: .apk on Alpine
+            image: alpine:3.21
+            install: apk add -q curl && curl -fsSLo /tmp/pfwd.apk "$BASE/pfwd_${VERSION}_x86_64.apk" && apk add -q --allow-untrusted /tmp/pfwd.apk
+    steps:
+      - name: Install the package in a clean container
+        env:
+          INSTALL: ${{ matrix.install }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm -e TAG -e INSTALL "$IMAGE" sh -euc '
+            VERSION="${TAG#v}"
+            BASE="https://github.com/hoanghero125/pfwd/releases/download/${TAG}"
+            eval "$INSTALL"
+            pfwd version | tee /tmp/version.txt
+            grep -F "$TAG" /tmp/version.txt
+          '
