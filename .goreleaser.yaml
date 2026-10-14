@@ -8,7 +8,7 @@ project_name: pfwd
 before:
   hooks:
     - go mod tidy -diff # fail if go.mod/go.sum are not tidy
-    - make web          # no-op until web/ exists (M6)
+    # web/dist is committed and checked by CI's web job, so no Node here.
 
 builds:
   - id: pfwd
