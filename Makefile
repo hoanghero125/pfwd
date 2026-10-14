@@ -21,7 +21,7 @@ LDFLAGS := -s -w \
 GOLANGCI_LINT_DIR := bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GOLANGCI_LINT     := $(GOLANGCI_LINT_DIR)/golangci-lint$(EXE)
 
-.PHONY: build web web-e2e test lint e2e soak demo snapshot release-dry-run
+.PHONY: build web web-e2e test lint e2e soak perf demo snapshot release-dry-run
 
 # Static binary with version info, like a release build.
 build: export CGO_ENABLED := 0
@@ -66,6 +66,12 @@ e2e:
 # PFWD_SOAK_DURATION and PFWD_SOAK_DROP_EVERY shorten it for a local run.
 soak:
 	go test -tags 'e2e soak' -run TestSoak -count=1 -timeout 75m -v ./test/e2e/...
+
+# Performance budgets against the same sshd containers (Linux): first
+# frame, first detected ports over a 50 ms RTT link, idle CPU and memory
+# with 3 hosts and 20 forwards, throughput against ssh -L.
+perf:
+	go test -tags 'e2e perf' -run TestPerf -count=1 -timeout 10m -v ./test/e2e/...
 
 demo:
 	@echo "no demo tapes yet (added in M2)"
