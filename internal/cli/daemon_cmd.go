@@ -89,6 +89,7 @@ func daemonRun(cmd *cobra.Command, f *rootFlags) error {
 	eng := engine.New(o)
 
 	h := newDaemonHandler(eng, d, path, logger)
+	h.cfgPath, h.ctx = c.cfgPath, ctx
 	ran := make(chan struct{})
 	go func() {
 		defer close(ran)
@@ -109,6 +110,9 @@ func daemonRun(cmd *cobra.Command, f *rootFlags) error {
 	cancel()
 	<-ran
 	<-stopper
+	h.webMu.Lock() // no web UI starts after this
+	h.webDone.Wait()
+	h.webMu.Unlock()
 	if err := eng.Close(); err != nil {
 		logger.Warn("engine shutdown", "err", err)
 	}
@@ -219,6 +223,9 @@ func daemonStatus(cmd *cobra.Command) error {
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "pfwd daemon %s running (pid %d) since %s on %s\n", st.Version, st.PID, st.StartedAt.Local().Format("15:04:05"), st.Socket)
 	fmt.Fprintf(w, "%d forwards\n", st.Forwards)
+	if st.Web != "" {
+		fmt.Fprintf(w, "web UI at %s (pfwd ui opens it)\n", st.Web)
+	}
 	for _, h := range st.Hosts {
 		fmt.Fprintf(w, "  %s: %s\n", safetext.Clean(h.Host), h.State)
 	}

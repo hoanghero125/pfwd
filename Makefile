@@ -21,20 +21,22 @@ LDFLAGS := -s -w \
 GOLANGCI_LINT_DIR := bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GOLANGCI_LINT     := $(GOLANGCI_LINT_DIR)/golangci-lint$(EXE)
 
-.PHONY: build web test lint e2e soak demo snapshot release-dry-run
+.PHONY: build web web-e2e test lint e2e soak demo snapshot release-dry-run
 
 # Static binary with version info, like a release build.
 build: export CGO_ENABLED := 0
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/pfwd$(EXE) ./cmd/pfwd
 
-# Web UI bundle for go:embed. A no-op until web/ exists (M6).
+# Web UI: install, check, unit-test and build web/dist, which the binary
+# embeds and git keeps (commit it with the source change). Needs Node.
 web:
-ifneq ($(wildcard web/package.json),)
-	cd web && pnpm install --frozen-lockfile && pnpm build
-else
-	@echo "web/ does not exist yet (added in M6); nothing to build"
-endif
+	cd web && npm ci && npm run check && npm test && npm run build && npm run size
+
+# Web UI in a browser against a mocked daemon: screens, keys, axe, budgets.
+# PW_CHANNEL=chrome uses the installed Chrome.
+web-e2e:
+	cd web && npx playwright test --project=mock
 
 # The race detector needs cgo and a C compiler.
 test: export CGO_ENABLED := 1

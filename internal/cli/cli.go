@@ -155,7 +155,7 @@ user@host. The flags below override the ssh config.`,
 	root.PersistentFlags().String("config", "", "`path` of the config file to use, instead of $PFWD_CONFIG or the default that pfwd config path prints")
 	root.AddCommand(newVersionCmd(), newConfigCmd())
 	root.AddCommand(newHostsCmd(&flags), newLsCmd(&flags), newFwdCmd(&flags), newDoctorCmd(&flags), newDaemonCmd(&flags), newStopCmd(), newAttachCmd(&flags))
-	root.AddCommand(stubCmds()...)
+	root.AddCommand(newUICmd(&flags))
 	wireCompletion(root) // after SetOut: cobra captures the writer when it builds the shell commands
 	return root
 }

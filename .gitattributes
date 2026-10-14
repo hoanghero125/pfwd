@@ -5,3 +5,5 @@
 *.gif binary
 *.ico binary
 *.zip binary
+# The built web UI: generated, embedded as is.
+web/dist/** -text -diff linguist-generated=true

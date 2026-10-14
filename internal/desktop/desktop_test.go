@@ -198,3 +198,20 @@ func TestOpenStillRunningCountsAsOpened(t *testing.T) {
 		t.Errorf("open took %v", d)
 	}
 }
+
+// TestCheckURLLoginLink: pfwd ui's one-time login link opens too, and
+// nothing that merely looks like it.
+func TestCheckURLLoginLink(t *testing.T) {
+	if err := checkURL("http://127.0.0.1:41234/login?token=Ab_9-zZ0"); err != nil {
+		t.Errorf("the login link: %v", err)
+	}
+	for _, bad := range []string{
+		"http://127.0.0.1:41234/login?token=a&x=y", "http://127.0.0.1:41234/login?token=a%20b", "http://127.0.0.1:41234/login?token=",
+		"http://127.0.0.1:41234/login?tok=abc", "http://127.0.0.1:41234/other?token=abc", "http://127.0.0.1:41234/login/x?token=abc",
+		"http://127.0.0.1:41234/login?token=abc#f", "http://example.com:80/login?token=abc",
+	} {
+		if err := checkURL(bad); err == nil {
+			t.Errorf("checkURL(%q) accepted it", bad)
+		}
+	}
+}

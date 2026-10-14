@@ -7,6 +7,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	tokens "github.com/hoanghero125/pfwd/internal/theme"
 )
 
 // glyphs are the symbols the TUI draws, in Unicode or ASCII.
@@ -18,7 +20,8 @@ type glyphs struct {
 }
 
 var unicodeGlyphs = glyphs{
-	active: "●", paused: "◌", failed: "✗", starting: "…", connecting: "◐", closed: "○",
+	active: tokens.Active().Glyph, paused: tokens.Paused().Glyph, failed: tokens.Failed().Glyph,
+	starting: tokens.Starting().Glyph, connecting: tokens.Connecting().Glyph, closed: tokens.Closed().Glyph,
 	cursor: "▶", ok: "✓", none: "—", rule: "─", ellipsis: "…", down: "↓", up: "↑",
 	topLeft: "╭", topRight: "╮", bottomLeft: "╰", bottomRight: "╯", side: "│",
 	upDown: "↑ ↓", dots: "…", block: "█", mask: "•",
@@ -27,7 +30,8 @@ var unicodeGlyphs = glyphs{
 // asciiGlyphs are for consoles whose fonts lack the Unicode ones, such as
 // the legacy Windows console.
 var asciiGlyphs = glyphs{
-	active: "*", paused: "o", failed: "x", starting: ".", connecting: "~", closed: "-",
+	active: tokens.Active().ASCII, paused: tokens.Paused().ASCII, failed: tokens.Failed().ASCII,
+	starting: tokens.Starting().ASCII, connecting: tokens.Connecting().ASCII, closed: tokens.Closed().ASCII,
 	cursor: ">", ok: "+", none: "-", rule: "-", ellipsis: "~", down: "v", up: "^",
 	topLeft: "+", topRight: "+", bottomLeft: "+", bottomRight: "+", side: "|",
 	upDown: "up down", dots: "...", block: "_", mask: "*",
@@ -35,7 +39,8 @@ var asciiGlyphs = glyphs{
 
 // theme holds the TUI's styles and glyphs. Colors are the terminal's own
 // ANSI palette, so pfwd follows the user's theme; only the accent and the
-// selection depend on whether the background is dark.
+// selection depend on whether the background is dark. The state glyphs and
+// colors come from internal/theme, which the web UI shares.
 type theme struct {
 	faint, bold, accent, ok, warn, bad lipgloss.Style
 	// selectBg starts the selected row's background.
@@ -45,19 +50,25 @@ type theme struct {
 
 func newTheme(dark, ascii bool) theme {
 	s := lipgloss.NewStyle()
+	color := func(st tokens.State) lipgloss.Style {
+		if dark {
+			return s.Foreground(lipgloss.Color(st.ANSI))
+		}
+		// Cyan is hard to read on white in the stock palettes, so the
+		// accent's light color is blue.
+		return s.Foreground(lipgloss.Color(st.ANSILight))
+	}
 	th := theme{
 		faint:    s.Faint(true),
 		bold:     s.Bold(true),
-		accent:   s.Foreground(lipgloss.Color("6")),
-		ok:       s.Foreground(lipgloss.Color("2")),
-		warn:     s.Foreground(lipgloss.Color("3")),
-		bad:      s.Foreground(lipgloss.Color("1")),
+		accent:   color(tokens.Connecting()),
+		ok:       color(tokens.Active()),
+		warn:     color(tokens.Paused()),
+		bad:      color(tokens.Failed()),
 		selectBg: "\x1b[48;5;236m",
 		g:        unicodeGlyphs,
 	}
 	if !dark {
-		// Cyan is hard to read on white in the stock palettes.
-		th.accent = s.Foreground(lipgloss.Color("4"))
 		th.selectBg = "\x1b[48;5;254m"
 	}
 	if ascii {

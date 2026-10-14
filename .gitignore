@@ -2,9 +2,11 @@
 /bin/
 /dist/
 
-# Web UI build output and dependencies (M6)
-/web/dist/
+# Web UI dependencies and test output. web/dist is committed: the binary
+# embeds it, so Go builds need no Node.
 /web/node_modules/
+/web/test-results/
+/web/playwright-report/
 
 # Test artifacts
 *.test

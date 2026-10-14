@@ -16,6 +16,8 @@ import (
 	"github.com/hoanghero125/pfwd/internal/ipc"
 	"github.com/hoanghero125/pfwd/internal/sshx"
 	"github.com/hoanghero125/pfwd/internal/version"
+	"github.com/hoanghero125/pfwd/internal/web"
+	webapp "github.com/hoanghero125/pfwd/web"
 )
 
 // watchBuffer is how many events a watcher may fall behind before the
@@ -24,14 +26,22 @@ const watchBuffer = 256
 
 // daemonHandler serves the daemon's IPC calls with one engine.
 type daemonHandler struct {
-	eng     *engine.Engine
-	d       *hostDialer
-	log     *slog.Logger
-	path    string
+	eng  *engine.Engine
+	d    *hostDialer
+	log  *slog.Logger
+	path string
+	// cfgPath is the config file the settings calls read and write.
+	cfgPath string
 	started time.Time
 	// stopping is closed when a client asks the daemon to shut down.
 	stopping chan struct{}
 	stopOnce sync.Once
+	// ctx is the daemon's life; the web UI's server runs until it ends,
+	// and webDone tracks it.
+	ctx     context.Context
+	webMu   sync.Mutex
+	web     *web.Server
+	webDone sync.WaitGroup
 
 	mu       sync.Mutex
 	hosts    []engine.HostID
@@ -123,7 +133,8 @@ func (h *daemonHandler) broadcastLocked(e ipc.Event) {
 }
 
 // Watch sends what the daemon knows now (sessions, ports, forwards,
-// waiting prompts), then every event, until ctx ends or send fails.
+// waiting prompts), a synced event, then every event, until ctx ends or
+// send fails.
 func (h *daemonHandler) Watch(ctx context.Context, send func(ipc.Event) error) error {
 	ch := make(chan ipc.Event, watchBuffer)
 	h.mu.Lock()
@@ -165,6 +176,8 @@ func (h *daemonHandler) Watch(ctx context.Context, send func(ipc.Event) error) e
 			snapshot = append(snapshot, e)
 		}
 	}
+	// synced ends the snapshot: what follows is news.
+	snapshot = append(snapshot, ipc.Event{Event: "synced"})
 	for _, e := range snapshot {
 		if err := send(e); err != nil {
 			return err
@@ -185,6 +198,38 @@ func (h *daemonHandler) Watch(ctx context.Context, send func(ipc.Event) error) e
 	}
 }
 
+// ui starts the web UI's server, the first time, and returns a new login
+// URL.
+func (h *daemonHandler) ui(p uiParams) (any, error) {
+	h.webMu.Lock()
+	defer h.webMu.Unlock()
+	reused := h.web != nil
+	if h.web == nil {
+		if h.ctx == nil || h.ctx.Err() != nil {
+			return nil, ipc.Errorf(ipc.CodeInternal, "the daemon is stopping")
+		}
+		srv := web.New(h, web.Options{Assets: webapp.Dist(), Version: version.Get().Version, Logger: h.log})
+		ln, err := srv.Listen(p.Port)
+		if err != nil {
+			return nil, ipc.Errorf(ipc.CodeBind, "%s", err.Error())
+		}
+		h.web = srv
+		h.webDone.Add(1)
+		go func() {
+			defer h.webDone.Done()
+			if err := srv.Serve(h.ctx, ln); err != nil {
+				h.log.Warn("web UI stopped", "err", err)
+			}
+		}()
+		h.log.Info("web UI started", "address", srv.Addr())
+	}
+	u, err := h.web.LoginURL()
+	if err != nil {
+		return nil, ipc.Errorf(ipc.CodeInternal, "%s", err.Error())
+	}
+	return uiJSON{URL: u, Address: h.web.Addr(), Reused: reused}, nil
+}
+
 // statusJSON is what pfwd daemon status prints.
 type statusJSON struct {
 	Running   bool             `json:"running"`
@@ -194,6 +239,8 @@ type statusJSON struct {
 	StartedAt time.Time        `json:"started_at"`
 	Hosts     []hostStatusJSON `json:"hosts"`
 	Forwards  int              `json:"forwards"`
+	// Web is the web UI's address, when pfwd ui has started it.
+	Web string `json:"web,omitempty"`
 }
 
 type hostStatusJSON struct {
@@ -322,6 +369,45 @@ func (h *daemonHandler) Handle(ctx context.Context, method string, params json.R
 			return nil, err
 		}
 		return map[string]bool{"ok": true}, nil
+	case "ui":
+		var p uiParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		return h.ui(p)
+	case "hosts":
+		return h.hostList()
+	case "disconnect":
+		var p hostParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		return h.disconnect(engine.HostID(p.Host))
+	case "set_label":
+		var p labelParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		if err := h.eng.SetLabel(p.ID, p.Label); err != nil {
+			return nil, ipc.Errorf(ipc.CodeNotFound, "%s", err.Error())
+		}
+		return map[string]bool{"ok": true}, nil
+	case "stats":
+		return h.stats(), nil
+	case "config_get":
+		return h.configGet()
+	case "config_put":
+		var p configTextParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		return h.configSave([]byte(p.Text))
+	case "config_set":
+		var p configValuesParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		return h.configSet(p.Values)
 	case "shutdown":
 		h.stopOnce.Do(func() { close(h.stopping) })
 		return map[string]bool{"stopping": true}, nil
@@ -337,6 +423,11 @@ func (h *daemonHandler) status() statusJSON {
 	}
 	h.mu.Unlock()
 	s.Forwards = len(h.eng.Forwards())
+	h.webMu.Lock()
+	if h.web != nil {
+		s.Web = h.web.Addr()
+	}
+	h.webMu.Unlock()
 	return s
 }
 
