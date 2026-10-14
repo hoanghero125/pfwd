@@ -299,6 +299,7 @@ func runAttach(cmd *cobra.Command, f *rootFlags) error {
 		return err
 	}
 	defer eng.close()
+	warnOtherRelease(ctx, cmd, eng.c)
 	var st statusJSON
 	if err := eng.c.Call(ctx, "status", nil, &st); err != nil {
 		return err

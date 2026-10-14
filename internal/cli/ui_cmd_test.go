@@ -151,3 +151,32 @@ func TestUIRefusesDaemonSettings(t *testing.T) {
 		}
 	}
 }
+
+// otherDaemon is a daemon of another release that has the web UI.
+type otherDaemon struct{ oldDaemon }
+
+func (otherDaemon) Handle(_ context.Context, method string, _ json.RawMessage) (any, error) {
+	switch method {
+	case "status":
+		return statusJSON{Running: true, Version: "v9.9.9"}, nil
+	case "ui":
+		return uiJSON{URL: "http://127.0.0.1:1/login?token=abc", Address: "http://127.0.0.1:1"}, nil
+	}
+	return map[string]bool{"ok": true}, nil
+}
+
+// TestUIWarnsAboutAnotherRelease: after an update, the daemon still
+// running is the old release; pfwd ui says so.
+func TestUIWarnsAboutAnotherRelease(t *testing.T) {
+	headlessEnv(t)
+	path := daemonSocket(t)
+	ln, err := ipc.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = ipc.NewServer(otherDaemon{}, nil).Serve(t.Context(), ln) }()
+	code, out, errOut := run(t, "ui", "--url")
+	if code != 0 || !strings.Contains(out, "/login?token=abc") || !strings.Contains(errOut, "v9.9.9") || !strings.Contains(errOut, "pfwd daemon stop") {
+		t.Errorf("pfwd ui with a v9.9.9 daemon: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}

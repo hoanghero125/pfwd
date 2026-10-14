@@ -17,7 +17,11 @@ scoop install pfwd/pfwd
 scoop update pfwd          # later, for a new release
 ```
 
-If `pfwd daemon` or `pfwd ui` is running when you update, stop it first with `pfwd daemon stop`: Windows won't replace a binary that is running, and a new `pfwd ui` needs a daemon from the same release.
+On Windows, stop the daemon before you update (`pfwd daemon stop`): Windows won't replace a binary that is running.
+
+## After an update
+
+A daemon started by `pfwd fwd --detach`, `pfwd daemon start` or `pfwd ui` keeps running the release it started with. Run `pfwd daemon stop` after updating; the next `pfwd ui` or `pfwd fwd --detach` starts the new one. `pfwd ui` and `pfwd attach` warn when the running daemon is from another release.
 
 ## Linux packages
 

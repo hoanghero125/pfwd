@@ -8,9 +8,9 @@ The log is `pfwd.log` in pfwd's state directory (see [install.md](install.md#whe
 
 ## Connecting
 
-**"no such host" or the wrong machine.** pfwd resolves hosts with `ssh -G`, so it sees what `ssh` sees, `Match` and `Include` included. Check with `ssh -G <host> | grep -i '^hostname\|^port\|^user'`. Without OpenSSH, pfwd reads `~/.ssh/config` itself; `-F` names another file.
+**The wrong host, or none.** pfwd resolves hosts with `ssh -G`, so it sees what `ssh` sees, `Match` and `Include` included. Check with `ssh -G <host> | grep -i '^hostname\|^port\|^user'`. Without OpenSSH, pfwd reads `~/.ssh/config` itself; `-F` names another file.
 
-**"host key changed".** pfwd refuses to connect, like `ssh`. If you know why the key changed (the server was reinstalled), remove the old key with `ssh-keygen -R <host>` and connect again.
+**The host key changed.** pfwd refuses to connect, like `ssh`. If you know why the key changed (the server was reinstalled), remove the old key with `ssh-keygen -R <host>` and connect again.
 
 **An unknown host key without a terminal.** `pfwd fwd`, `pfwd ls` and the daemon can't ask. Connect once with `pfwd <host>` or `ssh <host>`, pass `--accept-new`, or answer the question in `pfwd ui`.
 
@@ -20,11 +20,11 @@ The log is `pfwd.log` in pfwd's state directory (see [install.md](install.md#whe
 
 ## Ports
 
-**"Detection unavailable".** The server has none of `ss`, `netstat`, `lsof`, `sockstat` or a readable `/proc/net/tcp`, as in minimal containers. You can still forward by hand: New forward in the web UI, `pfwd fwd <host> <port>`, or the host's `forwards` list in `config.toml`.
+**Detection unavailable.** The server has none of `ss`, `netstat`, `lsof`, `sockstat` or a readable `/proc/net/tcp`, as in minimal containers. You can still forward by hand: New forward in the web UI, `pfwd fwd <host> <port>`, or the host's `forwards` list in `config.toml`.
 
 **A port doesn't show up.** Check that it is in neither `detect.ignore_ports` nor `detect.ignore_processes`; `h` in the TUI shows hidden ports. Servers listening only on a Unix socket aren't TCP ports and don't show.
 
-**"server disallows TCP forwarding".** The server's sshd has `AllowTcpForwarding no`. Ask its admin; pfwd can't work around it.
+**The server refuses TCP forwarding.** The server's sshd has `AllowTcpForwarding no` (or `DisableForwarding yes`). Ask its admin; pfwd can't work around it.
 
 **A remote forward (`-R`) says "port busy".** After a dropped connection, the server can hold the port for the old session a while longer. pfwd keeps trying until it is free; `ClientAliveInterval` in the server's sshd_config shortens the wait. To listen on an address other than loopback on the server, sshd also needs `GatewayPorts`.
 
@@ -32,7 +32,7 @@ The log is `pfwd.log` in pfwd's state directory (see [install.md](install.md#whe
 
 ## The daemon and the web UI
 
-**`pfwd ui` says the daemon is older than pfwd.** You updated pfwd while the old daemon kept running. Run `pfwd daemon stop`, then `pfwd ui` again.
+**`pfwd ui` or `pfwd attach` says the running daemon is another release.** You updated pfwd while the old daemon kept running, and it still serves the old code and web UI. Run `pfwd daemon stop`, then `pfwd ui` again.
 
 **"This tab isn't logged in to pfwd".** Each login link works once, for ten minutes, and belongs to the tab that opened it. Run `pfwd ui` for a new one; a reloaded tab keeps its login.
 

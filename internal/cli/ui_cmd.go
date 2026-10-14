@@ -12,6 +12,7 @@ import (
 
 	"github.com/hoanghero125/pfwd/internal/desktop"
 	"github.com/hoanghero125/pfwd/internal/ipc"
+	"github.com/hoanghero125/pfwd/internal/version"
 )
 
 // uiParams asks the daemon for the web UI: started on port (0 for any)
@@ -102,6 +103,7 @@ func runUI(cmd *cobra.Command, hosts []string, o uiOptions) error {
 		return interrupted(ctx, err)
 	}
 	defer client.Close()
+	warnOtherRelease(ctx, cmd, client)
 	for _, h := range slices.Compact(slices.Clone(hosts)) {
 		if err := client.Call(ctx, "connect", connectParams{Target: h}, nil); err != nil {
 			return interrupted(ctx, err)
@@ -135,4 +137,17 @@ func runUI(cmd *cobra.Command, hosts []string, o uiOptions) error {
 	}
 	fmt.Fprintf(out, "Open this link in your browser; it works once, for 10 minutes:\n  %s\n", res.URL)
 	return nil
+}
+
+// warnOtherRelease says when the running daemon is from another release of
+// pfwd, as after an update: it keeps serving its own web UI and code until
+// it restarts.
+func warnOtherRelease(ctx context.Context, cmd *cobra.Command, client *ipc.Client) {
+	var st statusJSON
+	if client.Call(ctx, "status", nil, &st) != nil || st.Version == "" {
+		return
+	}
+	if mine := version.Get().Version; st.Version != mine {
+		fmt.Fprintf(cmd.ErrOrStderr(), "The running pfwd daemon is %s and this pfwd is %s; run `pfwd daemon stop`, then this command again, to use %s.\n", st.Version, mine, mine)
+	}
 }
