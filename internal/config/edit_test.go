@@ -120,3 +120,18 @@ func TestValues(t *testing.T) {
 		t.Error("a syntax error gave values")
 	}
 }
+
+func TestValuesAndSetValuesWithBOM(t *testing.T) {
+	data := append([]byte("\xEF\xBB\xBF"), []byte(editBase)...)
+	v, err := Values(data)
+	if err != nil || v["detect.interval"] != "2s" {
+		t.Fatalf("Values with a BOM = %v, %v", v, err)
+	}
+	out, err := SetValues(data, map[string]any{"forward.auto": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := Parse("config.toml", out); err != nil || cfg.Forward.Auto {
+		t.Errorf("SetValues with a BOM: %v %+v:\n%s", err, cfg.Forward, out)
+	}
+}

@@ -115,3 +115,41 @@ func TestSetLabelRefusesConfigForward(t *testing.T) {
 		t.Error("relabeled a forward from config.toml")
 	}
 }
+
+// TestDisconnectThenCloseKeepsPins: quitting after a disconnect doesn't
+// forget the host's pinned forwards.
+func TestDisconnectThenCloseKeepsPins(t *testing.T) {
+	echo := echoServer(t)
+	dir := t.TempDir()
+	o := manualOptions(nil)
+	o.Dial, o.State = freshDial(listen(echo, "python3")), storeAt(dir)
+	e := New(o)
+	connected(t, e, "devbox")
+	f, err := e.Forward("devbox", ForwardSpec{LocalPort: freePort(t), RemotePort: echo, Pinned: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Disconnect("devbox")
+	next(t, e, func(s SessionChanged) bool { return s.State == Closed })
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := storeAt(dir).Load("devbox")
+	if err != nil || len(saved) != 1 || saved[0].Local != f.Spec.LocalPort || !saved[0].Pinned {
+		t.Errorf("remembered after Disconnect and Close = %+v, %v; want the pinned forward", saved, err)
+	}
+}
+
+// TestConnectRightAfterDisconnect: a Connect sent as soon as Disconnect
+// returns starts a new session instead of being dropped.
+func TestConnectRightAfterDisconnect(t *testing.T) {
+	echo := echoServer(t)
+	o := manualOptions(nil)
+	o.Dial = freshDial(listen(echo, "python3"))
+	e := newEngineWith(t, o)
+	connected(t, e, "devbox")
+	e.Disconnect("devbox")
+	e.Connect("devbox")
+	next(t, e, func(s SessionChanged) bool { return s.State == Closed })
+	next(t, e, func(s SessionChanged) bool { return s.State == Connected })
+}

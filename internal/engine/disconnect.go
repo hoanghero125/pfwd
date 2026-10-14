@@ -17,6 +17,11 @@ func (e *Engine) Disconnect(host HostID) {
 	ended := s.state == SessionFailed || s.state == Closed
 	e.mu.Unlock()
 
+	// End the session loop first, so nothing it does (a restore, an
+	// auto-forward) adds a forward after the sweep below.
+	s.cancel()
+	<-s.done
+
 	// Remember the pinned forwards before they go.
 	e.persistOnly(host, true)
 	e.mu.Lock()
@@ -28,11 +33,11 @@ func (e *Engine) Disconnect(host HostID) {
 		}
 	}
 	hs := e.hostLocked(host)
-	// The next connection reads state.json again and restores from it.
-	hs.restored, hs.unrestored = false, nil
+	// The next connection reads state.json again and restores from it;
+	// until then nothing writes the host's entry, so quitting keeps it.
+	hs.restored, hs.loaded, hs.unrestored = false, false, nil
 	e.mu.Unlock()
 
-	s.cancel()
 	for _, f := range fws {
 		f.cancel()
 		<-f.done
@@ -42,7 +47,7 @@ func (e *Engine) Disconnect(host HostID) {
 		e.emit(ForwardChanged{Forward: e.snapshot(f)})
 	}
 	if ended {
-		// The session loop has already returned; say it is closed now.
+		// The session loop had returned already; say it is closed now.
 		e.setState(s, Closed)
 		e.emit(SessionChanged{Host: host, State: Closed})
 	}

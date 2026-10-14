@@ -94,7 +94,7 @@ func Load(path string) (Config, error) {
 // Parse reads a config file's contents; path names the file in problems.
 // Unknown keys and bad values come back together as *Problems.
 func Parse(path string, data []byte) (Config, error) {
-	data = bytes.TrimPrefix(data, []byte("\xEF\xBB\xBF"))
+	data = withoutBOM(data)
 
 	idx := buildIndex(data)
 	raw, list, ok := decodeAll(data, idx)

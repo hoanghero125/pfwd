@@ -30,7 +30,7 @@ func SetValues(data []byte, values map[string]any) ([]byte, error) {
 			return nil, fmt.Errorf("%s is not a setting the form can change; edit config.toml instead", k)
 		}
 	}
-	out := slices.Clone(data)
+	out := slices.Clone(withoutBOM(data))
 	for _, k := range keys {
 		text, err := tomlValue(values[k])
 		if err != nil {
@@ -189,6 +189,7 @@ func valueSpan(p *unstable.Parser, data []byte, kv *unstable.Node) (start, end i
 // file at data sets them or as they default: durations as written ("2s"),
 // lists as lists. A file that can't be parsed is an error.
 func Values(data []byte) (map[string]any, error) {
+	data = withoutBOM(data)
 	raw, list, ok := decodeAll(data, buildIndex(data))
 	if !ok {
 		return nil, &Problems{Path: "config.toml", List: list}
@@ -209,4 +210,10 @@ func Values(data []byte) (map[string]any, error) {
 		}
 	}
 	return out, nil
+}
+
+// withoutBOM drops a UTF-8 byte order mark, which Windows editors and
+// PowerShell's utf8 encoding write.
+func withoutBOM(data []byte) []byte {
+	return bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 }
