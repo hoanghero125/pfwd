@@ -184,3 +184,29 @@ func valueSpan(p *unstable.Parser, data []byte, kv *unstable.Node) (start, end i
 	}
 	return start, len(data)
 }
+
+// Values returns the "table.key" settings SetValues can change, as the
+// file at data sets them or as they default: durations as written ("2s"),
+// lists as lists. A file that can't be parsed is an error.
+func Values(data []byte) (map[string]any, error) {
+	raw, list, ok := decodeAll(data, buildIndex(data))
+	if !ok {
+		return nil, &Problems{Path: "config.toml", List: list}
+	}
+	b, err := toml.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("read the settings: %w", err)
+	}
+	var doc map[string]any
+	if err := toml.Unmarshal(b, &doc); err != nil {
+		return nil, fmt.Errorf("read the settings: %w", err)
+	}
+	out := map[string]any{}
+	for _, table := range []string{"detect", "forward", "ssh", "ui"} {
+		t, _ := doc[table].(map[string]any)
+		for k, v := range t {
+			out[table+"."+k] = v
+		}
+	}
+	return out, nil
+}

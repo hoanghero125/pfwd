@@ -101,3 +101,22 @@ func TestParseReportsProblems(t *testing.T) {
 		t.Errorf("Parse = %v", err)
 	}
 }
+
+func TestValues(t *testing.T) {
+	v, err := Values([]byte(editBase))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v["forward.auto"] != true || v["detect.interval"] != "2s" || v["forward.auto_expire"] != "10m" || v["forward.on_conflict"] != "ask" {
+		t.Errorf("values = %v", v)
+	}
+	if ports, ok := v["detect.ignore_ports"].([]any); !ok || len(ports) != 2 {
+		t.Errorf("detect.ignore_ports = %#v", v["detect.ignore_ports"])
+	}
+	if _, ok := v["labels"]; ok {
+		t.Error("labels are not form settings")
+	}
+	if _, err := Values([]byte("[forward\n")); err == nil {
+		t.Error("a syntax error gave values")
+	}
+}

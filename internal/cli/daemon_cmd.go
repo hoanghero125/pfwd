@@ -89,6 +89,7 @@ func daemonRun(cmd *cobra.Command, f *rootFlags) error {
 	eng := engine.New(o)
 
 	h := newDaemonHandler(eng, d, path, logger)
+	h.cfgPath = c.cfgPath
 	ran := make(chan struct{})
 	go func() {
 		defer close(ran)

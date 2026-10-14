@@ -24,10 +24,12 @@ const watchBuffer = 256
 
 // daemonHandler serves the daemon's IPC calls with one engine.
 type daemonHandler struct {
-	eng     *engine.Engine
-	d       *hostDialer
-	log     *slog.Logger
-	path    string
+	eng  *engine.Engine
+	d    *hostDialer
+	log  *slog.Logger
+	path string
+	// cfgPath is the config file the settings calls read and write.
+	cfgPath string
 	started time.Time
 	// stopping is closed when a client asks the daemon to shut down.
 	stopping chan struct{}
@@ -322,6 +324,39 @@ func (h *daemonHandler) Handle(ctx context.Context, method string, params json.R
 			return nil, err
 		}
 		return map[string]bool{"ok": true}, nil
+	case "hosts":
+		return h.hostList()
+	case "disconnect":
+		var p hostParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		return h.disconnect(engine.HostID(p.Host))
+	case "set_label":
+		var p labelParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		if err := h.eng.SetLabel(p.ID, p.Label); err != nil {
+			return nil, ipc.Errorf(ipc.CodeNotFound, "%s", err.Error())
+		}
+		return map[string]bool{"ok": true}, nil
+	case "stats":
+		return h.stats(), nil
+	case "config_get":
+		return h.configGet()
+	case "config_put":
+		var p configTextParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		return h.configSave([]byte(p.Text))
+	case "config_set":
+		var p configValuesParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		return h.configSet(p.Values)
 	case "shutdown":
 		h.stopOnce.Do(func() { close(h.stopping) })
 		return map[string]bool{"stopping": true}, nil
