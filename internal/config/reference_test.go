@@ -30,7 +30,7 @@ func TestReferenceCoversEverySetting(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := s.Default; got != want && !(got == "[]" && want == "[]") {
+		if got := s.Default; got != want {
 			t.Errorf("%s: the reference says %s, the code defaults to %s", s.Key, got, want)
 		}
 	}
