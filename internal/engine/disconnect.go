@@ -65,7 +65,7 @@ func (e *Engine) SetLabel(id, label string) error {
 		return fmt.Errorf("no forward with id %q", id)
 	case f.Spec.Config:
 		e.mu.Unlock()
-		return fmt.Errorf("the forward of port %d comes from config.toml (hosts.%s.forwards); edit the file to change it", f.Spec.RemotePort, f.Host)
+		return &ConfigForwardError{Port: f.Spec.RemotePort, Host: f.Host}
 	}
 	changed := f.Spec.Label != label
 	f.Spec.Label = label
@@ -75,4 +75,14 @@ func (e *Engine) SetLabel(id, label string) error {
 		e.persist(f.Host)
 	}
 	return nil
+}
+
+// ConfigForwardError refuses to change a forward that config.toml defines.
+type ConfigForwardError struct {
+	Port uint16
+	Host HostID
+}
+
+func (e *ConfigForwardError) Error() string {
+	return fmt.Sprintf("the forward of port %d comes from config.toml (hosts.%s.forwards); edit the file to change it", e.Port, e.Host)
 }

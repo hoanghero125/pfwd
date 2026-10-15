@@ -340,7 +340,7 @@ func (h *daemonHandler) Handle(ctx context.Context, method string, params json.R
 			return nil, err
 		}
 		if err := h.eng.SetPinned(p.ID, p.Pinned); err != nil {
-			return nil, ipc.Errorf(ipc.CodeNotFound, "%s", err.Error())
+			return nil, forwardChangeError(err)
 		}
 		return map[string]bool{"ok": true}, nil
 	case "reconnect", "stop_retrying":
@@ -389,7 +389,7 @@ func (h *daemonHandler) Handle(ctx context.Context, method string, params json.R
 			return nil, err
 		}
 		if err := h.eng.SetLabel(p.ID, p.Label); err != nil {
-			return nil, ipc.Errorf(ipc.CodeNotFound, "%s", err.Error())
+			return nil, forwardChangeError(err)
 		}
 		return map[string]bool{"ok": true}, nil
 	case "stats":
@@ -472,6 +472,16 @@ func (h *daemonHandler) waitConnected(ctx context.Context, host engine.HostID) e
 			return ipc.Errorf(ipc.CodeConnect, "%s is not connected yet: %v", host, ctx.Err())
 		}
 	}
+}
+
+// forwardChangeError is the IPC error for a refused pin or label: a usage
+// error for a forward from config.toml, else a missing forward.
+func forwardChangeError(err error) error {
+	var cfg *engine.ConfigForwardError
+	if errors.As(err, &cfg) {
+		return ipc.Errorf(ipc.CodeUsage, "%s", err.Error())
+	}
+	return ipc.Errorf(ipc.CodeNotFound, "%s", err.Error())
 }
 
 // sessionError turns a failed session's error into an IPC error with the

@@ -23,7 +23,7 @@ func (e *Engine) SetPinned(id string, pinned bool) error {
 		return fmt.Errorf("no forward with id %q", id)
 	case f.Spec.Config:
 		e.mu.Unlock()
-		return fmt.Errorf("the forward of port %d comes from config.toml (hosts.%s.forwards); edit the file to change it", f.Spec.RemotePort, f.Host)
+		return &ConfigForwardError{Port: f.Spec.RemotePort, Host: f.Host}
 	}
 	changed := f.Spec.Pinned != pinned
 	f.Spec.Pinned = pinned
