@@ -73,8 +73,12 @@ soak:
 perf:
 	go test -tags 'e2e perf' -run TestPerf -count=1 -timeout 10m -v ./test/e2e/...
 
+# The README's TUI demo, demo/pfwd.gif. Needs vhs and Docker; demo/setup.sh
+# starts the demo host first. CI's demo workflow also takes the web UI
+# screenshots.
 demo:
-	@echo "no demo tapes yet (added in M2)"
+	demo/setup.sh
+	vhs demo/pfwd.tape
 
 # Every platform into dist/. Signing is skipped: cosign keyless only works in release.yml.
 snapshot:
