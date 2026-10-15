@@ -478,3 +478,26 @@ func TestSecondLoginKeepsOtherTabs(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptAnswerNullBody(t *testing.T) {
+	ts := start(t)
+	c, token := ts.loggedIn(t)
+	if resp, _ := do(t, c, "POST", ts.base+"/api/prompts/3", "null", map[string]string{tokenHeader: token}); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a null answer: %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestHeadSessionTakesNoToken: only a page's GET takes the tab token.
+func TestHeadSessionTakesNoToken(t *testing.T) {
+	ts := start(t)
+	c := browser(t)
+	u, _ := ts.LoginURL()
+	do(t, c, "GET", u, "", nil)
+	if resp, _ := do(t, c, "HEAD", ts.base+"/api/session", "", nil); resp.StatusCode == http.StatusOK {
+		t.Errorf("HEAD /api/session: %d", resp.StatusCode)
+	}
+	resp, body := do(t, c, "GET", ts.base+"/api/session", "", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"token"`) {
+		t.Errorf("GET after a HEAD: %d %s", resp.StatusCode, body)
+	}
+}

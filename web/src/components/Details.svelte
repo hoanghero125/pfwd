@@ -25,7 +25,7 @@
 
 <Dialog title="{f.kind === 'dynamic' ? 'SOCKS proxy' : `:${f.remote}`} on {f.host}" {onclose} {returnTo} drawer>
   <span class="patch">
-    <span class="jack">{f.host}{remoteAddr(f).startsWith(":") ? "" : " "}{remoteAddr(f)}</span>
+    <span class="jack">{remoteAddr(f).startsWith(":") ? `${f.host}${remoteAddr(f)}` : `${remoteAddr(f)} via ${f.host}`}</span>
     <span class="cable g-{f.state} {f.state}" aria-hidden="true"></span>
     <span class="jack">{localAddr(f)}</span>
   </span>

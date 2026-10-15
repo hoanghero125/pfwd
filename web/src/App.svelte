@@ -40,8 +40,9 @@
     This tab isn't logged in to pfwd, or the daemon restarted. Run <code>pfwd ui</code> in a terminal for a new login link.
   </div>
 {:else if app.link === "retrying"}
-  <div class="banner" role="alert">
-    Lost the connection to the pfwd daemon. Retrying in {retryIn} s.
+  <div class="banner">
+    <span role="alert">Lost the connection to the pfwd daemon.</span>
+    <span>Retrying in {retryIn} s.</span>
     <button class="btn small" onclick={() => app.retryNow()}>Retry now</button>
   </div>
 {/if}

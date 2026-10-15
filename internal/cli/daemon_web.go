@@ -68,9 +68,12 @@ type configValuesParams struct {
 
 // hosts lists ssh config's hosts and the daemon's, most recently used first.
 func (h *daemonHandler) hostList() (any, error) {
+	// A broken ssh config still leaves the daemon's own hosts to list.
+	warning := ""
 	rows, err := listHosts(h.d.f.sshConfig)
 	if err != nil {
-		return nil, ipc.Errorf(ipc.CodeUsage, "%s", err.Error())
+		h.log.Warn("list the ssh config's hosts", "err", err)
+		warning = err.Error()
 	}
 	live := map[engine.HostID]int{}
 	for _, f := range h.eng.Forwards() {
@@ -98,7 +101,7 @@ func (h *daemonHandler) hostList() (any, error) {
 			out = append(out, daemonHostJSON{Host: string(host), State: states[host], Forwards: live[host]})
 		}
 	}
-	return map[string]any{"hosts": out}, nil
+	return map[string]any{"hosts": out, "warning": warning}, nil
 }
 
 // disconnect ends a host's connection.
@@ -183,9 +186,13 @@ func (h *daemonHandler) configSet(values map[string]any) (any, error) {
 }
 
 // writeAtomic replaces path with data through a temporary file in the same
-// directory. A new file is private to the user; an existing one keeps its
-// mode.
+// directory, following a symlink to its target. A new file is private to
+// the user; an existing one keeps its mode.
 func writeAtomic(path string, data []byte) error {
+	// Write a symlinked file (a dotfiles repository) where it really is.
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		path = target
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)

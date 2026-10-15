@@ -1,6 +1,7 @@
 import { describe as group, expect, it } from "vitest";
 
-import { formatRate, localAddr, target } from "./format";
+import { formatRate, localAddr, portLabel, portTarget, target } from "./format";
+import { parseHash } from "./store.svelte";
 import { apply, emptyModel, forwardsOf, historyPoints, startSync } from "./reduce";
 import type { Forward } from "./types";
 
@@ -122,5 +123,26 @@ group("snapshots", () => {
     expect(m.prompts).toEqual([]);
     expect(m.log.length).toBe(logged);
     expect(m.notices.length).toBe(noticed);
+  });
+});
+
+group("polish", () => {
+  it("targets the address a port listens on, as the TUI does", () => {
+    expect(portTarget(["0.0.0.0"])).toBe("127.0.0.1");
+    expect(portTarget(["*"])).toBe("127.0.0.1");
+    expect(portTarget(["::"])).toBe("::1");
+    expect(portTarget([])).toBe("127.0.0.1");
+    expect(portTarget(["10.1.2.3"])).toBe("10.1.2.3");
+    expect(portLabel(9000, ["10.1.2.3"])).toBe("10.1.2.3:9000");
+    expect(portLabel(3000, ["0.0.0.0", "::"])).toBe(":3000");
+  });
+  it("numbers log lines", () => {
+    const m = emptyModel();
+    apply(m, { event: "auto_forward_failed", data: { host: "devbox", port: 1, error: "x" } }, 1);
+    apply(m, { event: "auto_forward_failed", data: { host: "devbox", port: 2, error: "x" } }, 1);
+    expect(m.log.map((l) => l.seq)).toEqual([1, 2]);
+  });
+  it("reads a malformed hash as home", () => {
+    expect(parseHash("#/host/%E0%A4%A")).toEqual({ kind: "home" });
   });
 });

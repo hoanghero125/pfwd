@@ -54,8 +54,11 @@ cosign verify-blob checksums.txt \
   --bundle checksums.txt.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/hoanghero125/pfwd/\.github/workflows/release\.yml@refs/tags/v'
-sha256sum --ignore-missing -c checksums.txt
+sha256sum --ignore-missing -c checksums.txt          # Linux
+shasum -a 256 --ignore-missing -c checksums.txt      # macOS
 ```
+
+On Windows, compare `(Get-FileHash .\pfwd_<version>_windows_amd64.zip).Hash` with the archive's line in `checksums.txt` (the case differs, the digits don't). The signature bundle uses Sigstore's newer format; if cosign doesn't recognize it, update cosign.
 
 ## Building from source
 

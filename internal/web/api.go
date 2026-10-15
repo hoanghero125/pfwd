@@ -67,6 +67,9 @@ func (s *Server) routes() *http.ServeMux {
 		if err := readJSON(r, &m); err != nil {
 			return nil, err
 		}
+		if m == nil {
+			return nil, ipc.Errorf(ipc.CodeUsage, "send the answer as a JSON object, such as {\"accept\": true}")
+		}
 		m["id"] = r.PathValue("id")
 		return m, nil
 	}))
@@ -123,6 +126,12 @@ func (s *Server) authorized(next http.Handler) http.Handler {
 // sessionInfo tells the page its session's token, the first time it asks.
 func (s *Server) sessionInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodGet {
+		// A HEAD would take the tab's token without reading it.
+		w.Header().Set("Allow", "GET")
+		writeStatus(w, http.StatusMethodNotAllowed, ipc.CodeUsage, "use GET")
+		return
+	}
 	sess, ok := s.session(r)
 	if !ok {
 		writeStatus(w, http.StatusUnauthorized, "login", "This page isn't logged in. Run `pfwd ui` for a new login link.")

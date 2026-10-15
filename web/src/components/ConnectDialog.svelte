@@ -33,6 +33,7 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input id="connect-q" type="search" bind:value={query} autocomplete="off" autofocus />
     </div>
+    {#if app.hostsWarning}<p class="err" role="status">Your ssh config's hosts are missing: {app.hostsWarning}</p>{/if}
     {#if choices.length}
       <ul class="pick">
         {#each choices as h (h.host)}

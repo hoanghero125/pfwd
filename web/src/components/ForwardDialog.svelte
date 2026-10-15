@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { portLabel, portTarget } from "../lib/format";
   import { app } from "../lib/store.svelte";
   import type { Port } from "../lib/types";
   import Dialog from "./Dialog.svelte";
@@ -29,7 +30,7 @@
     const f = await app.forward(host, {
       kind: "local",
       local: local ? Number(local) : 0,
-      remote_host: remoteHost.trim() || "localhost",
+      remote_host: port ? portTarget(port.addrs) : remoteHost.trim() || "localhost",
       remote: Number(remote),
       label: port?.label,
     });
@@ -38,7 +39,7 @@
   }
 </script>
 
-<Dialog title={port ? `Forward :${port.port} to another local port` : `New forward on ${host}`} {onclose} {returnTo}>
+<Dialog title={port ? `Forward ${portLabel(port.port, port.addrs)} to another local port` : `New forward on ${host}`} {onclose} {returnTo}>
   <form onsubmit={submit}>
     <div class="fields">
       {#if !port}

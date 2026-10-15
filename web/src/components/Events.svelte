@@ -26,7 +26,7 @@
   </select>
 </div>
 <div class="log rows" role="log" aria-label="Events, newest first">
-  {#each lines as l, i (l.at + ":" + i)}
+  {#each lines as l (l.seq)}
     <div class="line">
       <span class="muted">{clock(l.at)}</span>
       <span>{l.host}</span>

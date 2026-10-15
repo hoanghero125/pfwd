@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/hoanghero125/pfwd/internal/config"
@@ -46,22 +48,54 @@ func openLogAt(path, level string) (*slog.Logger, func(), error) {
 	return logger, func() { _ = f.Close() }, nil
 }
 
+// secretKey matches attribute keys that name a secret.
+var secretKey = regexp.MustCompile(`(?i)password|passphrase|passwd|secret|token`)
+
 // redactAttr takes anything that looks like a secret out of a log line's
 // message and attributes, at every level: passwords, passphrases, tokens
-// (the web UI's login link carries one) and private keys.
+// (the web UI's login link carries one) and private keys. An attribute
+// whose key names a secret loses its value whatever it is.
 func redactAttr(_ []string, a slog.Attr) slog.Attr {
-	switch v := a.Value; v.Kind() {
+	v := a.Value
+	if v.Kind() != slog.KindGroup && secretKey.MatchString(a.Key) {
+		a.Value = slog.StringValue("[redacted]")
+		return a
+	}
+	switch v.Kind() {
 	case slog.KindString:
 		a.Value = slog.StringValue(redact(v.String(), ""))
 	case slog.KindAny:
 		switch x := v.Any().(type) {
-		case error:
-			a.Value = slog.StringValue(redact(x.Error(), ""))
-		case fmt.Stringer:
-			a.Value = slog.StringValue(redact(x.String(), ""))
+		case error, fmt.Stringer:
+			a.Value = slog.StringValue(redact(describeValue(x), ""))
+		default:
+			// Structs and maps: written as JSON, unless the JSON shows
+			// a secret.
+			if b, err := json.Marshal(x); err == nil {
+				if text := redact(string(b), ""); text != string(b) {
+					a.Value = slog.StringValue(text)
+				}
+			}
 		}
 	}
 	return a
+}
+
+// describeValue is an error's or Stringer's text. A typed nil pointer whose
+// method dereferences it says <nil> instead of crashing the log.
+func describeValue(x any) (text string) {
+	defer func() {
+		if recover() != nil {
+			text = "<nil>"
+		}
+	}()
+	switch x := x.(type) {
+	case error:
+		return x.Error()
+	case fmt.Stringer:
+		return x.String()
+	}
+	return fmt.Sprint(x)
 }
 
 // rotateLog shifts pfwd.log to pfwd.log.1 (and so on) when it is too big.

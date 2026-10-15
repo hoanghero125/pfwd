@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -164,5 +165,89 @@ func TestWatchMarksTheSnapshotEnd(t *testing.T) {
 	i := slices.Index(got, "synced")
 	if i < 0 || !slices.Contains(got[:i], "forward_changed") || !slices.Contains(got[:i], "session_changed") {
 		t.Errorf("watch events = %v; want the snapshot, then synced", got)
+	}
+}
+
+// TestConfigForwardRefusalIsUsage: changing a forward from config.toml is
+// a usage error (400 in the web UI), not "not found".
+func TestConfigForwardRefusalIsUsage(t *testing.T) {
+	headlessEnv(t)
+	echo := echoListener(t)
+	local := freeLocalPort(t)
+	writeConfig(t, fmt.Sprintf("[ssh]\nuse_openssh_config = false\n\n[ui]\nnotifications = false\n\n[hosts.testbox]\nforwards = [\"%d:%d\"]\n", local, echo))
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(ssLine(echo, "echo"))}, true)
+	path := startDaemon(t, "-F", h.sshConfig)
+	if err := call(t, path, "connect", map[string]string{"target": "testbox"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Hosts []hostJSON `json:"hosts"`
+	}
+	var id string
+	for range 50 {
+		_ = call(t, path, "list", nil, &list)
+		if len(list.Hosts) == 1 && len(list.Hosts[0].Forwards) == 1 {
+			id = list.Hosts[0].Forwards[0].ID
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if id == "" {
+		t.Fatalf("the config forward never came up: %+v", list)
+	}
+	for _, c := range []struct {
+		method string
+		params any
+	}{
+		{"set_label", map[string]string{"id": id, "label": "x"}},
+		{"set_pinned", map[string]any{"id": id, "pinned": false}},
+	} {
+		if err := call(t, path, c.method, c.params, nil); !isCode(err, ipc.CodeUsage) {
+			t.Errorf("%s on a config forward: %v, want a usage error", c.method, err)
+		}
+	}
+	if err := call(t, path, "set_label", map[string]string{"id": "99", "label": "x"}, nil); !isCode(err, ipc.CodeNotFound) {
+		t.Errorf("set_label of a missing forward: %v", err)
+	}
+}
+
+// TestHostsWithABrokenSSHConfig: the daemon's own hosts are still listed,
+// with a warning, when ~/.ssh/config can't be read.
+func TestHostsWithABrokenSSHConfig(t *testing.T) {
+	headlessEnv(t)
+	path := startDaemon(t, "-F", t.TempDir()) // a directory, not a file
+	var res struct {
+		Hosts   []daemonHostJSON `json:"hosts"`
+		Warning string           `json:"warning"`
+	}
+	if err := call(t, path, "hosts", nil, &res); err != nil {
+		t.Fatalf("hosts with a broken ssh config: %v", err)
+	}
+	if res.Warning == "" {
+		t.Error("no warning about the ssh config")
+	}
+}
+
+func TestWriteAtomicFollowsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dotfiles", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.toml")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	if err := writeAtomic(link, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Lstat(link); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the symlink was replaced: %v %v", st.Mode(), err)
+	}
+	if data, _ := os.ReadFile(target); string(data) != "new" {
+		t.Errorf("target = %q", data)
 	}
 }

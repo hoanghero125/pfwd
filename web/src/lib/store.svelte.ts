@@ -20,7 +20,12 @@ export interface Toast {
 // parseHash reads the view from the address: #/host/devbox/reverse,
 // #/events, #/settings.
 export function parseHash(hash: string): View {
-  const parts = hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  let parts: string[];
+  try {
+    parts = hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  } catch {
+    return { kind: "home" }; // a malformed escape
+  }
   switch (parts[0]) {
     case "host":
       if (parts[1]) {
@@ -59,6 +64,8 @@ class App {
   version = $state("");
   view = $state<View>({ kind: "home" });
   hosts = $state<HostInfo[]>([]);
+  // hostsWarning says why the ssh config's hosts are missing, if they are.
+  hostsWarning = $state("");
   toasts = $state<Toast[]>([]);
   now = $state(Date.now());
   // notify is the opt-in for browser notifications.
@@ -69,6 +76,11 @@ class App {
   #retryTimer = 0;
   #toastId = 0;
   #noticesSeen = 0;
+
+  // ready settles once this tab has tried to log in; views that call the
+  // API when they open wait for it, or their first call has no token.
+  #loggedIn: () => void = () => {};
+  ready = new Promise<void>((resolve) => (this.#loggedIn = resolve));
 
   // start logs in and opens the event stream.
   async start() {
@@ -88,6 +100,8 @@ class App {
         this.link = "login";
         return;
       }
+    } finally {
+      this.#loggedIn();
     }
     this.connect();
     void this.loadHosts();
@@ -185,8 +199,9 @@ class App {
 
   async loadHosts() {
     try {
-      const res = await api.get<{ hosts: HostInfo[] }>("/api/hosts");
+      const res = await api.get<{ hosts: HostInfo[]; warning?: string }>("/api/hosts");
       this.hosts = res.hosts;
+      this.hostsWarning = res.warning ?? "";
     } catch (e) {
       this.fail(e);
     }
@@ -247,10 +262,18 @@ class App {
     return this.run(() => api.patch(`/api/forwards/${encodeURIComponent(f.id)}`, { label }));
   }
 
-  answer(id: string, body: { accept?: boolean; secret?: string; cancel?: boolean }) {
-    // The prompt leaves the queue at once; prompt_done confirms it.
+  async answer(id: string, body: { accept?: boolean; secret?: string; cancel?: boolean }) {
+    // The prompt leaves the queue at once; prompt_done confirms it. When the
+    // answer doesn't arrive, it comes back, unless another client answered.
+    const prompt = this.model.prompts.find((p) => p.id === id);
     this.model.prompts = this.model.prompts.filter((p) => p.id !== id);
-    return this.run(() => api.post(`/api/prompts/${encodeURIComponent(id)}`, body));
+    try {
+      await api.post(`/api/prompts/${encodeURIComponent(id)}`, body);
+    } catch (e) {
+      const gone = e instanceof api.ApiError && e.status === 404;
+      if (prompt && !gone && !this.model.prompts.some((p) => p.id === id)) this.model.prompts.unshift(prompt);
+      this.fail(e);
+    }
   }
 
   async copy(text: string) {

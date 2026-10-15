@@ -47,6 +47,10 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		c, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
+				// Close again, here: the close ctx started may still be
+				// running (a Windows pipe listener waits for its own
+				// goroutine), and Serve returns once it is done.
+				_ = ln.Close()
 				return nil
 			}
 			return err
