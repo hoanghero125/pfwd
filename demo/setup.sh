@@ -26,7 +26,9 @@ Host devbox
   StrictHostKeyChecking accept-new
 CONFIG
 chmod 600 "$HOME/.ssh/config"
-printf '[ui]\nnotifications = false\n' > "$HOME/.config/pfwd/config.toml"
+# Docker's DNS resolver listens on a random high port in the container;
+# keep it out of the pictures.
+printf '[detect]\nignore_ports = [22, "32768-60999"]\n\n[ui]\nnotifications = false\n' > "$HOME/.config/pfwd/config.toml"
 for port in 3000 6006 8888; do
   "$here/start-server.sh" "$port"
 done
