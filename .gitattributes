@@ -7,3 +7,7 @@
 *.zip binary
 # The built web UI: generated, embedded as is.
 web/dist/** -text -diff linguist-generated=true
+
+# Rendered demo images: commit them as they are.
+demo/*.gif binary
+demo/*.png binary

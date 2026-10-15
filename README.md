@@ -9,6 +9,8 @@ The VS Code Ports panel for any terminal. Agentless, one binary, every OS.
 
 `pfwd devbox` connects to a host from your `~/.ssh/config` and shows a live table of the TCP ports listening on it. Start `npm run dev` on the server and, a few seconds later, `localhost:5173` on your laptop reaches it. You don't press anything.
 
+![pfwd connects to devbox, lists the servers listening there, and auto-forwards one that starts a few seconds later](demo/pfwd.gif)
+
 > **Status: v0.6.0, early.** The TUI, scripting commands, a background daemon and a web UI work; expect rough edges until v1.0.
 
 ## Install
@@ -162,6 +164,11 @@ pfwd ui devbox gpu-node     # connects these hosts first
 pfwd ui --no-open           # prints the login link instead of opening it
 pfwd ui --url               # prints only the link, for scripts
 ```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="demo/web-dark.png">
+  <img alt="The web UI: devbox with two forwarded ports and two detected ones" src="demo/web-light.png">
+</picture>
 
 The web UI is a front end of the daemon, like `pfwd attach`, so the browser, the TUI and the CLI show the same forwards. Closing the tab leaves them running; `pfwd daemon stop` ends them and the web UI.
 
