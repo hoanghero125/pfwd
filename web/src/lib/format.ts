@@ -100,3 +100,20 @@ export function clock(ms: number): string {
 export function pauseText(reason: string): string {
   return reason || "paused";
 }
+
+// portTarget is the server address a detected port is reached at, as the
+// TUI picks it: loopback when the port listens on every address or on
+// loopback, else the one address it listens on.
+export function portTarget(addrs: string[]): string {
+  if (addrs.some((a) => a === "0.0.0.0" || a === "*" || a === "127.0.0.1")) return "127.0.0.1";
+  if (addrs.includes("::1") || addrs.includes("::")) return "::1";
+  return addrs[0] ?? "127.0.0.1";
+}
+
+// portLabel names a detected port: :3000, or 10.1.2.3:9000 when it listens
+// on one other address only.
+export function portLabel(port: number, addrs: string[]): string {
+  const host = portTarget(addrs);
+  if (loopback.has(host)) return `:${port}`;
+  return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
+}

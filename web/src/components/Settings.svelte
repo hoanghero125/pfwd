@@ -52,7 +52,7 @@
       app.fail(e);
     }
   }
-  void load();
+  void app.ready.then(load);
 
   function parseList(s: string): unknown[] {
     return s

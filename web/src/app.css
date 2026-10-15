@@ -181,7 +181,8 @@ kbd { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   .row .traffic { white-space: normal; }
   .row .proc { grid-column: 2; grid-row: 2; }
   .row .traffic { grid-column: 1; grid-row: 2; }
-  .row .label { display: none; }
+  .row .label { grid-column: 2; grid-row: 3; }
+  .row .label:empty { display: none; }
   .row .acts { grid-column: 3; grid-row: 1 / 3; }
   .row .acts .wide { display: none; }
   .cable { flex-basis: 24px; min-width: 16px; margin: 0 6px; }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { portTarget } from "../lib/format";
   import { app } from "../lib/store.svelte";
   import type { Port } from "../lib/types";
   import Dialog from "./Dialog.svelte";
@@ -29,7 +30,7 @@
     const f = await app.forward(host, {
       kind: "local",
       local: local ? Number(local) : 0,
-      remote_host: remoteHost.trim() || "localhost",
+      remote_host: port ? portTarget(port.addrs) : remoteHost.trim() || "localhost",
       remote: Number(remote),
       label: port?.label,
     });

@@ -41,12 +41,20 @@ export class Daemon {
   ws: WebSocketRoute | null = null;
   claimed = false;
   loggedIn = true;
+  // failAnswers makes these prompt answers fail with a 500.
+  failAnswers = new Set<string>();
+  // refuseStream closes new event streams at once, as a stopped daemon.
+  refuseStream = false;
 
   constructor(readonly page: Page) {}
 
   async install(events = snapshot()) {
     await this.page.route("**/api/**", (route) => this.answer(route));
     await this.page.routeWebSocket(/\/api\/events/, (ws) => {
+      if (this.refuseStream || !ws.url().includes("token=test-token")) {
+        void ws.close({ code: 1008, reason: "no token" });
+        return;
+      }
       this.ws = ws;
       for (const e of events) ws.send(JSON.stringify(e));
       ws.send(JSON.stringify({ event: "synced" }));
@@ -74,6 +82,12 @@ export class Daemon {
     this.calls.push({ method, path, body });
     const json = (data: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(data) });
     if (!this.loggedIn) return json({ error: { code: "login", message: "This page isn't logged in." } }, 401);
+    // Like the daemon: every call but the first /api/session needs the token.
+    if (path !== "/api/session" && req.headers()["x-pfwd-token"] !== "test-token") {
+      return json({ error: { code: "login", message: "This tab has no pfwd login." } }, 403);
+    }
+    const answer = path.match(/^\/api\/prompts\/(.+)$/);
+    if (answer && this.failAnswers.has(answer[1])) return json({ error: { code: "internal", message: "the daemon broke" } }, 500);
     if (path === "/api/session") {
       const first = !this.claimed;
       this.claimed = true;

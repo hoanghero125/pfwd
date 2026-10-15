@@ -39,7 +39,7 @@ test("forwarding a detected port", async ({ page }) => {
   const d = await open(page);
   const detected = page.getByRole("list", { name: "Detected ports" });
   await detected.getByRole("listitem").filter({ hasText: "redis-server" }).getByRole("button", { name: "Forward" }).click();
-  await expect.poll(() => d.last("POST", "/api/forwards")?.body).toEqual({ host: "devbox", spec: { kind: "local", remote: 6379, label: "Redis" } });
+  await expect.poll(() => d.last("POST", "/api/forwards")?.body).toEqual({ host: "devbox", spec: { kind: "local", remote_host: "127.0.0.1", remote: 6379, label: "Redis" } });
   d.push("forward_changed", forward({ id: "9", local: 6379, remote: 6379, label: "Redis", auto: false, scheme: "" }));
   await expect(page.getByRole("list", { name: "Forwarded ports" }).getByText("localhost:6379")).toBeVisible();
   await expect(detected.getByText("redis-server")).toHaveCount(0);
@@ -135,10 +135,12 @@ test("live updates don't move the row under the cursor", async ({ page }) => {
 
 test("a banner when the daemon goes away, and back", async ({ page }) => {
   const d = await open(page);
+  d.refuseStream = true;
   await d.ws?.close();
   await expect(page.getByRole("alert").filter({ hasText: "Lost the connection to the pfwd daemon" })).toBeVisible();
   await axe(page, "banner");
   await expect(page.getByText("localhost:5173", { exact: true })).toBeVisible(); // the last state stays on screen
+  d.refuseStream = false;
   await page.getByRole("button", { name: "Retry now" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Lost the connection" })).toHaveCount(0);
 });
@@ -189,6 +191,51 @@ test("Open only for web servers, at localhost", async ({ page }) => {
   const lan = page.getByRole("list", { name: "Forwarded ports" }).getByRole("listitem").filter({ hasText: "0.0.0.0:8080" });
   await lan.getByRole("button", { name: "Open" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { opened: string[] }).opened)).toEqual(["http://localhost:8080"]);
+});
+
+test("Escape closes a row menu and returns focus", async ({ page }) => {
+  await open(page);
+  const more = page.getByRole("button", { name: "More actions for :5173" });
+  await more.click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(more).toBeFocused();
+});
+
+test("a port listening on one address is forwarded there", async ({ page }) => {
+  const d = await open(page);
+  d.push("ports_changed", {
+    host: "devbox", strategy: "ss", os: "Linux", added: [9000], removed: [], error: "",
+    ports: [{ port: 9000, addrs: ["10.1.2.3"], process: "api", pid: 9, label: "", ignored: false }],
+  });
+  const row = page.getByRole("list", { name: "Detected ports" }).getByRole("listitem").filter({ hasText: "10.1.2.3:9000" });
+  await row.getByRole("button", { name: "Forward" }).click();
+  await expect.poll(() => d.last("POST", "/api/forwards")?.body).toMatchObject({ spec: { remote_host: "10.1.2.3", remote: 9000 } });
+  d.push("forward_changed", forward({ id: "11", local: 9000, remote: 9000, remote_host: "10.1.2.3", label: "", auto: false, scheme: "none" }));
+  await expect(page.getByRole("list", { name: "Detected ports" })).toHaveCount(0);
+});
+
+test("a prompt whose answer fails comes back", async ({ page }) => {
+  const d = await open(page);
+  d.failAnswers.add("7");
+  d.push("prompt", { id: "7", session: "devbox", host: "devbox", kind: "password", prompt: "alice" });
+  await page.getByLabel("Password", { exact: true }).fill("x");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByText("the daemon broke")).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Password for alice@devbox" })).toBeVisible();
+});
+
+test("the retry banner announces once", async ({ page }) => {
+  const d = await open(page);
+  await d.ws?.close();
+  await expect(page.getByRole("alert")).toHaveText("Lost the connection to the pfwd daemon.");
+});
+
+test("labels stay on small screens", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page);
+  await expect(page.getByRole("list", { name: "Forwarded ports" }).getByText("Vite", { exact: true })).toBeVisible();
 });
 
 test("a reconnect keeps the log and doesn't replay old news", async ({ page }) => {

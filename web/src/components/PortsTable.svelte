@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { exposed, formatRate, localAddr, pauseText, target } from "../lib/format";
+  import { exposed, formatRate, localAddr, pauseText, portLabel, portTarget, target } from "../lib/format";
   import { forwardsOf } from "../lib/reduce";
   import { app } from "../lib/store.svelte";
   import type { Forward, Port } from "../lib/types";
@@ -44,17 +44,17 @@
 
   const forwarded = $derived<Row[]>(
     forwards
-      .map((f): Row => ({ key: `f${f.id}`, kind: "forward", f, port: local(f.remote_host) ? ports.find((p) => p.port === f.remote) : undefined }))
+      .map((f): Row => ({ key: `f${f.id}`, kind: "forward", f, port: ports.find((p) => serves(f, p)) }))
       .filter((r) => r.kind === "forward" && matches(`:${r.f.remote} ${r.f.local} ${r.f.remote_host} ${r.port?.process ?? ""} ${r.f.label || r.port?.label || ""}`)),
   );
-  const taken = $derived(new Set(forwards.filter((f) => local(f.remote_host)).map((f) => f.remote)));
-  const hiddenCount = $derived(ports.filter((p) => p.ignored && !taken.has(p.port)).length);
+  const taken = (p: Port) => forwards.some((f) => serves(f, p));
+  const hiddenCount = $derived(ports.filter((p) => p.ignored && !taken(p)).length);
   const detected = $derived<Row[]>(
     ports
-      .filter((p) => !taken.has(p.port) && (showHidden || !p.ignored))
+      .filter((p) => !taken(p) && (showHidden || !p.ignored))
       .sort((a, b) => a.port - b.port)
       .map((p): Row => ({ key: `p${p.port}`, kind: "detected", port: p }))
-      .filter((r) => r.kind === "detected" && matches(`:${r.port.port} ${r.port.process} ${r.port.label}`)),
+      .filter((r) => r.kind === "detected" && matches(`${portLabel(r.port.port, r.port.addrs)} ${r.port.process} ${r.port.label}`)),
   );
   const rows = $derived([...forwarded, ...detected]);
   const current = $derived(
@@ -63,11 +63,18 @@
       rows[Math.min(sel.index, rows.length - 1)],
   );
 
+  // serves reports whether forward f reaches detected port p: the same
+  // port, at the address the port listens on (any loopback name counts).
+  function serves(f: Forward, p: Port): boolean {
+    if (f.remote !== p.port) return false;
+    const at = portTarget(p.addrs);
+    return local(f.remote_host) ? at === "127.0.0.1" || at === "::1" : f.remote_host === at;
+  }
+
   // portOf is the server port a row stands for: a detected port, or a
   // forward of one. Forwards to other machines have none.
   function portOf(r: Row): number {
-    if (r.kind === "detected") return r.port.port;
-    return local(r.f.remote_host) ? r.f.remote : 0;
+    return r.kind === "detected" ? r.port.port : (r.port?.port ?? 0);
   }
 
   function select(r: Row) {
@@ -98,7 +105,7 @@
   }
 
   function forwardPort(p: Port) {
-    return app.forward(host, { kind: "local", remote: p.port, label: p.label });
+    return app.forward(host, { kind: "local", remote_host: portTarget(p.addrs), remote: p.port, label: p.label });
   }
 
   function open(f: Forward) {
@@ -121,6 +128,13 @@
 
   function onkeydown(e: KeyboardEvent) {
     const t = e.target as HTMLElement | null;
+    if (e.key === "Escape" && menu) {
+      const opener = menu;
+      menu = "";
+      document.getElementById(`more-${opener}`)?.focus();
+      e.preventDefault();
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input, textarea, select, dialog, .menu-list") || detailed) return;
     const r = current;
     switch (e.key) {
@@ -243,7 +257,7 @@
     onfocusin={() => select(r)}
   >
     <span class="st muted"><span aria-hidden="true">—</span><span class="visually-hidden">not forwarded</span></span>
-    <span class="patch"><span class="jack">:{p.port}</span></span>
+    <span class="patch"><span class="jack">{portLabel(p.port, p.addrs)}</span></span>
     <span class="proc" class:muted={!p.process}>{p.process || "?"}</span>
     <span class="label">{p.label}{#if p.ignored} <span class="badge pin">hidden</span>{/if}</span>
     <span class="traffic"></span>

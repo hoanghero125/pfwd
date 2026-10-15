@@ -8,6 +8,8 @@ import type { Forward, PortsInfo, Prompt, Session, Stat, WireEvent } from "./typ
 export type Level = "info" | "ok" | "warn" | "error";
 
 export interface LogLine {
+  // seq numbers the lines, for keys.
+  seq?: number;
   at: number;
   host: string;
   level: Level;
@@ -43,6 +45,8 @@ export interface Model {
   // page was away can go.
   syncing: boolean;
   seen: { forwards: Record<string, true>; prompts: Record<string, true> };
+  // seq is the last log line's number.
+  seq: number;
 }
 
 export const maxLog = 500;
@@ -51,7 +55,7 @@ export const historyPoints = 300;
 export function emptyModel(): Model {
   return {
     sessions: {}, ports: {}, forwards: {}, auto: {}, prompts: [], log: [], rates: {}, history: {}, notices: [],
-    syncing: false, seen: { forwards: {}, prompts: {} },
+    syncing: false, seen: { forwards: {}, prompts: {} }, seq: 0,
   };
 }
 
@@ -63,6 +67,7 @@ export function startSync(m: Model) {
 
 function log(m: Model, line: LogLine, notice = false) {
   if (m.syncing) return;
+  line.seq = ++m.seq;
   m.log.push(line);
   if (m.log.length > maxLog) m.log.splice(0, m.log.length - maxLog);
   if (notice) m.notices.push(line);
