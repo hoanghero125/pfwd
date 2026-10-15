@@ -98,3 +98,37 @@ func TestLogRedactsSecrets(t *testing.T) {
 		t.Errorf("the log lost the message:\n%s", data)
 	}
 }
+
+type nilErr struct{ msg string }
+
+func (e *nilErr) Error() string { return e.msg } // panics on a nil *nilErr
+
+// TestLogRedactsSecretKeysAndValues: a key that names a secret hides its
+// value, plain values are checked as JSON, and a typed-nil error doesn't
+// crash the log.
+func TestLogRedactsSecretKeysAndValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pfwd.log")
+	logger, closeLog, err := openLogAt(path, "debug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var typedNil *nilErr
+	logger.Info("auth", "password", "keypw1", "user_token", 12345678,
+		"creds", struct{ User, Password string }{"alice", "structpw2"},
+		"err", error(typedNil), "ports", []int{22, 8080})
+	closeLog()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leaked := range []string{"keypw1", "12345678", "structpw2"} {
+		if strings.Contains(string(data), leaked) {
+			t.Errorf("the log kept %q:\n%s", leaked, data)
+		}
+	}
+	for _, kept := range []string{"alice", `"ports":[22,8080]`} {
+		if !strings.Contains(string(data), kept) {
+			t.Errorf("the log lost %q:\n%s", kept, data)
+		}
+	}
+}
