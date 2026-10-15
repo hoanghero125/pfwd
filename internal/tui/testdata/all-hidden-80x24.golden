@@ -1,5 +1,5 @@
- pfwd  devbox ● connected                                                ? help
-────────────────────────────────────────────────────────────────────────────────
+  pfwd  devbox ● connected                                              ? help
+
 
   No ports to show: 2 are hidden by the ignore list. Press h to show them.
 
@@ -19,6 +19,6 @@
 
 
 
-─ 2 ignored hidden, h shows ────────────────────────────────────────────────────
+  2 ignored hidden, h shows
 
- a auto  L log  ? help  q quit
+  a auto  L log  ? help  q quit

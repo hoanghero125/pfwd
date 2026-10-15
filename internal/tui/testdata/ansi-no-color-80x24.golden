@@ -1,12 +1,13 @@
- \e[1mpfwd\e[m  devbox \e[m●\e[m connected                                     auto: \e[mon\e[m   \e[m?\e[m \e[2mhelp\e[m 
-\e[2m────────────────────────────────────────────────────────────────────────────────\e[m
-\e[2m  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC\e[m        
-\e[m\e[m▶\e[m\e[m \e[m●\e[m\e[m fwd   :5173   \e[1mlocalhost:5173\e[m\e[m  node         Vite \e[2mhttp\e[m\e[m    2    ↓12K/s ↑1.0K/s \e[m
-  \e[m◌\e[m pause :8000   localhost:8000  \e[2mport closed\e[m               0    \e[2m—\e[m              
-  \e[m●\e[m fwd   :8888   \e[1mlocalhost:8888\e[m  jupyter-lab  Jupyter \e[2mpin\e[m  0    ↓0 ↑0          
-  \e[2m───────────────────────── detected, not forwarded ──────────────────────────\e[m  
-  \e[2m—\e[m       :6379   \e[2m—\e[m               redis-server Redis        \e[2m—\e[m    \e[2m—\e[m              
-  \e[2m—\e[m       :9090   \e[2m—\e[m               \e[2m?\e[m            Prometheus   \e[2m—\e[m    \e[2m—\e[m              
+  \e[2mpfwd\e[m  \e[1mdevbox\e[m ● connected                                   auto: on   ? \e[2mhelp\e[m  
+                                                                                
+\e[2m  state   remote   local           process      label       conn traffic\e[m        
+▌ ● fwd   :5173  \e[2m→\e[m \e[1mlocalhost:5173\e[m  node         Vite \e[2mhttp\e[m   2    ↓12K/s \e[2m↑1.0K/s\e[m 
+  ◌ pause :8000  \e[2m→\e[m localhost:8000  \e[2mport closed\e[m              0    \e[2m—\e[m              
+  ● fwd   :8888  \e[2m→\e[m \e[1mlocalhost:8888\e[m  jupyter-lab  Jupyter \e[2mpin\e[m 0    \e[2m↓0 ↑0\e[m          
+                                                                                
+  \e[2mdetected, not forwarded\e[m                                                       
+  \e[2m—\e[m       :6379                    redis-server Redis                           
+  \e[2m—\e[m       :9090                    \e[2m?\e[m            Prometheus                      
                                                                                 
                                                                                 
                                                                                 
@@ -18,7 +19,6 @@
                                                                                 
                                                                                 
                                                                                 
-                                                                                
-\e[2m─ \e[m\e[2m1 ignored hidden, h shows\e[m \e[2m────────────────────────────────────────────────────\e[m
- \e[m✓\e[m Forwarded :5173 to localhost:5173                                            
- \e[menter\e[m \e[2mstop\e[m  \e[mo\e[m \e[2mopen\e[m  \e[my\e[m \e[2mcopy\e[m  \e[mp\e[m \e[2mpin\e[m  \e[ma\e[m \e[2mauto\e[m  \e[m/\e[m \e[2mfilter\e[m  \e[mL\e[m \e[2mlog\e[m  \e[m?\e[m \e[2mhelp\e[m  \e[mq\e[m \e[2mquit\e[m     
+  \e[2m1 ignored hidden, h shows\e[m                                                     
+  ✓ Forwarded :5173 to localhost:5173                                           
+  enter \e[2mstop\e[m  o \e[2mopen\e[m  y \e[2mcopy\e[m  p \e[2mpin\e[m  a \e[2mauto\e[m  / \e[2mfilter\e[m  L \e[2mlog\e[m  ? \e[2mhelp\e[m  q \e[2mquit\e[m    

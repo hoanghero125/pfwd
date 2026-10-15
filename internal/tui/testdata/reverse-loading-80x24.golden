@@ -1,5 +1,5 @@
- pfwd  devbox ● connected                                                ? help
-────────────────────────────────────────────────────────────────────────────────
+  pfwd  devbox ● connected                                              ? help
+
   This machine's listening ports. enter exposes one on devbox.
 
   Looking for listening ports on this machine…
@@ -19,6 +19,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────
 
- enter expose  F other server port  ↑ ↓ move  esc back
+
+  enter expose  F other server port  ↑ ↓ move  esc back

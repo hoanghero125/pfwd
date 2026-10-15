@@ -37,18 +37,22 @@ pfwd devbox gpu-node   # several hosts, a tab each
 The first time you connect to a server, pfwd shows its host key fingerprint and asks before saving it to `known_hosts`, the way `ssh` does. Then the table fills in:
 
 ```
- pfwd  devbox ● connected                                     auto: on   ? help
-────────────────────────────────────────────────────────────────────────────────
-  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
-▶ ● fwd   :5173   localhost:5173  node         Vite http    2    ↓12K/s ↑1.0K/s
-  ● fwd   :8888   localhost:8888  jupyter-lab  Jupyter http 0    ↓0 ↑0
-  ───────────────────────── detected, not forwarded ──────────────────────────
-  —       :6379   —               redis-server Redis        —    —
-  —       :9090   —               ?            Prometheus   —    —
-─ 1 ignored hidden, h shows ────────────────────────────────────────────────────
- ✓ Forwarded :5173 to localhost:5173 (auto)
- enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit
+  pfwd  devbox ● connected                                   auto: on   ? help
+
+  state   remote   local           process      label       conn traffic
+▌ ● fwd   :5173  → localhost:5173  node         Vite http   2    ↓12K/s ↑1.0K/s
+  ● fwd   :8888  → localhost:8888  jupyter-lab  Jupyter     0    ↓0 ↑0
+
+  detected, not forwarded
+  —       :6379                    redis-server Redis
+  —       :9090                    ?            Prometheus
+
+  1 ignored hidden, h shows
+  ✓ Forwarded :5173 to localhost:5173 (auto)
+  enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit
 ```
+
+In a wider terminal, each active forward also gets a sparkline of its last eight seconds of traffic.
 
 | Key | Does |
 | --- | --- |

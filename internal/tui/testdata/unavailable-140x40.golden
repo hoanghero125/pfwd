@@ -1,5 +1,5 @@
- pfwd  devbox ● connected                                                                                                            ? help
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  pfwd  devbox ● connected                                                                                                          ? help
+
 
   Can't list ports on devbox: it has none of ss, /proc/net/tcp, netstat, lsof or sockstat (or PowerShell, on Windows). You can still
   forward ports by hand.
@@ -35,6 +35,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- a auto  L log  ? help  q quit
+
+  a auto  L log  ? help  q quit

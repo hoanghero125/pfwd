@@ -36,7 +36,7 @@ func bothConnected(m Model) Model {
 // selectedLine is the table line with the cursor.
 func selectedLine(m Model) string {
 	for _, l := range strings.Split(view(m), "\n") {
-		if strings.HasPrefix(l, "▶") {
+		if strings.HasPrefix(l, unicodeGlyphs.cursor) {
 			return l
 		}
 	}
@@ -98,7 +98,7 @@ func TestAllHostsView(t *testing.T) {
 	m := bothConnected(twoHosts(e, Options{}))
 	m, _ = press(t, m, "ctrl+a")
 	v := view(m)
-	for _, want := range []string{"all hosts", "HOST", ":5173", ":8888", "devbox", "gpu"} {
+	for _, want := range []string{"all hosts", "host", ":5173", ":8888", "devbox", "gpu"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("all-hosts view lacks %q:\n%s", want, v)
 		}

@@ -9,7 +9,7 @@ Set FontSize 15
 Set Width 1120
 Set Height 540
 Set Padding 18
-Set Theme "Builtin Dark"
+Set Theme { "name": "pfwd", "background": "#131416", "foreground": "#E9E9EC", "selection": "#2A2C31", "cursor": "#6CC4D9", "black": "#18191C", "red": "#EC6F67", "green": "#7DC88E", "yellow": "#E2B45A", "blue": "#6CA6D9", "magenta": "#C49BE0", "cyan": "#6CC4D9", "white": "#E9E9EC", "brightBlack": "#8F929A", "brightRed": "#F28B84", "brightGreen": "#98D6A6", "brightYellow": "#EAC57E", "brightBlue": "#8DBAE3", "brightMagenta": "#D3B3EA", "brightCyan": "#8FD3E3", "brightWhite": "#FFFFFF" }
 Set TypingSpeed 70ms
 
 Hide

@@ -160,7 +160,7 @@ func (m Model) pickerLines() (string, []string) {
 		c := choices[i]
 		cursor := "  "
 		if i == m.picker.cursor {
-			cursor = th.accent.Render(th.g.cursor) + " "
+			cursor = th.accent.Render(th.g.pointer) + " "
 		}
 		last := "never"
 		if !c.LastUsed.IsZero() {

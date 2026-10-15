@@ -1,6 +1,6 @@
- pfwd  devbox ● connected                                                                                                 auto: on   ? help
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Event log, newest last
+  pfwd  devbox ● connected                                                                                               auto: on   ? help
+
+  event log, newest last
   09:00:00  ✓ Connected to devbox
   09:00:00  ✓ Forwarded :5173 to localhost:5173
   09:00:00  ✓ Forwarded :8888 to localhost:8888
@@ -35,6 +35,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ✗ Couldn't auto-forward :8080: port 8080 is busy on this machine; something else on this computer listens on it
- ↑ ↓ scroll  g G first, last  L close
+
+  ✗ Couldn't auto-forward :8080: port 8080 is busy on this machine; something else on this computer listens on it
+  ↑ ↓ scroll  g G first, last  L close

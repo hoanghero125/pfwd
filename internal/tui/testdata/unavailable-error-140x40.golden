@@ -1,5 +1,5 @@
- pfwd  devbox ● connected                                                                                                            ? help
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  pfwd  devbox ● connected                                                                                                          ? help
+
 
   Can't list ports on devbox: probe the server for ss and /proc: exec request denied
 
@@ -35,6 +35,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- a auto  L log  ? help  q quit
+
+  a auto  L log  ? help  q quit

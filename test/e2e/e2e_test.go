@@ -143,10 +143,10 @@ func (d *driver) view() string {
 	return ansi.Strip(d.m.View().Content)
 }
 
-// selectedRow returns the table line with the ▶ cursor.
+// selectedRow returns the table line with the ▌ cursor.
 func (d *driver) selectedRow() string {
 	for _, line := range strings.Split(d.view(), "\n") {
-		if strings.HasPrefix(line, "▶") {
+		if strings.HasPrefix(line, "▌") {
 			return line
 		}
 	}

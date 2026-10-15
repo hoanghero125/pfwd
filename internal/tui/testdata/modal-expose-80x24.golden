@@ -1,8 +1,8 @@
- pfwd  devbox ● connected                                                ? help
-────────────────────────────────────────────────────────────────────────────────
+  pfwd  devbox ● connected                                              ? help
+
   This machine's listening ports. enter exposes one on devbox.
-  PORT     ADDRESS           PROCESS
-▶ :3000    127.0.0.1         node
+  port     address           process
+▌ :3000    127.0.0.1         node
   :8080    0.0.0.0           python3
 
 
@@ -19,6 +19,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────
 
- enter expose  F other server port  ↑ ↓ move  esc back
+
+  enter expose  F other server port  ↑ ↓ move  esc back

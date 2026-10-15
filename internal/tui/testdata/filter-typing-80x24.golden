@@ -1,7 +1,7 @@
- pfwd  devbox ● connected                                     auto: on   ? help
-────────────────────────────────────────────────────────────────────────────────
-  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
-▶ ● fwd   :8888   localhost:8888  jupyter-lab  Jupyter pin  0    ↓0 ↑0
+  pfwd  devbox ● connected                                   auto: on   ? help
+
+  state   remote   local           process      label       conn traffic
+▌ ● fwd   :8888  → localhost:8888  jupyter-lab  Jupyter pin 0    ↓0 ↑0
 
 
 
@@ -19,6 +19,6 @@
 
 
 
-─ / 88█ ─ 1 ignored hidden, h shows ────────────────────────────────────────────
- ✓ Forwarded :5173 to localhost:5173
- enter keep  esc clear  ↑ ↓ move
+  / 88█   1 ignored hidden, h shows
+  ✓ Forwarded :5173 to localhost:5173
+  enter keep  esc clear  ↑ ↓ move

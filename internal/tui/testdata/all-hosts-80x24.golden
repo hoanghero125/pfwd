@@ -1,9 +1,10 @@
- pfwd  all hosts  devbox ●  gpu ●                                        ? help
-────────────────────────────────────────────────────────────────────────────────
-  HOST    STATE   REMOTE  LOCAL           PROCESS             LABEL        CONN
-▶ gpu     ● fwd   :8888   localhost:8888  jupyter-lab                      0
-  ───────────────────────── detected, not forwarded ──────────────────────────
-  devbox  —       :5173   —               node                             —
+  pfwd  all hosts  devbox ●  gpu ●                                      ? help
+
+  host    state   remote   local           process             label       conn
+▌ gpu     ● fwd   :8888  → localhost:8888  jupyter-lab                     0
+
+  detected, not forwarded
+  devbox  —       :5173                    node
 
 
 
@@ -19,6 +20,5 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────
 
- enter stop  o open  y copy  p pin  a auto  / filter  L log  ? help  q quit
+  enter stop  o open  y copy  p pin  a auto  / filter  L log  ? help  q quit
