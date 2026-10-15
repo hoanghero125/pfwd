@@ -1,7 +1,7 @@
- pfwd  devbox ● connected                                     auto: on   ? help
-────────────────────────────────────────────────────────────────────────────────
-  STATE   REMOTE  LOCAL           PROCESS      LABEL        CONN TRAFFIC
-▶ —       :6379   —               redis-server Redis        —    —
+  pfwd  devbox ● connected                                   auto: on   ? help
+
+  state   remote   local           process      label       conn traffic
+▌ —       :6379                    redis-server Redis
 
 
 
@@ -19,6 +19,6 @@
 
 
 
-─ / re: 1 of 5 ports ─ 1 ignored hidden, h shows ───────────────────────────────
- ✓ Forwarded :5173 to localhost:5173
- enter forward  F other port  a auto  / filter  L log  ? help  q quit
+  / re: 1 of 5 ports   1 ignored hidden, h shows
+  ✓ Forwarded :5173 to localhost:5173
+  enter forward  F other port  a auto  / filter  L log  ? help  q quit

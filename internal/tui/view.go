@@ -56,7 +56,7 @@ func (m Model) render() string {
 		return strings.Join(fit(lines, w), "\n")
 	}
 	lines := make([]string, 0, h)
-	lines = append(lines, m.hostBar(w), m.rule(w))
+	lines = append(lines, m.hostBar(w), "")
 	if m.logOpen {
 		lines = append(lines, m.logPane(w, h-5)...)
 	} else if m.reverseOpen {
@@ -64,7 +64,7 @@ func (m Model) render() string {
 	} else {
 		lines = append(lines, m.body(w, h-5)...)
 	}
-	lines = append(lines, m.viewLine(w), m.statusLine(), m.hints(w))
+	lines = append(lines, m.viewLine(), m.statusLine(), m.hints(w))
 	lines = fit(lines, w)
 	if m.modal.kind != modalNone {
 		lines = overlay(lines, m.modalLines(), w)
@@ -88,10 +88,6 @@ func pad(s string, w int) string {
 		return s + strings.Repeat(" ", w-n)
 	}
 	return s
-}
-
-func (m Model) rule(w int) string {
-	return m.th.faint.Render(strings.Repeat(m.th.g.rule, w))
 }
 
 func (m Model) hostBar(w int) string {
@@ -125,10 +121,10 @@ func (m Model) hostBar(w int) string {
 		}
 	}
 	badges = append(badges, th.accent.Render("?")+" "+th.faint.Render("help"))
-	right := strings.Join(badges, "   ") + " "
+	right := strings.Join(badges, "   ") + "  "
 
 	host := safetext.Clean(string(m.host))
-	head := " " + th.bold.Render("pfwd") + "  "
+	head := "  " + th.faint.Render("pfwd") + "  "
 	if m.all {
 		head += th.bold.Render("all hosts")
 		state = ""
@@ -136,7 +132,7 @@ func (m Model) hostBar(w int) string {
 	current := host + " " + state
 	if m.all {
 		current = ""
-	} else if len(m.hosts) > 1 {
+	} else {
 		host = th.bold.Render(host)
 	}
 	// A long host name is cut before any badge goes.
@@ -192,9 +188,10 @@ func (m Model) reconnectText() string {
 	return "reconnecting" + m.th.g.dots
 }
 
-// viewLine is the rule above the status line. It names what is not on
-// screen: the filter and the ignored ports hidden.
-func (m Model) viewLine(w int) string {
+// viewLine is the line above the status line. It names what is not on
+// screen, the filter and the ignored ports hidden, and is blank when every
+// row shows.
+func (m Model) viewLine() string {
 	th, g := m.th, m.th.g
 	var parts []string
 	filter := safetext.Clean(m.filter)
@@ -209,14 +206,9 @@ func (m Model) viewLine(w int) string {
 		parts = append(parts, th.faint.Render(fmt.Sprintf("%d ignored hidden, h shows", m.hidden)))
 	}
 	if len(parts) == 0 {
-		return m.rule(w)
+		return ""
 	}
-	sep := th.faint.Render(" " + g.rule + " ")
-	line := th.faint.Render(g.rule+" ") + strings.Join(parts, sep) + " "
-	if n := w - ansi.StringWidth(line); n > 0 {
-		line += th.faint.Render(strings.Repeat(g.rule, n))
-	}
-	return line
+	return "  " + strings.Join(parts, "   ")
 }
 
 func (m Model) statusLine() string {
@@ -224,7 +216,7 @@ func (m Model) statusLine() string {
 	if s.text == "" || m.now().Sub(s.at) >= statusFor {
 		return ""
 	}
-	return " " + m.kindGlyph(s.kind) + safetext.Clean(s.text)
+	return "  " + m.kindGlyph(s.kind) + safetext.Clean(s.text)
 }
 
 // kindGlyph is the glyph and space in front of a status or log message.
@@ -290,7 +282,7 @@ func (m Model) hints(w int) string {
 		for i, it := range items {
 			parts[i] = m.th.accent.Render(it.key) + " " + m.th.faint.Render(it.desc)
 		}
-		return " " + strings.Join(parts, "  ")
+		return "  " + strings.Join(parts, "  ")
 	}
 	line := render()
 	for ansi.StringWidth(line) > w {
@@ -382,20 +374,30 @@ func (m Model) unavailable() []string {
 // shown.
 type columns struct {
 	host, state, remote, local, process, label, conn, traffic int
+	// arrow is the cells at the end of remote for the arrow to local.
+	arrow int
+	// spark says traffic starts with a sparkline.
+	spark bool
 }
 
-// minProcess is the narrowest PROCESS column before optional columns go.
-const minProcess = 10
+// minProcess is the narrowest process column before optional columns go;
+// sparkProcess, the narrowest that leaves room for sparklines.
+const (
+	minProcess   = 10
+	sparkProcess = 16
+)
 
-// columns lays out the table. PROCESS takes what is left, up to 40
-// cells; when it would get fewer than minProcess, TRAFFIC goes, then
-// CONN, then LABEL.
+// columns lays out the table. process takes what is left, up to 40
+// cells; when it would get fewer than minProcess, traffic goes, then
+// conn, then label. Sparklines show only when process keeps
+// sparkProcess cells.
 func (m Model) columns(w int) columns {
-	c := columns{state: 8, remote: 8, local: 16, label: 13, conn: 5, traffic: 15}
+	c := columns{state: 8, remote: 7, local: 16, label: 12, conn: 5, traffic: 15}
 	for _, r := range m.rows {
 		c.remote = max(c.remote, ansi.StringWidth(remoteText(r))+1)
 	}
-	c.remote = min(c.remote, 24)
+	c.arrow = ansi.StringWidth(m.th.g.arrow) + 1
+	c.remote = min(c.remote, 24) + c.arrow
 	if w >= 100 {
 		c.label = 18
 	}
@@ -406,6 +408,10 @@ func (m Model) columns(w int) columns {
 		c.host = min(max(c.host, 6), 16)
 	}
 	fixed := 2 + c.host + c.state + c.remote + c.local
+	if w-fixed-c.label-c.conn-c.traffic-(sparkLen+1) >= sparkProcess {
+		c.traffic += sparkLen + 1
+		c.spark = true
+	}
 	for {
 		rest := w - fixed - c.label - c.conn - c.traffic
 		switch {
@@ -413,7 +419,7 @@ func (m Model) columns(w int) columns {
 			c.process = min(40, rest)
 			return c
 		case c.traffic > 0:
-			c.traffic = 0
+			c.traffic, c.spark = 0, false
 		case c.conn > 0:
 			c.conn = 0
 		case c.label > 0:
@@ -428,10 +434,10 @@ func (m Model) columns(w int) columns {
 func (m Model) table(w, h int) []string {
 	th := m.th
 	c := m.columns(w)
-	header := "  " + th.cell("HOST", c.host) + th.cell("STATE", c.state) + th.cell("REMOTE", c.remote) + th.cell("LOCAL", c.local) + th.cell("PROCESS", c.process) +
-		th.cell("LABEL", c.label) + th.cell("CONN", c.conn)
+	header := "  " + th.cell("host", c.host) + th.cell("state", c.state) + th.cell("remote", c.remote) + th.cell("local", c.local) + th.cell("process", c.process) +
+		th.cell("label", c.label) + th.cell("conn", c.conn)
 	if c.traffic > 0 {
-		header += "TRAFFIC"
+		header += "traffic"
 	}
 	lines := []string{th.faint.Render(header)}
 
@@ -439,7 +445,7 @@ func (m Model) table(w, h int) []string {
 	var body []string
 	for i, r := range m.rows {
 		if i == sep {
-			body = append(body, m.separator(w))
+			body = append(body, "", m.separator())
 		}
 		line := m.rowLine(r, i == m.cursor, c)
 		if i == m.cursor {
@@ -456,11 +462,9 @@ func (m Model) table(w, h int) []string {
 	return lines
 }
 
-func (m Model) separator(w int) string {
-	label := " detected, not forwarded "
-	n := max(0, w-4-ansi.StringWidth(label))
-	rule := m.th.g.rule
-	return "  " + m.th.faint.Render(strings.Repeat(rule, n/2)+label+strings.Repeat(rule, n-n/2))
+// separator titles the detected ports under the forwards.
+func (m Model) separator() string {
+	return "  " + m.th.faint.Render("detected, not forwarded")
 }
 
 func remoteText(r row) string {
@@ -491,14 +495,16 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 	}
 	dash := th.faint.Render(g.none)
 	cursor += th.cell(safetext.Clean(string(r.host)), c.host)
+	// The arrow from remote to local is only on forwards.
+	remote := th.cell(remoteText(r), c.remote-c.arrow) + strings.Repeat(" ", c.arrow)
+	if r.fwd != nil {
+		remote = th.cell(remoteText(r), c.remote-c.arrow) + th.faint.Render(g.arrow) + " "
+	}
 
 	if r.fwd == nil && r.port.Ignored {
 		// Shown only while h is on, and quiet: never auto-forwarded.
-		line := th.cell("ignored", c.state) + th.cell(remoteText(r), c.remote) + th.cell(g.none, c.local) +
-			th.cell(m.processName(*r.port, "?"), c.process) + th.cell(safetext.Clean(rowLabel(r)), c.label) + th.cell(g.none, c.conn)
-		if c.traffic > 0 {
-			line += g.none
-		}
+		line := th.cell("ignored", c.state) + remote + th.cell("", c.local) +
+			th.cell(m.processName(*r.port, "?"), c.process) + th.cell(safetext.Clean(rowLabel(r)), c.label)
 		return cursor + th.faint.Render(line)
 	}
 
@@ -542,14 +548,14 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 		conn = itoa(int(f.Stats.Conns))
 		traffic = dash
 		if f.State == engine.Active {
-			traffic = m.trafficText(f.ID)
+			traffic = m.trafficText(f.ID, c.spark)
 		}
 	} else {
-		state, local, conn, traffic = dash, dash, dash, dash
+		state = dash
 		process = m.processName(*r.port, th.faint.Render("?"))
 	}
 
-	line := cursor + th.cell(state, c.state) + th.cell(remoteText(r), c.remote) + th.cell(local, c.local) + th.cell(process, c.process) +
+	line := cursor + th.cell(state, c.state) + remote + th.cell(local, c.local) + th.cell(process, c.process) +
 		m.labelCell(r, c.label) + th.cell(conn, c.conn)
 	if c.traffic > 0 {
 		line += traffic
@@ -598,11 +604,17 @@ func (m Model) processName(p engine.Port, unknown string) string {
 	return safetext.Clean(p.Process)
 }
 
-func (m Model) trafficText(id string) string {
-	g := m.th.g
+// trafficText is an active forward's rate, after a sparkline of its last
+// seconds when spark is set. Idle traffic is faint.
+func (m Model) trafficText(id string, spark bool) string {
+	th, g := m.th, m.th.g
 	r := m.rates[id]
-	if r.in == 0 && r.out == 0 {
-		return g.down + "0 " + g.up + "0"
+	var line string
+	if spark {
+		line = th.sparkline(r.recent, sparkLen-len(r.recent)) + " "
 	}
-	return g.down + formatRate(r.in) + "/s " + g.up + formatRate(r.out) + "/s"
+	if r.in == 0 && r.out == 0 {
+		return line + th.faint.Render(g.down+"0 "+g.up+"0")
+	}
+	return line + g.down + formatRate(r.in) + "/s " + th.faint.Render(g.up+formatRate(r.out)+"/s")
 }

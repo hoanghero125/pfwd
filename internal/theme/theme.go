@@ -1,5 +1,5 @@
 // Package theme holds pfwd's design tokens: the words, glyphs and colors of
-// forward and connection states, shared by the TUI (ANSI colors) and the
+// forward and connection states, and the palette, shared by the TUI and the
 // web UI (CSS variables). `go generate ./internal/theme` writes the web UI's
 // copy, web/src/lib/theme.gen.css and theme.gen.ts.
 package theme
@@ -15,20 +15,17 @@ type State struct {
 	Word string
 	// Glyph and ASCII are the symbols for Unicode and ASCII-only terminals.
 	Glyph, ASCII string
-	// ANSI and ANSILight are the terminal palette colors on a dark and a
-	// light background. Empty means the terminal's faint default.
-	ANSI, ANSILight string
-	// Dark and Light are the web UI's colors.
+	// Dark and Light are the colors on a dark and a light background.
 	Dark, Light string
 }
 
 // The states, in the order front ends list them.
 var (
-	active     = State{Name: "active", Word: "active", Glyph: "●", ASCII: "*", ANSI: "2", ANSILight: "2", Dark: "#7DC88E", Light: "#1E7A45"}
-	paused     = State{Name: "paused", Word: "paused", Glyph: "◌", ASCII: "o", ANSI: "3", ANSILight: "3", Dark: "#E2B45A", Light: "#865B00"}
-	failed     = State{Name: "failed", Word: "failed", Glyph: "✗", ASCII: "x", ANSI: "1", ANSILight: "1", Dark: "#EC6F67", Light: "#B3261E"}
-	starting   = State{Name: "starting", Word: "starting", Glyph: "…", ASCII: ".", ANSI: "6", ANSILight: "4", Dark: "#6CC4D9", Light: "#0A6A82"}
-	connecting = State{Name: "connecting", Word: "connecting", Glyph: "◐", ASCII: "~", ANSI: "6", ANSILight: "4", Dark: "#6CC4D9", Light: "#0A6A82"}
+	active     = State{Name: "active", Word: "active", Glyph: "●", ASCII: "*", Dark: "#7DC88E", Light: "#1E7A45"}
+	paused     = State{Name: "paused", Word: "paused", Glyph: "◌", ASCII: "o", Dark: "#E2B45A", Light: "#865B00"}
+	failed     = State{Name: "failed", Word: "failed", Glyph: "✗", ASCII: "x", Dark: "#EC6F67", Light: "#B3261E"}
+	starting   = State{Name: "starting", Word: "starting", Glyph: "…", ASCII: ".", Dark: "#6CC4D9", Light: "#0A6A82"}
+	connecting = State{Name: "connecting", Word: "connecting", Glyph: "◐", ASCII: "~", Dark: "#6CC4D9", Light: "#0A6A82"}
 	closed     = State{Name: "closed", Word: "closed", Glyph: "○", ASCII: "-", Dark: "#8F929A", Light: "#5A5D66"}
 )
 
@@ -61,8 +58,9 @@ type Color struct {
 	Dark, Light string
 }
 
-// Palette returns the web UI's surface colors, from the page background
-// out: the rail beside it, panels, and raised rows (hover, selection).
+// Palette returns the surface and text colors, from the page background
+// out: the rail beside it, panels, and raised rows (hover, selection). The
+// TUI uses muted for secondary text and raised for the selected row.
 // The accent is the color of the connecting and starting states; accent-ink
 // is text on an accent fill.
 func Palette() []Color {

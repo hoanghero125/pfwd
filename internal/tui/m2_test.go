@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/hoanghero125/pfwd/internal/detect"
 	"github.com/hoanghero125/pfwd/internal/engine"
 	"github.com/hoanghero125/pfwd/internal/forward"
+	tokens "github.com/hoanghero125/pfwd/internal/theme"
 )
 
 // withLabel is a detected port with a label, as the engine reports it.
@@ -61,8 +63,8 @@ func TestLabelAndSchemeColumn(t *testing.T) {
 	if l := lineWith(t, m, ":6379"); !strings.Contains(l, "Redis") {
 		t.Errorf("detected row = %q; want its label", l)
 	}
-	if h := lineWith(t, m, "STATE"); !strings.Contains(h, "LABEL") {
-		t.Errorf("header = %q; want LABEL", h)
+	if h := lineWith(t, m, "state"); !strings.Contains(h, "label") {
+		t.Errorf("header = %q; want label", h)
 	}
 }
 
@@ -86,12 +88,12 @@ func TestColumnsDropInOrder(t *testing.T) {
 		width     int
 		want, not []string
 	}{
-		{140, []string{"PROCESS", "LABEL", "CONN", "TRAFFIC"}, nil},
-		{80, []string{"PROCESS", "LABEL", "CONN", "TRAFFIC"}, nil},
-		{76, []string{"PROCESS", "LABEL", "CONN"}, []string{"TRAFFIC"}},
-		{61, []string{"PROCESS", "LABEL"}, []string{"CONN", "TRAFFIC"}},
+		{140, []string{"process", "label", "conn", "traffic"}, nil},
+		{80, []string{"process", "label", "conn", "traffic"}, nil},
+		{76, []string{"process", "label", "conn"}, []string{"traffic"}},
+		{61, []string{"process", "label"}, []string{"conn", "traffic"}},
 	} {
-		h := lineWith(t, sized(m, tc.width, 24), "STATE")
+		h := lineWith(t, sized(m, tc.width, 24), "state")
 		for _, w := range tc.want {
 			if !strings.Contains(h, w) {
 				t.Errorf("%d columns: header %q lacks %s", tc.width, h, w)
@@ -327,17 +329,17 @@ func TestEventLog(t *testing.T) {
 	table := m
 	m, _ = press(t, m, "L")
 	v := view(m)
-	for _, want := range []string{"Event log, newest last", "09:00:00", "Connected to devbox", "New port :8080 (python3)", "Couldn't auto-forward :8080: busy", "Forwarded :5173 to localhost:5173"} {
+	for _, want := range []string{"event log, newest last", "09:00:00", "Connected to devbox", "New port :8080 (python3)", "Couldn't auto-forward :8080: busy", "Forwarded :5173 to localhost:5173"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the log lacks %q:\n%s", want, v)
 		}
 	}
-	if strings.Contains(v, "STATE") {
+	if strings.Contains(v, "remote") {
 		t.Errorf("the table is still drawn under the log:\n%s", v)
 	}
 	for _, k := range []string{"L", "esc", "q"} {
 		next, quit := press(t, table, "L", k)
-		if quit || strings.Contains(view(next), "Event log") {
+		if quit || strings.Contains(view(next), "event log") {
 			t.Errorf("%s did not close the log (quit=%v)", k, quit)
 		}
 	}
@@ -368,8 +370,8 @@ func TestMouse(t *testing.T) {
 	if m.View().MouseMode != tea.MouseModeCellMotion {
 		t.Error("mouse mode is off")
 	}
-	// Rows start on line 3 (after the host bar, rule and header), so y=4
-	// is the second row.
+	// Rows start on line 3 (after the host bar, a blank line and the
+	// header), so y=4 is the second row.
 	next, _ := m.Update(tea.MouseClickMsg{X: 10, Y: 4, Button: tea.MouseLeft})
 	m, _ = press(t, mustModel(next), "enter")
 	if len(e.specs) != 1 || e.specs[0].RemotePort != 5001 {
@@ -432,7 +434,7 @@ func TestScrollKeepsOffset(t *testing.T) {
 		t.Fatalf("G did not scroll to the end:\n%s", view(m))
 	}
 	m, _ = press(t, m, "up")
-	if v := view(m); !strings.Contains(v, ":5019") || !strings.Contains(lineWith(t, m, ":5018"), "▶") {
+	if v := view(m); !strings.Contains(v, ":5019") || !strings.Contains(lineWith(t, m, ":5018"), unicodeGlyphs.cursor) {
 		t.Errorf("up moved the view instead of the cursor:\n%s", v)
 	}
 }
@@ -500,12 +502,13 @@ func TestBackgroundColorPicksTheme(t *testing.T) {
 	dark := m.View().Content
 	next, _ := m.Update(tea.BackgroundColorMsg{Color: lightGray})
 	light := mustModel(next).View().Content
-	if !strings.Contains(dark, "\x1b[36m") || !strings.Contains(light, "\x1b[34m") || strings.Contains(light, "\x1b[36m") {
-		t.Errorf("accent: dark has cyan %v, light has blue %v", strings.Contains(dark, "\x1b[36m"), strings.Contains(light, "\x1b[34m"))
+	darkAccent, lightAccent := foreground(tokens.Connecting().Dark), foreground(tokens.Connecting().Light)
+	if !strings.Contains(dark, darkAccent) || !strings.Contains(light, lightAccent) || strings.Contains(light, darkAccent) {
+		t.Errorf("accent: dark has its dark color %v, light its light color %v", strings.Contains(dark, darkAccent), strings.Contains(light, lightAccent))
 	}
 	forced := connectedWith(newModelWith(newFakeEngine(), Options{Theme: "light"}), rp(5173, "node"))
 	next, _ = forced.Update(tea.BackgroundColorMsg{Color: black})
-	if !strings.Contains(mustModel(next).View().Content, "\x1b[34m") {
+	if !strings.Contains(mustModel(next).View().Content, lightAccent) {
 		t.Error("Theme light was overridden by the terminal's answer")
 	}
 }
@@ -528,7 +531,7 @@ func TestCursorFollowsItsPort(t *testing.T) {
 	m := connectedWith(newModel(e), rp(3000, "node"), rp(5000, "x"), rp(5173, "vite"))
 	m, _ = press(t, m, "G", "enter") // forward 5173 by hand: it moves to the top
 	m, _ = press(t, m, "down")       // the detected :3000
-	if l := lineWith(t, m, ":3000"); !strings.Contains(l, "▶") {
+	if l := lineWith(t, m, ":3000"); !strings.Contains(l, unicodeGlyphs.cursor) {
 		t.Fatalf("cursor is not on :3000:\n%s", view(m))
 	}
 	m = apply(m, engine.ForwardChanged{Forward: engine.Forward{
@@ -543,7 +546,7 @@ func TestCursorFollowsItsPort(t *testing.T) {
 	// And back: when that forward stops, the cursor stays on :3000.
 	m = apply(m, engine.ForwardChanged{Forward: engine.Forward{ID: "9", Host: "devbox", State: engine.Stopped,
 		Spec: engine.ForwardSpec{RemotePort: 3000, LocalPort: 3000}}})
-	if l := lineWith(t, m, ":3000"); !strings.Contains(l, "▶") {
+	if l := lineWith(t, m, ":3000"); !strings.Contains(l, unicodeGlyphs.cursor) {
 		t.Errorf("cursor left :3000 when its forward stopped:\n%s", view(m))
 	}
 }
@@ -606,4 +609,64 @@ func TestZeroSizeWindowDoesNotPanic(t *testing.T) {
 	_ = m.View()
 	m = sized(m, 1, 1)
 	_ = m.View()
+}
+
+// TestMouseSkipsSeparator: a click on the blank line or the title above
+// the detected ports selects nothing, and a click under them selects the
+// row drawn there.
+func TestMouseSkipsSeparator(t *testing.T) {
+	e := newFakeEngine()
+	m := sized(connectedWith(newModelWith(e, Options{Mouse: true}), rp(5000, "a"), rp(5001, "b"), rp(5002, "c")), 80, 24)
+	m, _ = press(t, m, "enter") // forward 5000, so the separator shows
+	lines := strings.Split(view(m), "\n")
+	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "detected, not forwarded") })
+	if y < 1 || strings.TrimSpace(lines[y-1]) != "" {
+		t.Fatalf("no blank line and title over the detected ports:\n%s", view(m))
+	}
+	for _, at := range []int{y - 1, y} {
+		next, _ := m.Update(tea.MouseClickMsg{X: 10, Y: at, Button: tea.MouseLeft})
+		if got := mustModel(next).cursor; got != m.cursor {
+			t.Errorf("a click on line %d moved the cursor to %d", at, got)
+		}
+	}
+	at := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, ":5002") })
+	next, _ := m.Update(tea.MouseClickMsg{X: 10, Y: at, Button: tea.MouseLeft})
+	if r, ok := mustModel(next).current(); !ok || r.remotePort() != 5002 {
+		t.Errorf("a click on :5002's line selected %+v", r)
+	}
+}
+
+// TestSparkline: levels scale to the largest value, and the seconds not
+// measured yet and the idle ones are a faint baseline.
+func TestSparkline(t *testing.T) {
+	th := newTheme(true, false, false)
+	got := th.sparkline([]float64{0, 1, 2, 4}, 2)
+	if want := th.faint.Render("▁▁▁") + th.accent.Render("▃▅█"); got != want {
+		t.Errorf("sparkline = %q; want %q", got, want)
+	}
+	if got := ansi.Strip(th.sparkline(nil, sparkLen)); got != strings.Repeat("▁", sparkLen) {
+		t.Errorf("empty sparkline = %q", got)
+	}
+}
+
+// TestTrafficHistory: a forward keeps the rates of its last sparkLen
+// seconds, oldest first.
+func TestTrafficHistory(t *testing.T) {
+	e := newFakeEngine()
+	m := connectedWith(newModel(e), rp(5173, "node"))
+	m, _ = press(t, m, "enter")
+	for i := range sparkLen + 4 {
+		e.mu.Lock()
+		e.forwards[0].Stats = forward.Stats{BytesIn: int64(i * i * 100)}
+		e.mu.Unlock()
+		m, _ = update(t, m, tickMsg(t0.Add(time.Duration(i)*time.Second)))
+	}
+	got := m.rates[e.forwards[0].ID].recent
+	want := make([]float64, 0, sparkLen)
+	for i := 4; i < sparkLen+4; i++ {
+		want = append(want, float64((i*i-(i-1)*(i-1))*100))
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("recent = %v; want %v", got, want)
+	}
 }

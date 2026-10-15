@@ -1,5 +1,5 @@
- pfwd  devbox ● connected                                                                                                            ? help
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  pfwd  devbox ● connected                                                                                                          ? help
+
 
   No listening ports yet. Start a server on devbox and it will appear here.
 
@@ -35,6 +35,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
- a auto  L log  ? help  q quit
+
+  a auto  L log  ? help  q quit

@@ -241,10 +241,11 @@ func TestGolden(t *testing.T) {
 func TestGoldenANSI(t *testing.T) {
 	dark := mainScreen(t)
 	light := mainScreenWith(t, Options{Theme: "light"})
+	plain := mainScreenWith(t, Options{NoColor: true})
 	for name, content := range map[string]string{
 		"dark":     sized(dark, 80, 24).View().Content,
 		"light":    sized(light, 80, 24).View().Content,
-		"no-color": downsample(t, sized(dark, 80, 24).View().Content, colorprofile.Ascii),
+		"no-color": downsample(t, sized(plain, 80, 24).View().Content, colorprofile.Ascii),
 	} {
 		checkRawGolden(t, "ansi-"+name+"-80x24", strings.ReplaceAll(content, "\x1b", `\e`)+"\n")
 	}

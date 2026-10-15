@@ -329,6 +329,7 @@ func runAttach(cmd *cobra.Command, f *rootFlags) error {
 	opts := []tea.ProgramOption{tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out)}
 	if noColor(os.Getenv("NO_COLOR"), f.noColor) {
 		opts = append(opts, tea.WithColorProfile(colorprofile.Ascii))
+		topts.NoColor = true
 	}
 	_, runErr := tea.NewProgram(tui.NewHosts(eng, hosts, topts), opts...).Run()
 	cancel()

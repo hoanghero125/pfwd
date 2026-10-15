@@ -444,18 +444,18 @@ func (m *Model) handleClick(p tea.Mouse) {
 	if p.Button != tea.MouseLeft || m.modal.kind != modalNone || m.logOpen || m.tooSmall() {
 		return
 	}
-	// The table starts under the host bar, the rule and the header.
+	// The table starts under the host bar, a blank line and the header.
 	line := p.Y - 3
 	if line < 0 || line >= m.visibleRows() {
 		return
 	}
 	line += m.offset
 	if sep := m.separatorAt(); sep >= 0 {
-		if line == sep {
+		if line >= sep && line < sep+separatorLines {
 			return
 		}
-		if line > sep {
-			line--
+		if line >= sep+separatorLines {
+			line -= separatorLines
 		}
 	}
 	if line < len(m.rows) {

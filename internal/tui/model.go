@@ -43,6 +43,9 @@ type Options struct {
 	Theme string
 	// ASCII draws ASCII glyphs, for fonts without the Unicode ones.
 	ASCII bool
+	// NoColor draws without colors (NO_COLOR): secondary text is faint
+	// instead of gray, and the selected row has no background.
+	NoColor bool
 	// Mouse selects rows on click and moves the cursor with the wheel.
 	Mouse bool
 	// SkipQuitConfirm quits on q even while forwards are active.
@@ -108,7 +111,15 @@ type sample struct {
 	at      time.Time
 }
 
-type rate struct{ in, out float64 }
+// rate is a forward's traffic, in bytes per second: the latest, and the
+// last sparkLen totals (in and out) for its sparkline, oldest first.
+type rate struct {
+	in, out float64
+	recent  []float64
+}
+
+// sparkLen is how many seconds of traffic a sparkline shows.
+const sparkLen = 8
 
 // row is one table line: a forward (with the detected port it forwards,
 // if the server still lists it) or a detected port that is not forwarded.
@@ -246,7 +257,7 @@ func NewHosts(e Engine, hosts []engine.HostID, opts Options) Model {
 		views:      views,
 		hostView:   views[hosts[0]],
 		opts:       opts,
-		th:         newTheme(opts.Theme != "light", opts.ASCII),
+		th:         newTheme(opts.Theme != "light", opts.ASCII, opts.NoColor),
 		goos:       runtime.GOOS,
 		now:        time.Now,
 		every:      tea.Tick,
@@ -346,7 +357,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scrollToCursor()
 	case tea.BackgroundColorMsg:
 		if !m.themeForced() {
-			m.th = newTheme(msg.IsDark(), m.opts.ASCII)
+			m.th = newTheme(msg.IsDark(), m.opts.ASCII, m.opts.NoColor)
 		}
 	case eventMsg:
 		m.applyEvent(msg.ev)
@@ -704,10 +715,15 @@ func (m *Model) applyStats(msg statsMsg) {
 		m.forwards[f.ID] = cur
 		if prev, ok := m.samples[f.ID]; ok && msg.at.After(prev.at) {
 			dt := msg.at.Sub(prev.at).Seconds()
-			m.rates[f.ID] = rate{
+			r := rate{
 				in:  max(0, float64(f.Stats.BytesIn-prev.in)/dt),
 				out: max(0, float64(f.Stats.BytesOut-prev.out)/dt),
 			}
+			// A new slice each time: Models are copied, and a copy must not
+			// see this one's history change under it.
+			recent := m.rates[f.ID].recent
+			r.recent = append(slices.Clone(recent[max(0, len(recent)-sparkLen+1):]), r.in+r.out)
+			m.rates[f.ID] = r
 		}
 		m.samples[f.ID] = sample{in: f.Stats.BytesIn, out: f.Stats.BytesOut, at: msg.at}
 	}
@@ -924,9 +940,13 @@ func (m *Model) setCursor(i int) {
 	m.scrollToCursor()
 }
 
-// separatorAt is the table line of the "detected, not forwarded"
-// separator, or -1 when there is none: it sits between the forwards and
-// the detected ports when there are both.
+// separatorLines is how many table lines the "detected, not forwarded"
+// separator takes: a blank line and the title.
+const separatorLines = 2
+
+// separatorAt is the table line where the "detected, not forwarded"
+// separator starts, or -1 when there is none: it sits between the
+// forwards and the detected ports when there are both.
 func (m Model) separatorAt() int {
 	nf := 0
 	for nf < len(m.rows) && m.rows[nf].fwd != nil {
@@ -941,7 +961,7 @@ func (m Model) separatorAt() int {
 // lineOf is the table line of row i.
 func (m Model) lineOf(i int) int {
 	if sep := m.separatorAt(); sep >= 0 && i >= sep {
-		return i + 1
+		return i + separatorLines
 	}
 	return i
 }
@@ -957,7 +977,7 @@ func (m *Model) scrollToCursor() {
 	vis := m.visibleRows()
 	lines := len(m.rows)
 	if m.separatorAt() >= 0 {
-		lines++
+		lines += separatorLines
 	}
 	cl := m.lineOf(m.cursor)
 	if cl < m.offset {

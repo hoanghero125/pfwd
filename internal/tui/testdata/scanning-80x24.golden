@@ -1,5 +1,5 @@
- pfwd  devbox ● connected                                                ? help
-────────────────────────────────────────────────────────────────────────────────
+  pfwd  devbox ● connected                                              ? help
+
 
   Connected. Looking for listening ports on devbox…
 
@@ -19,6 +19,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────
 
- a auto  L log  ? help  q quit
+
+  a auto  L log  ? help  q quit

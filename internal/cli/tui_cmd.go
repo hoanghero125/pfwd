@@ -144,6 +144,7 @@ func runTUI(cmd *cobra.Command, targets []string, f *rootFlags) error {
 	if noColor(os.Getenv("NO_COLOR"), f.noColor) {
 		// Bubble Tea only honors NO_COLOR values such as 1 or true.
 		opts = append(opts, tea.WithColorProfile(colorprofile.Ascii))
+		topts.NoColor = true
 	}
 	prog := tea.NewProgram(tui.NewHosts(eng, hosts, topts), opts...)
 	final, err := prog.Run()
