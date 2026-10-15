@@ -24,12 +24,12 @@ type State struct {
 
 // The states, in the order front ends list them.
 var (
-	active     = State{Name: "active", Word: "active", Glyph: "●", ASCII: "*", ANSI: "2", ANSILight: "2", Dark: "#4CC38A", Light: "#1B7A4B"}
-	paused     = State{Name: "paused", Word: "paused", Glyph: "◌", ASCII: "o", ANSI: "3", ANSILight: "3", Dark: "#E3B64B", Light: "#855D00"}
-	failed     = State{Name: "failed", Word: "failed", Glyph: "✗", ASCII: "x", ANSI: "1", ANSILight: "1", Dark: "#F2736C", Light: "#B42318"}
-	starting   = State{Name: "starting", Word: "starting", Glyph: "…", ASCII: ".", ANSI: "6", ANSILight: "4", Dark: "#52C0D8", Light: "#0B6A82"}
-	connecting = State{Name: "connecting", Word: "connecting", Glyph: "◐", ASCII: "~", ANSI: "6", ANSILight: "4", Dark: "#52C0D8", Light: "#0B6A82"}
-	closed     = State{Name: "closed", Word: "closed", Glyph: "○", ASCII: "-", Dark: "#9BA5B2", Light: "#545F6E"}
+	active     = State{Name: "active", Word: "active", Glyph: "●", ASCII: "*", ANSI: "2", ANSILight: "2", Dark: "#7DC88E", Light: "#1E7A45"}
+	paused     = State{Name: "paused", Word: "paused", Glyph: "◌", ASCII: "o", ANSI: "3", ANSILight: "3", Dark: "#E2B45A", Light: "#865B00"}
+	failed     = State{Name: "failed", Word: "failed", Glyph: "✗", ASCII: "x", ANSI: "1", ANSILight: "1", Dark: "#EC6F67", Light: "#B3261E"}
+	starting   = State{Name: "starting", Word: "starting", Glyph: "…", ASCII: ".", ANSI: "6", ANSILight: "4", Dark: "#6CC4D9", Light: "#0A6A82"}
+	connecting = State{Name: "connecting", Word: "connecting", Glyph: "◐", ASCII: "~", ANSI: "6", ANSILight: "4", Dark: "#6CC4D9", Light: "#0A6A82"}
+	closed     = State{Name: "closed", Word: "closed", Glyph: "○", ASCII: "-", Dark: "#8F929A", Light: "#5A5D66"}
 )
 
 // Active is a working forward or a connected host.
@@ -61,17 +61,21 @@ type Color struct {
 	Dark, Light string
 }
 
-// Palette returns the web UI's surface colors. The accent is the color of
-// the connecting and starting states.
+// Palette returns the web UI's surface colors, from the page background
+// out: the rail beside it, panels, and raised rows (hover, selection).
+// The accent is the color of the connecting and starting states; accent-ink
+// is text on an accent fill.
 func Palette() []Color {
 	return []Color{
-		{Name: "bg", Dark: "#1A1F26", Light: "#F6F7F9"},
-		{Name: "surface", Dark: "#212731", Light: "#FFFFFF"},
-		{Name: "line", Dark: "#333B46", Light: "#D8DDE4"},
-		{Name: "text", Dark: "#E3E7ED", Light: "#1C222A"},
-		{Name: "muted", Dark: "#9BA5B2", Light: "#545F6E"},
-		{Name: "hover", Dark: "#283039", Light: "#EEF1F4"},
-		{Name: "select", Dark: "#22343C", Light: "#E3EEF2"},
+		{Name: "bg", Dark: "#131416", Light: "#F7F7F8"},
+		{Name: "rail", Dark: "#0F1012", Light: "#EFEFF1"},
+		{Name: "surface", Dark: "#18191C", Light: "#FFFFFF"},
+		{Name: "raised", Dark: "#202126", Light: "#F0F0F3"},
+		{Name: "line", Dark: "#2A2C31", Light: "#E3E3E8"},
+		{Name: "line-strong", Dark: "#3B3E46", Light: "#CDCED6"},
+		{Name: "text", Dark: "#E9E9EC", Light: "#16171A"},
+		{Name: "muted", Dark: "#8F929A", Light: "#5A5D66"},
 		{Name: "accent", Dark: connecting.Dark, Light: connecting.Light},
+		{Name: "accent-ink", Dark: "#0B2027", Light: "#FFFFFF"},
 	}
 }

@@ -23,8 +23,8 @@ async function axe(page: Page, what: string) {
 test("the ports view shows forwarded and detected ports", async ({ page }) => {
   await open(page);
   await expect(page.getByRole("heading", { name: "devbox" })).toBeVisible();
-  await expect(page.getByText("Forwarded (3)")).toBeVisible();
-  await expect(page.getByText("Detected, not forwarded (2)")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Forwarded 3" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Detected, not forwarded 2" })).toBeVisible();
   const forwarded = page.getByRole("list", { name: "Forwarded ports" });
   await expect(forwarded.getByRole("listitem")).toHaveCount(3);
   await expect(forwarded.getByText("localhost:15432")).toBeVisible();
@@ -68,7 +68,7 @@ test("the details drawer", async ({ page }) => {
   await row.getByRole("button", { name: "More actions for :5173" }).click();
   await page.getByRole("menuitem", { name: "Details" }).click();
   const drawer = page.getByRole("dialog", { name: ":5173 on devbox" });
-  await expect(drawer.getByText("2 open")).toBeVisible();
+  await expect(drawer.locator(".stats > div").filter({ hasText: "Connections" })).toContainText("2");
   await expect(drawer.getByRole("img", { name: /Traffic rate/ })).toBeVisible();
   await expect(drawer.getByRole("listitem").filter({ hasText: /\d active$/ })).toBeVisible(); // the history from the snapshot
   await page.keyboard.press("Escape");
@@ -134,12 +134,15 @@ test("live updates don't move the row under the cursor", async ({ page }) => {
 });
 
 test("a banner when the daemon goes away, and back", async ({ page }) => {
+  await page.clock.install();
   const d = await open(page);
   d.refuseStream = true;
   await d.ws?.close();
   await expect(page.getByRole("alert").filter({ hasText: "Lost the connection to the pfwd daemon" })).toBeVisible();
   await axe(page, "banner");
   await expect(page.getByText("localhost:5173", { exact: true })).toBeVisible(); // the last state stays on screen
+  // Stop the clock, so the banner's own retry can't beat the click below.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10));
   d.refuseStream = false;
   await page.getByRole("button", { name: "Retry now" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Lost the connection" })).toHaveCount(0);
@@ -308,20 +311,40 @@ test("first paint under a second", async ({ page }) => {
   expect(fcp).toBeLessThan(1000);
 });
 
+// traffic feeds stats on a fake clock until the sparklines are full (36
+// points), so they and the details chart have a shape in the screenshots.
+// Jupyter's connections alternate between 1 and 2, so the header's total
+// shows when the page has taken each tick.
+async function traffic(page: Page, d: Daemon) {
+  const total = { "1": [3_400_000, 210_000], "2": [0, 0] };
+  for (let i = 1; i <= 37; i++) {
+    total["1"][0] += Math.round(60_000 + 50_000 * Math.sin(i / 3) + (i % 7) * 9_000);
+    total["1"][1] += Math.round(6_000 + 4_000 * Math.cos(i / 4));
+    total["2"][0] += i > 24 ? 140_000 + (i % 5) * 30_000 : 2_000;
+    total["2"][1] += i > 24 ? 12_000 : 500;
+    const jupyter = i % 2 ? 1 : 2;
+    d.push("stats", { forwards: Object.entries(total).map(([id, [bytes_in, bytes_out]]) => ({ id, conns: id === "1" ? 2 : jupyter, bytes_in, bytes_out })) });
+    await expect(page.locator(".meta")).toContainText(`${6 + jupyter} open connections`);
+    await page.clock.runFor(1000);
+  }
+}
+
 for (const scheme of ["light", "dark"] as const) {
   for (const width of [1280, 390]) {
     test(`screens and accessibility, ${scheme}, ${width} px`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme });
       await page.setViewportSize({ width, height: width > 600 ? 800 : 844 });
       const shot = async (name: string) => {
-        await page.screenshot({ path: `${test.info().project.outputDir}/screens/${name}-${scheme}-${width}.png`, fullPage: true });
+        await page.screenshot({ path: `${test.info().project.outputDir}/screens/${name}-${scheme}-${width}.png`, fullPage: true, animations: "disabled" });
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
         expect(overflow, `${name} scrolls sideways`).toBeLessThanOrEqual(0);
         await axe(page, name);
       };
+      await page.clock.install();
       const d = await open(page);
       d.push("forward_changed", forward({ id: "4", local: 8080, remote: 8080, state: "failed", error: "server disallows TCP forwarding", label: "", auto: false }));
       await expect(page.getByText("failed").first()).toBeVisible();
+      await traffic(page, d);
       await shot("ports");
       await page.getByRole("button", { name: "More actions for :5173" }).click();
       await page.getByRole("menuitem", { name: "Details" }).click();

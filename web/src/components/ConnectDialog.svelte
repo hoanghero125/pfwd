@@ -26,7 +26,7 @@
   }
 </script>
 
-<Dialog title="Connect a host" {onclose}>
+<Dialog title="Connect a host" icon="brand" {onclose}>
   <form onsubmit={submit}>
     <div class="field">
       <label for="connect-q">Host from your ssh config, or user@host:port</label>
@@ -40,7 +40,7 @@
           <li>
             <button type="button" onclick={() => pick(h.host)}>
               <span class="mono">{h.host}</span>
-              <span class="muted">{ago(h.last_used, app.now)}{#if h.remembered} · {h.remembered} remembered{/if}</span>
+              <span class="muted">{ago(h.last_used, app.now)}{#if h.remembered}, {h.remembered} remembered{/if}</span>
             </button>
           </li>
         {/each}

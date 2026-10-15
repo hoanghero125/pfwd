@@ -2,6 +2,7 @@
   import { localAddr } from "../lib/format";
   import { forwardsOf } from "../lib/reduce";
   import { app } from "../lib/store.svelte";
+  import Icon from "./Icon.svelte";
   import State from "./State.svelte";
 
   // Reverse forwards: a port on this machine, exposed on the server.
@@ -30,8 +31,8 @@
   }
 </script>
 
-<p class="muted">Expose a port of this machine on {host}: programs there reach it at 127.0.0.1 on the server port.</p>
-<form class="toolbar" onsubmit={submit}>
+<p class="lead">Expose a port of this machine on {host}: programs there reach it at 127.0.0.1 on the server port.</p>
+<form class="inline-form" onsubmit={submit}>
   <div class="field">
     <label for="rv-local">Local port</label>
     <input id="rv-local" type="text" inputmode="numeric" bind:value={local} aria-invalid={local !== "" && !port(local)} required />
@@ -40,27 +41,26 @@
     <label for="rv-remote">Server port</label>
     <input id="rv-remote" type="text" inputmode="numeric" bind:value={remote} aria-invalid={remote !== "" && !port(remote)} placeholder="same" />
   </div>
-  <div class="field">
-    <span class="label" aria-hidden="true">&nbsp;</span>
-    <button type="submit" class="btn primary" disabled={busy || !connected || !port(local)}>Expose</button>
-  </div>
+  <button type="submit" class="btn primary" disabled={busy || !connected || !port(local)}><Icon name="reverse" /> Expose</button>
 </form>
 
-<h2 class="group">Exposed on {host} ({reverse.length})</h2>
+<h2 class="group">Exposed on {host} <span class="n">{reverse.length}</span></h2>
 {#if reverse.length}
 <div class="rows" role="list" aria-label="Reverse forwards">
   {#each reverse as f (f.id)}
     <div class="row" role="listitem">
-      <span class="st"><State state={f.state} /></span>
+      <State state={f.state} />
       <span class="patch">
-        <span class="jack">{localAddr(f)}</span>
+        <span class="jack local">{localAddr(f)}</span>
         <span class="cable g-{f.state} {f.state}" aria-hidden="true"></span>
         <span class="jack">{host}:{f.remote}</span>
       </span>
-      <span class="proc">{f.state === "paused" ? f.pause : f.error}</span>
-      <span class="label">{f.label}</span>
-      <span class="traffic"></span>
-      <span class="acts"><button class="btn small" onclick={() => app.stop(f)}>Stop</button></span>
+      <span class="what">
+        <span class="proc" class:muted={!f.label}>{f.label || "reverse forward"}</span>
+        {#if f.state === "paused" ? f.pause : f.error}<span class="label">{f.state === "paused" ? f.pause : f.error}</span>{/if}
+      </span>
+      <span class="traffic"><span class="rate">{f.conns ? `${f.conns} open` : ""}</span></span>
+      <span class="acts"><button class="btn ghost small danger" onclick={() => app.stop(f)}><Icon name="close" size={14} /> Stop</button></span>
     </div>
   {/each}
 </div>

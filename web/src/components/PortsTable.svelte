@@ -6,6 +6,8 @@
   import Details from "./Details.svelte";
   import ForwardDialog from "./ForwardDialog.svelte";
   import LabelDialog from "./LabelDialog.svelte";
+  import Icon from "./Icon.svelte";
+  import Sparkline from "./Sparkline.svelte";
   import State from "./State.svelte";
 
   let { host }: { host: string } = $props();
@@ -191,14 +193,19 @@
 
 <svelte:window {onkeydown} onclick={closeMenu} />
 
-<input type="search" class="filter" placeholder="Filter by port, process or label" aria-label="Filter ports" data-filter bind:value={filter} />
-
-{#snippet stateCell(f: Forward)}
-  <span class="st"><State state={f.state} /></span>
-{/snippet}
+<div class="toolbar">
+  <label class="search">
+    <Icon name="search" />
+    <input type="search" placeholder="Filter by port, process or label" aria-label="Filter ports" data-filter bind:value={filter} />
+    <kbd aria-hidden="true">/</kbd>
+  </label>
+</div>
 
 {#snippet forwardRow(r: Extract<Row, { kind: "forward" }>)}
   {@const f = r.f}
+  {@const t = target(f)}
+  {@const rate = app.model.rates[f.id]}
+  {@const live = f.state === "active" && !!rate && rate.in + rate.out > 0}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (j/k select rows from the keyboard) -->
   <div
     id="row-{r.key}"
@@ -209,35 +216,49 @@
     onclick={() => select(r)}
     onfocusin={() => select(r)}
   >
-    {@render stateCell(f)}
+    <State state={f.state} />
     <span class="patch">
       <span class="jack">{f.remote_host && !local(f.remote_host) ? `${f.remote_host}:${f.remote}` : `:${f.remote}`}</span>
-      <span class="cable g-{f.state === 'active' ? 'active' : f.state} {f.state}" aria-hidden="true"></span>
-      <span class="jack">{localAddr(f)}</span>
-      {#if exposed(f)}<span class="badge lan" title="Reachable from your network">LAN</span>{/if}
+      <span class="cable g-{f.state} {f.state}" class:live aria-hidden="true"></span>
+      <span class="jack local">{localAddr(f)}</span>
     </span>
-    <span class="proc">{r.port?.process ?? ""}</span>
-    <span class="label">{f.label || r.port?.label || ""}{#if f.pinned} <span class="badge pin">pinned</span>{/if}</span>
-    <span class="traffic" title={f.state === "failed" ? f.error : undefined}>{traffic(f)}</span>
+    <span class="what">
+      <span class="proc" class:muted={!r.port?.process}>{r.port?.process || "unknown process"}</span>
+      <span class="label">
+        {#if f.label || r.port?.label}<span>{f.label || r.port?.label}</span>{/if}
+        {#if f.pinned}<span class="tag"><Icon name="pin" size={12} /> pinned</span>{/if}
+        {#if f.auto}<span class="tag">auto</span>{/if}
+        {#if exposed(f)}<span class="tag lan" title="Reachable from your network"><Icon name="lan" size={12} /> LAN</span>{/if}
+      </span>
+    </span>
+    <span class="traffic" title={f.state === "failed" ? f.error : undefined}>
+      {#if f.state === "active"}
+        <Sparkline values={rate?.history ?? []} />
+        <span class="rate"><b>↓{formatRate(rate?.in ?? 0)}/s</b> ↑{formatRate(rate?.out ?? 0)}/s</span>
+      {:else}
+        <span class="rate">{traffic(f)}</span>
+      {/if}
+    </span>
     <span class="acts">
-      {#if (f.state === "active" || f.state === "paused") && target(f).web}
-        <button class="btn small wide" onclick={() => open(f)}>Open</button>
+      {#if (f.state === "active" || f.state === "paused") && t.web}
+        <button class="btn ghost icon-only wide" aria-label="Open" title="Open {t.text}" onclick={() => open(f)}><Icon name="open" /></button>
       {/if}
       {#if f.state === "active" || f.state === "paused"}
-        <button class="btn small wide" onclick={() => app.copy(target(f).text)}>{target(f).web ? "Copy URL" : "Copy address"}</button>
+        <button class="btn ghost icon-only wide" aria-label={t.web ? "Copy URL" : "Copy address"} title="Copy {t.text}" onclick={() => app.copy(t.text)}><Icon name="copy" /></button>
       {/if}
       <span class="menu">
-        <button id="more-{r.key}" class="btn small icon" aria-label="More actions for :{f.remote}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
+        <button id="more-{r.key}" class="btn ghost icon-only" aria-label="More actions for :{f.remote}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}><Icon name="more" size={18} /></button>
         {#if menu === r.key}
           <span class="menu-list" role="menu">
-            <button role="menuitem" onclick={() => ((details = f.id), (back = `more-${r.key}`), (menu = ""))}>Details</button>
-            {#if target(f).web}<button role="menuitem" onclick={() => (open(f), (menu = ""))}>Open in the browser</button>{/if}
-            <button role="menuitem" onclick={() => (app.copy(target(f).text), (menu = ""))}>{target(f).web ? "Copy URL" : "Copy address"}</button>
+            <button role="menuitem" onclick={() => ((details = f.id), (back = `more-${r.key}`), (menu = ""))}><Icon name="info" /> Details</button>
+            {#if t.web}<button role="menuitem" onclick={() => (open(f), (menu = ""))}><Icon name="open" /> Open in the browser</button>{/if}
+            <button role="menuitem" onclick={() => (app.copy(t.text), (menu = ""))}><Icon name="copy" /> {t.web ? "Copy URL" : "Copy address"}</button>
             {#if !f.config}
-              <button role="menuitem" onclick={() => (app.pin(f, !f.pinned), (menu = ""))}>{f.pinned ? "Unpin" : "Pin"}</button>
-              <button role="menuitem" onclick={() => ((labeling = f), (back = `more-${r.key}`), (menu = ""))}>Label…</button>
+              <button role="menuitem" onclick={() => (app.pin(f, !f.pinned), (menu = ""))}><Icon name="pin" /> {f.pinned ? "Unpin" : "Pin"}</button>
+              <button role="menuitem" onclick={() => ((labeling = f), (back = `more-${r.key}`), (menu = ""))}><Icon name="tag" /> Label…</button>
             {/if}
-            <button role="menuitem" onclick={() => (app.stop(f), (menu = ""))}>Stop</button>
+            <hr />
+            <button role="menuitem" class="danger" onclick={() => (app.stop(f), (menu = ""))}><Icon name="close" /> Stop</button>
           </span>
         {/if}
       </span>
@@ -250,7 +271,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (j/k select rows from the keyboard) -->
   <div
     id="row-{r.key}"
-    class="row"
+    class="row detected"
     class:new={isNew(r.key)}
     role="listitem"
     aria-current={current?.key === r.key ? "true" : undefined}
@@ -259,16 +280,21 @@
   >
     <span class="st muted"><span aria-hidden="true">—</span><span class="visually-hidden">not forwarded</span></span>
     <span class="patch"><span class="jack">{portLabel(p.port, p.addrs)}</span></span>
-    <span class="proc" class:muted={!p.process}>{p.process || "?"}</span>
-    <span class="label">{p.label}{#if p.ignored} <span class="badge pin">hidden</span>{/if}</span>
+    <span class="what">
+      <span class="proc" class:muted={!p.process}>{p.process || "unknown process"}</span>
+      <span class="label">
+        {#if p.label}<span>{p.label}</span>{/if}
+        {#if p.ignored}<span class="tag">hidden</span>{/if}
+      </span>
+    </span>
     <span class="traffic"></span>
     <span class="acts">
-      <button class="btn small" onclick={() => forwardPort(p)}>Forward</button>
+      <button class="btn soft small" onclick={() => forwardPort(p)}>Forward <Icon name="arrow" size={14} /></button>
       <span class="menu">
-        <button id="more-{r.key}" class="btn small icon" aria-label="More actions for :{p.port}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
+        <button id="more-{r.key}" class="btn ghost icon-only" aria-label="More actions for :{p.port}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}><Icon name="more" size={18} /></button>
         {#if menu === r.key}
           <span class="menu-list" role="menu">
-            <button role="menuitem" onclick={() => ((custom = p), (back = `more-${r.key}`), (menu = ""))}>Forward to another local port…</button>
+            <button role="menuitem" onclick={() => ((custom = p), (back = `more-${r.key}`), (menu = ""))}><Icon name="arrow" /> Forward to another local port…</button>
           </span>
         {/if}
       </span>
@@ -283,11 +309,12 @@
 {:else}
   {#if info?.error && connected}
     <div class="notice warn">
-      <span>Detection unavailable: {info.error}. You can still add forwards with New forward; pfwd doctor {host} says more.</span>
+      <Icon name="warn" size={18} />
+      <span class="grow">Detection unavailable: {info.error}. You can still add forwards with New forward; <code>pfwd doctor {host}</code> says more.</span>
     </div>
   {/if}
 
-  <h2 class="group">Forwarded ({forwarded.length})</h2>
+  <h2 class="group">Forwarded <span class="n">{forwarded.length}</span></h2>
   {#if forwarded.length}
     <div class="rows" role="list" aria-label="Forwarded ports">
       {#each forwarded as r (r.key)}
@@ -298,7 +325,7 @@
     <p class="empty">{filter ? "No forward matches the filter." : "Nothing forwarded yet. Forward a detected port below, or add one with New forward."}</p>
   {/if}
 
-  <h2 class="group">Detected, not forwarded ({detected.length})</h2>
+  <h2 class="group">Detected, not forwarded <span class="n">{detected.length}</span></h2>
   {#if detected.length}
     <div class="rows" role="list" aria-label="Detected ports">
       {#each detected as r (r.key)}
@@ -311,8 +338,8 @@
     </p>
   {/if}
   {#if hiddenCount}
-    <p class="muted more">
-      <button class="btn small" onclick={() => (showHidden = !showHidden)}>{showHidden ? "Hide" : "Show"} {hiddenCount} hidden {hiddenCount === 1 ? "port" : "ports"}</button>
+    <p class="more">
+      <button class="btn ghost small" onclick={() => (showHidden = !showHidden)}>{showHidden ? "Hide" : "Show"} {hiddenCount} hidden {hiddenCount === 1 ? "port" : "ports"}</button>
     </p>
   {/if}
 {/if}

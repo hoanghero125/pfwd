@@ -18,9 +18,12 @@
   ];
 </script>
 
-<Dialog title="Keyboard shortcuts" {onclose}>
+<Dialog title="Keyboard shortcuts" icon="keyboard" {onclose}>
   <div class="keys">
-    {#each keys as [k, what] (k)}<kbd>{k}</kbd><span>{what}</span>{/each}
+    {#each keys as [k, what] (k)}
+      <span class="k">{#each k.split(", ") as group, i (group)}{#if i}<span class="muted">or</span>{/if}{#each group.split(" / ") as key, j (key)}{#if j}<span class="muted">/</span>{/if}<kbd>{key}</kbd>{/each}{/each}</span>
+      <span>{what}</span>
+    {/each}
   </div>
   <div class="btns"><button class="btn" onclick={onclose}>Close</button></div>
 </Dialog>
