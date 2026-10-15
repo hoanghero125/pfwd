@@ -46,11 +46,25 @@ var asciiGlyphs = glyphs{
 	spark: []string{"_", ".", ",", "-", "=", "+", "*", "#"},
 }
 
-// theme holds the TUI's styles and glyphs. The colors are internal/theme's,
-// the web UI's palette, for a dark or a light background; Bubble Tea
-// downsamples them for terminals with fewer colors. Without colors
-// (NO_COLOR), secondary text is faint instead of muted gray, and the
-// selected row has no background.
+// palette is where a theme's colors come from.
+type palette int
+
+const (
+	// hexPalette is internal/theme's colors, the web UI's, for a dark or a
+	// light background. Bubble Tea downsamples them for 256 colors.
+	hexPalette palette = iota
+	// ansiPalette is the terminal's own 16 colors, which follow its theme,
+	// with faint secondary text: for 16-color terminals, where the hex
+	// colors would turn paused and failed the same red, and while pfwd
+	// doesn't know the background.
+	ansiPalette
+	// plainPalette has no colors (NO_COLOR): secondary text is faint, and
+	// the selected row has no background.
+	plainPalette
+)
+
+// theme holds the TUI's styles and glyphs. The state glyphs and colors come
+// from internal/theme, which the web UI shares.
 type theme struct {
 	faint, bold, accent, ok, warn, bad lipgloss.Style
 	// selectBg starts the selected row's background.
@@ -58,14 +72,33 @@ type theme struct {
 	g        glyphs
 }
 
-func newTheme(dark, ascii, noColor bool) theme {
+func newTheme(dark, ascii bool, p palette) theme {
 	s := lipgloss.NewStyle()
 	th := theme{bold: s.Bold(true), g: unicodeGlyphs}
 	if ascii {
 		th.g = asciiGlyphs
 	}
-	if noColor {
+	switch p {
+	case plainPalette:
 		th.faint, th.accent, th.ok, th.warn, th.bad = s.Faint(true), s, s, s, s
+		return th
+	case ansiPalette:
+		ansi := func(st tokens.State) lipgloss.Style {
+			if dark {
+				return s.Foreground(lipgloss.Color(st.ANSI))
+			}
+			// Cyan is hard to read on white in the stock palettes, so the
+			// accent's light color is blue.
+			return s.Foreground(lipgloss.Color(st.ANSILight))
+		}
+		th.faint = s.Faint(true)
+		th.accent, th.ok, th.warn, th.bad = ansi(tokens.Connecting()), ansi(tokens.Active()), ansi(tokens.Paused()), ansi(tokens.Failed())
+		// No 16-color background is darker than a dark background and
+		// lighter than a light one; the 256-color grays are.
+		th.selectBg = "\x1b[48;5;236m"
+		if !dark {
+			th.selectBg = "\x1b[48;5;254m"
+		}
 		return th
 	}
 	pick := func(c tokens.Color) string {
@@ -165,19 +198,21 @@ func (th theme) sparkline(values []float64, missing int) string {
 	return b.String()
 }
 
-// formatRate formats bytes per second with binary units: 512, 1.0K, 12K,
-// 1.5M.
+// formatRate formats bytes per second with binary units in at most four
+// cells: 512, 1.0K, 12K, 1.5M. A value that would round to 1000 or more of
+// a unit moves up to the next one.
 func formatRate(b float64) string {
 	if b < 1024 {
 		return strconv.Itoa(int(b))
 	}
 	units := []string{"K", "M", "G", "T"}
-	i := -1
-	for b >= 1024 && i < len(units)-1 {
+	b /= 1024
+	i := 0
+	for b >= 999.5 && i < len(units)-1 {
 		b /= 1024
 		i++
 	}
-	if b < 10 {
+	if b < 9.95 {
 		return fmt.Sprintf("%.1f%s", b, units[i])
 	}
 	return fmt.Sprintf("%.0f%s", b, units[i])

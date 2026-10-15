@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/hoanghero125/pfwd/internal/detect"
 	"github.com/hoanghero125/pfwd/internal/engine"
 )
@@ -178,5 +180,19 @@ func TestUnavailableNamesTheTools(t *testing.T) {
 	v := view(m)
 	if strings.Contains(v, "v0.4.0") || !strings.Contains(v, "lsof") {
 		t.Errorf("unavailable view:\n%s", v)
+	}
+}
+
+// TestMouseInReversePane: the wheel moves the Reverse tab's cursor, and
+// neither the wheel nor a click touches the table hidden under it.
+func TestMouseInReversePane(t *testing.T) {
+	e := newFakeEngine()
+	m := sized(connectedWith(newModelWith(e, Options{Mouse: true, LocalPorts: localPortsFake(localSample, nil)}), rp(5173, "node"), rp(6006, "tb")), 80, 24)
+	m, _ = press(t, m, "r")
+	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	next, _ = mustModel(next).Update(tea.MouseClickMsg{X: 10, Y: 4, Button: tea.MouseLeft})
+	m = mustModel(next)
+	if m.revCursor != 1 || m.cursor != 0 {
+		t.Errorf("after the wheel and a click: Reverse cursor %d (want 1), table cursor %d (want 0)", m.revCursor, m.cursor)
 	}
 }

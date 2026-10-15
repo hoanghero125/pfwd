@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 
 	"github.com/hoanghero125/pfwd/internal/detect"
 	"github.com/hoanghero125/pfwd/internal/engine"
@@ -166,13 +167,18 @@ type pickerState struct {
 
 // Model is the TUI state. Create it with New.
 type Model struct {
-	eng   Engine
-	host  engine.HostID
-	opts  Options
-	th    theme
-	goos  string
-	now   func() time.Time
-	every func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
+	eng  Engine
+	host engine.HostID
+	opts Options
+	th   theme
+	// dark is whether the background is dark; bgKnown, whether the
+	// terminal said so (or Options.Theme did). profile is the terminal's
+	// color profile. Together they pick the theme's palette.
+	dark, bgKnown bool
+	profile       colorprofile.Profile
+	goos          string
+	now           func() time.Time
+	every         func(time.Duration, func(time.Time) tea.Msg) tea.Cmd
 
 	width, height int
 
@@ -249,7 +255,7 @@ func NewHosts(e Engine, hosts []engine.HostID, opts Options) Model {
 	for _, h := range hosts {
 		views[h] = &hostView{}
 	}
-	return Model{
+	m := Model{
 		eng:        e,
 		host:       hosts[0],
 		tab:        hosts[0],
@@ -257,7 +263,7 @@ func NewHosts(e Engine, hosts []engine.HostID, opts Options) Model {
 		views:      views,
 		hostView:   views[hosts[0]],
 		opts:       opts,
-		th:         newTheme(opts.Theme != "light", opts.ASCII, opts.NoColor),
+		dark:       opts.Theme != "light",
 		goos:       runtime.GOOS,
 		now:        time.Now,
 		every:      tea.Tick,
@@ -268,6 +274,9 @@ func NewHosts(e Engine, hosts []engine.HostID, opts Options) Model {
 		samples:    make(map[string]sample),
 		rates:      make(map[string]rate),
 	}
+	m.bgKnown = m.themeForced()
+	m.restyle()
+	return m
 }
 
 // Err returns the connection error, if the connection failed or was lost.
@@ -329,6 +338,25 @@ func (m Model) themeForced() bool {
 	return m.opts.Theme == "dark" || m.opts.Theme == "light"
 }
 
+// palette picks the theme's colors: none with NO_COLOR, the terminal's own
+// on a 16-color terminal or while its background is unknown, and
+// internal/theme's otherwise.
+func (m Model) palette() palette {
+	switch {
+	case m.opts.NoColor:
+		return plainPalette
+	case m.profile == colorprofile.ANSI || !m.bgKnown:
+		return ansiPalette
+	}
+	return hexPalette
+}
+
+// restyle rebuilds the theme after the background or the color profile
+// changed.
+func (m *Model) restyle() {
+	m.th = newTheme(m.dark, m.opts.ASCII, m.palette())
+}
+
 // Init starts listening for engine events and the 1 s stats tick, and
 // asks the terminal for its background color unless the theme is forced.
 func (m Model) Init() tea.Cmd {
@@ -357,8 +385,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scrollToCursor()
 	case tea.BackgroundColorMsg:
 		if !m.themeForced() {
-			m.th = newTheme(msg.IsDark(), m.opts.ASCII, m.opts.NoColor)
+			m.dark, m.bgKnown = msg.IsDark(), true
+			m.restyle()
 		}
+	case tea.ColorProfileMsg:
+		m.profile = msg.Profile
+		m.restyle()
 	case eventMsg:
 		m.applyEvent(msg.ev)
 		return m, waitEvent(m.eng.Events())

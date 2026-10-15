@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/hoanghero125/pfwd/internal/detect"
@@ -497,19 +498,46 @@ func TestASCIIGlyphs(t *testing.T) {
 	}
 }
 
+// TestBackgroundColorPicksTheme: until the terminal says what its
+// background is, the TUI uses the terminal's own colors; then the shared
+// palette for that background. Options.Theme wins over the answer.
 func TestBackgroundColorPicksTheme(t *testing.T) {
+	const terminalCyan = "\x1b[36m"
 	m := connectedWith(newModel(newFakeEngine()), rp(5173, "node"))
-	dark := m.View().Content
-	next, _ := m.Update(tea.BackgroundColorMsg{Color: lightGray})
-	light := mustModel(next).View().Content
 	darkAccent, lightAccent := foreground(tokens.Connecting().Dark), foreground(tokens.Connecting().Light)
+	if v := m.View().Content; !strings.Contains(v, terminalCyan) || strings.Contains(v, darkAccent) {
+		t.Errorf("before the terminal answers: terminal cyan %v, palette %v", strings.Contains(v, terminalCyan), strings.Contains(v, darkAccent))
+	}
+	next, _ := m.Update(tea.BackgroundColorMsg{Color: black})
+	dark := mustModel(next).View().Content
+	next, _ = m.Update(tea.BackgroundColorMsg{Color: lightGray})
+	light := mustModel(next).View().Content
 	if !strings.Contains(dark, darkAccent) || !strings.Contains(light, lightAccent) || strings.Contains(light, darkAccent) {
 		t.Errorf("accent: dark has its dark color %v, light its light color %v", strings.Contains(dark, darkAccent), strings.Contains(light, lightAccent))
 	}
 	forced := connectedWith(newModelWith(newFakeEngine(), Options{Theme: "light"}), rp(5173, "node"))
+	if !strings.Contains(forced.View().Content, lightAccent) {
+		t.Error("Theme light doesn't use the palette from the start")
+	}
 	next, _ = forced.Update(tea.BackgroundColorMsg{Color: black})
 	if !strings.Contains(mustModel(next).View().Content, lightAccent) {
 		t.Error("Theme light was overridden by the terminal's answer")
+	}
+}
+
+// TestSixteenColorsUseTerminalPalette: on a 16-color terminal the shared
+// palette would turn paused and failed the same red, so the TUI keeps the
+// terminal's own colors and faint text.
+func TestSixteenColorsUseTerminalPalette(t *testing.T) {
+	m := connectedWith(newModelWith(newFakeEngine(), Options{Theme: "dark"}), rp(5173, "node"))
+	next, _ := m.Update(tea.ColorProfileMsg{Profile: colorprofile.ANSI})
+	v := mustModel(next).View().Content
+	if !strings.Contains(v, "\x1b[36m") || !strings.Contains(v, "\x1b[2m") || strings.Contains(v, "38;2;") {
+		t.Errorf("16 colors: terminal cyan %v, faint %v, truecolor %v", strings.Contains(v, "\x1b[36m"), strings.Contains(v, "\x1b[2m"), strings.Contains(v, "38;2;"))
+	}
+	next, _ = mustModel(next).Update(tea.ColorProfileMsg{Profile: colorprofile.ANSI256})
+	if v := mustModel(next).View().Content; !strings.Contains(v, foreground(tokens.Connecting().Dark)) {
+		t.Error("256 colors don't use the palette")
 	}
 }
 
@@ -639,7 +667,7 @@ func TestMouseSkipsSeparator(t *testing.T) {
 // TestSparkline: levels scale to the largest value, and the seconds not
 // measured yet and the idle ones are a faint baseline.
 func TestSparkline(t *testing.T) {
-	th := newTheme(true, false, false)
+	th := newTheme(true, false, hexPalette)
 	got := th.sparkline([]float64{0, 1, 2, 4}, 2)
 	if want := th.faint.Render("▁▁▁") + th.accent.Render("▃▅█"); got != want {
 		t.Errorf("sparkline = %q; want %q", got, want)

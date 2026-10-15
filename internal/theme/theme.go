@@ -15,17 +15,21 @@ type State struct {
 	Word string
 	// Glyph and ASCII are the symbols for Unicode and ASCII-only terminals.
 	Glyph, ASCII string
+	// ANSI and ANSILight are the terminal's own palette colors on a dark
+	// and a light background, for the TUI on 16-color terminals and while
+	// it doesn't know the background. Empty means faint.
+	ANSI, ANSILight string
 	// Dark and Light are the colors on a dark and a light background.
 	Dark, Light string
 }
 
 // The states, in the order front ends list them.
 var (
-	active     = State{Name: "active", Word: "active", Glyph: "●", ASCII: "*", Dark: "#7DC88E", Light: "#1E7A45"}
-	paused     = State{Name: "paused", Word: "paused", Glyph: "◌", ASCII: "o", Dark: "#E2B45A", Light: "#865B00"}
-	failed     = State{Name: "failed", Word: "failed", Glyph: "✗", ASCII: "x", Dark: "#EC6F67", Light: "#B3261E"}
-	starting   = State{Name: "starting", Word: "starting", Glyph: "…", ASCII: ".", Dark: "#6CC4D9", Light: "#0A6A82"}
-	connecting = State{Name: "connecting", Word: "connecting", Glyph: "◐", ASCII: "~", Dark: "#6CC4D9", Light: "#0A6A82"}
+	active     = State{Name: "active", Word: "active", Glyph: "●", ASCII: "*", ANSI: "2", ANSILight: "2", Dark: "#7DC88E", Light: "#1E7A45"}
+	paused     = State{Name: "paused", Word: "paused", Glyph: "◌", ASCII: "o", ANSI: "3", ANSILight: "3", Dark: "#E2B45A", Light: "#865B00"}
+	failed     = State{Name: "failed", Word: "failed", Glyph: "✗", ASCII: "x", ANSI: "1", ANSILight: "1", Dark: "#EC6F67", Light: "#B3261E"}
+	starting   = State{Name: "starting", Word: "starting", Glyph: "…", ASCII: ".", ANSI: "6", ANSILight: "4", Dark: "#6CC4D9", Light: "#0A6A82"}
+	connecting = State{Name: "connecting", Word: "connecting", Glyph: "◐", ASCII: "~", ANSI: "6", ANSILight: "4", Dark: "#6CC4D9", Light: "#0A6A82"}
 	closed     = State{Name: "closed", Word: "closed", Glyph: "○", ASCII: "-", Dark: "#8F929A", Light: "#5A5D66"}
 )
 

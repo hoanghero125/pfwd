@@ -439,9 +439,10 @@ func (m Model) handleLogKey(k string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleClick selects the table row under the pointer.
+// handleClick selects the table row under the pointer. The panes that
+// replace the table take no clicks.
 func (m *Model) handleClick(p tea.Mouse) {
-	if p.Button != tea.MouseLeft || m.modal.kind != modalNone || m.logOpen || m.tooSmall() {
+	if p.Button != tea.MouseLeft || m.modal.kind != modalNone || m.logOpen || m.reverseOpen || m.tooSmall() {
 		return
 	}
 	// The table starts under the host bar, a blank line and the header.
@@ -463,7 +464,8 @@ func (m *Model) handleClick(p tea.Mouse) {
 	}
 }
 
-// handleWheel moves the cursor, or scrolls the log, one line.
+// handleWheel moves the cursor, the Reverse tab's cursor, or scrolls the
+// log, one line.
 func (m *Model) handleWheel(p tea.Mouse) {
 	if m.modal.kind != modalNone || m.tooSmall() {
 		return
@@ -475,11 +477,14 @@ func (m *Model) handleWheel(p tea.Mouse) {
 	case tea.MouseWheelDown:
 		step = 1
 	}
-	if m.logOpen {
+	switch {
+	case m.logOpen:
 		m.logScroll = max(0, min(m.logScroll-step, m.maxLogScroll()))
-		return
+	case m.reverseOpen:
+		m.revCursor = max(0, min(m.revCursor+step, len(m.local)-1))
+	default:
+		m.setCursor(m.cursor + step)
 	}
-	m.setCursor(m.cursor + step)
 }
 
 func parsePort(s string) (uint16, bool) {
