@@ -92,7 +92,7 @@ func (m Model) reversePane(w, h int) []string {
 	case len(m.local) == 0:
 		lines = append(lines, "", "  Nothing listens on this machine yet. Start a server here, then press r again.")
 	default:
-		lines = append(lines, th.faint.Render("  "+th.cell("PORT", 9)+th.cell("ADDRESS", 18)+"PROCESS"))
+		lines = append(lines, th.faint.Render("  "+th.cell("port", 9)+th.cell("address", 18)+"process"))
 		start := max(0, m.revCursor-(h-4))
 		for i := start; i < len(m.local) && len(lines) < h; i++ {
 			p := m.local[i]

@@ -1,5 +1,5 @@
- pfwd  devbox ● connected                                     auto: on   ? help
-────────────────────────────────────────────────────────────────────────────────
+  pfwd  devbox ● connected                                   auto: on   ? help
+
 
   No ports match /zz. Press esc to clear the filter.
 
@@ -19,6 +19,6 @@
 
 
 
-─ / zz: 0 of 5 ports ─ 1 ignored hidden, h shows ───────────────────────────────
- ✓ Forwarded :5173 to localhost:5173
- a auto  L log  ? help  q quit
+  / zz: 0 of 5 ports   1 ignored hidden, h shows
+  ✓ Forwarded :5173 to localhost:5173
+  a auto  L log  ? help  q quit

@@ -1,9 +1,9 @@
- pfwd  devbox ✗ disconnected                                                                                              auto: on   ? help
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  STATE   REMOTE  LOCAL           PROCESS                                 LABEL             CONN TRAFFIC
-▶ ◌ pause :5173   localhost:5173  disconnected                            Vite http         2    —
-  ◌ pause :8000   localhost:8000  port closed                                               0    —
-  ◌ pause :8888   localhost:8888  disconnected                            Jupyter http pin  0    —
+  pfwd  devbox ✗ disconnected                                                                                            auto: on   ? help
+
+  state   remote   local           process                                 label             conn traffic
+▌ ◌ pause :5173  → localhost:5173  disconnected                            Vite http         2    —
+  ◌ pause :8000  → localhost:8000  port closed                                               0    —
+  ◌ pause :8888  → localhost:8888  disconnected                            Jupyter http pin  0    —
 
 
 
@@ -35,6 +35,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ✗ Disconnected from devbox; c reconnects
- c reconnect  L log  q quit
+
+  ✗ Disconnected from devbox; c reconnects
+  c reconnect  L log  q quit

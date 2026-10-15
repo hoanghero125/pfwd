@@ -600,3 +600,21 @@ func TestForwardErrorsReachTheStatusLine(t *testing.T) {
 		t.Errorf("a refused forward is not shown as failed:\n%s", v)
 	}
 }
+
+// TestFormatRateFitsFourCells: a rate is at most four cells, so the
+// traffic column never cuts "/s" off.
+func TestFormatRateFitsFourCells(t *testing.T) {
+	for _, c := range []struct {
+		in   float64
+		want string
+	}{{1023, "1023"}, {10200, "10K"}, {1023 * 1024, "1.0M"}, {999.6 * 1024, "1.0M"}} {
+		if got := formatRate(c.in); got != c.want {
+			t.Errorf("formatRate(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	for b := 1.0; b < 1<<40; b *= 1.01 {
+		if got := formatRate(b); len(got) > 4 {
+			t.Fatalf("formatRate(%v) = %q, more than four cells", b, got)
+		}
+	}
+}

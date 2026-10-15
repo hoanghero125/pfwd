@@ -236,15 +236,20 @@ func TestGolden(t *testing.T) {
 }
 
 // TestGoldenANSI pins the colors and attributes of the main screen on a
-// dark and a light background, and what is left of them with NO_COLOR.
+// dark and a light background, in the terminal's own colors (before it
+// says what its background is, and on 16-color terminals), and what is left
+// of them with NO_COLOR.
 // ESC is written as \e to keep the files readable.
 func TestGoldenANSI(t *testing.T) {
-	dark := mainScreen(t)
+	dark := mainScreenWith(t, Options{Theme: "dark"})
 	light := mainScreenWith(t, Options{Theme: "light"})
+	terminal := mainScreen(t)
+	plain := mainScreenWith(t, Options{NoColor: true})
 	for name, content := range map[string]string{
 		"dark":     sized(dark, 80, 24).View().Content,
 		"light":    sized(light, 80, 24).View().Content,
-		"no-color": downsample(t, sized(dark, 80, 24).View().Content, colorprofile.Ascii),
+		"terminal": sized(terminal, 80, 24).View().Content,
+		"no-color": downsample(t, sized(plain, 80, 24).View().Content, colorprofile.Ascii),
 	} {
 		checkRawGolden(t, "ansi-"+name+"-80x24", strings.ReplaceAll(content, "\x1b", `\e`)+"\n")
 	}

@@ -46,7 +46,7 @@ func (m Model) maxLogScroll() int {
 
 // logPane replaces the table with the event log, exactly h lines.
 func (m Model) logPane(w, h int) []string {
-	lines := []string{m.th.faint.Render("  Event log, newest last")}
+	lines := []string{m.th.faint.Render("  event log, newest last")}
 	all := m.logLines(w)
 	end := len(all) - min(m.logScroll, m.maxLogScroll())
 	start := max(0, end-(h-1))

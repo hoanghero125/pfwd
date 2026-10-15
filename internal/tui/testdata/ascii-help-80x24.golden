@@ -1,13 +1,13 @@
- pfwd  devbo+------------------------------------------------------+on   ? help
-------------| Keys                                                 |------------
-  STATE   RE|                                                      |FFIC
+  pfwd  devb+------------------------------------------------------+n   ? help
+            | Keys                                                 |
+  state   re|                                                      |ffic
 > * fwd   :5| up down  j k move                                    |K/s ^1.0K/s
   o pause :8| g G          first, last                             |
   * fwd   :8| enter  f     forward the port, or stop it            |^0
-  ----------| F            forward to another local port           |----------
-  -       :6| x            stop the forward                        |
-  -       :9| o            open in the browser                     |
-            | y            copy the URL                            |
+            | F            forward to another local port           |
+  detected, | x            stop the forward                        |
+  -       :6| o            open in the browser                     |
+  -       :9| y            copy the URL                            |
             | p            pin: remember the forward next time     |
             | a            turn auto-forward on or off             |
             | /            filter by port, process or label        |
@@ -19,6 +19,6 @@
             | r            expose a local port on the server       |
             | d            start or stop a SOCKS proxy (1080)      |
             | c            reconnect now                           |
-- 1 ignored | x            stop retrying, while reconnecting       |------------
- + Forwarded| up down more keys, 1-19 of 21                        |
- enter stop +------------------------------------------------------+ q quit
+  1 ignored | x            stop retrying, while reconnecting       |
+  + Forwarde| up down more keys, 1-19 of 21                        |
+  enter stop+------------------------------------------------------+  q quit

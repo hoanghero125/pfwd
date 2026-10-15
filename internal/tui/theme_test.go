@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -28,26 +29,38 @@ func TestTUIMatchesTheme(t *testing.T) {
 		}
 	}
 	for _, dark := range []bool{true, false} {
-		th := newTheme(dark, false)
-		ansi := func(s tokens.State) string {
-			if dark {
-				return s.ANSI
+		for _, p := range []palette{hexPalette, ansiPalette} {
+			th := newTheme(dark, false, p)
+			want := func(s tokens.State) string {
+				switch {
+				case p == ansiPalette && dark:
+					return s.ANSI
+				case p == ansiPalette:
+					return s.ANSILight
+				case dark:
+					return s.Dark
+				}
+				return s.Light
 			}
-			return s.ANSILight
-		}
-		for _, c := range []struct {
-			name  string
-			style lipgloss.Style
-			want  string
-		}{
-			{"ok", th.ok, ansi(tokens.Active())},
-			{"warn", th.warn, ansi(tokens.Paused())},
-			{"bad", th.bad, ansi(tokens.Failed())},
-			{"accent", th.accent, ansi(tokens.Connecting())},
-		} {
-			if c.style.GetForeground() != lipgloss.Color(c.want) {
-				t.Errorf("dark %v: %s color is %v, theme says %s", dark, c.name, c.style.GetForeground(), c.want)
+			for _, c := range []struct {
+				name  string
+				style lipgloss.Style
+				want  string
+			}{
+				{"ok", th.ok, want(tokens.Active())},
+				{"warn", th.warn, want(tokens.Paused())},
+				{"bad", th.bad, want(tokens.Failed())},
+				{"accent", th.accent, want(tokens.Connecting())},
+			} {
+				if c.style.GetForeground() != lipgloss.Color(c.want) {
+					t.Errorf("dark %v, palette %d: %s color is %v, theme says %s", dark, p, c.name, c.style.GetForeground(), c.want)
+				}
 			}
 		}
 	}
+}
+
+// foreground is the escape sequence that makes hex the foreground color.
+func foreground(hex string) string {
+	return strings.Replace(background(hex), "[48;", "[38;", 1)
 }

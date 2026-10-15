@@ -1,7 +1,7 @@
- pfwd  devbox ● connected  gpu ◐                                                                                                     ? help
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  STATE   REMOTE  LOCAL           PROCESS                                 LABEL             CONN TRAFFIC
-▶ —       :5173   —               node                                                      —    —
+  pfwd  devbox ● connected  gpu ◐                                                                                                   ? help
+
+  state   remote   local           process                                 label             conn traffic
+▌ —       :5173                    node
 
 
 
@@ -35,6 +35,6 @@
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ✗ Lost the connection to gpu; reconnecting
- enter forward  F other port  a auto  / filter  L log  ? help  q quit
+
+  ✗ Lost the connection to gpu; reconnecting
+  enter forward  F other port  a auto  / filter  L log  ? help  q quit
