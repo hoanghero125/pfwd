@@ -140,7 +140,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .side { background: var(--rail); border-right: 1px solid var(--line); padding: 18px 12px 16px; display: flex; flex-direction: column; gap: 2px; min-width: 0; position: sticky; top: 0; height: 100dvh; }
 .brand { display: flex; align-items: center; gap: 9px; padding: 2px 10px 18px; font: 600 16px var(--mono); letter-spacing: -0.03em; }
 .brand .icon { color: var(--accent); }
-.side .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; }
+.side .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.side .nav > :not(.grow) { flex-shrink: 0; }
 .side-title { padding: 8px 10px 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .side-link {
   position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 0 10px;
@@ -256,7 +257,8 @@ button.jack.local:hover { text-decoration: underline; text-underline-offset: 3px
 .menu-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: var(--z-menu); min-width: 230px; padding: 5px; display: grid; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow); animation: pop 0.14s var(--ease); }
 .menu-list button { display: flex; align-items: center; gap: 10px; text-align: left; background: none; border: 0; padding: 0 10px; height: 34px; border-radius: var(--r-sm); cursor: pointer; font-size: 13px; }
 .menu-list button .icon { color: var(--muted); }
-.menu-list button:hover, .menu-list button:focus-visible { background: var(--raised); outline: none; }
+.menu-list button:hover, .menu-list button:focus-visible { background: var(--raised); }
+.menu-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .menu-list button.danger { color: var(--failed); }
 .menu-list button.danger .icon { color: var(--failed); }
 .menu-list hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
@@ -283,7 +285,8 @@ dialog form { display: grid; gap: 16px; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
 .pick { list-style: none; margin: 0; padding: 4px; display: grid; gap: 2px; max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); }
 .pick button, .pick a { width: 100%; display: flex; gap: 12px; justify-content: space-between; align-items: center; text-align: left; background: none; border: 0; padding: 0 10px; min-height: 40px; border-radius: var(--r-sm); cursor: pointer; color: inherit; }
-.pick button:hover, .pick button:focus-visible, .pick a:hover { background: var(--raised); outline: none; }
+.pick button:hover, .pick button:focus-visible, .pick a:hover { background: var(--raised); }
+.pick button:focus-visible, .pick a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pick .mono { font-size: 13px; }
 p.err { color: var(--failed); font-size: 13px; }
 
@@ -341,6 +344,7 @@ dialog.drawer .btns { margin-top: auto; }
 .check input { appearance: none; flex: none; width: 32px; height: 18px; margin: 1px 0 0; border-radius: 999px; background: var(--line-strong); position: relative; cursor: pointer; transition: background-color 0.2s; }
 .check input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); transition: transform 0.2s var(--ease); }
 .check input:checked { background: var(--accent); }
+.check input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .check input:checked::after { transform: translateX(14px); }
 .check .hint { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 textarea.toml { width: 100%; min-height: 380px; font: 13px/1.6 var(--mono); resize: vertical; background: var(--bg); }
@@ -377,7 +381,29 @@ textarea.toml { width: 100%; min-height: 380px; font: 13px/1.6 var(--mono); resi
 .proxy .addr { font: 500 15px var(--mono); overflow-wrap: anywhere; }
 .proxy .sub { display: flex; gap: 10px; align-items: center; font-size: 13px; }
 
-/* Under 760 px: the rail becomes a top bar, rows stack. */
+/* Rows need about 1240 px in one line. Below that a row takes two lines:
+   state, route and actions, then the process and the traffic. Under
+   1000 px it stacks. */
+@media (min-width: 1000px) and (max-width: 1239px) {
+  .row, .row.detected { grid-template-columns: 96px minmax(0, 1fr) auto; grid-template-areas: "st patch acts" ". what traffic"; row-gap: 4px; }
+  .row .st { grid-area: st; }
+  .row .patch { grid-area: patch; }
+  .row .acts { grid-area: acts; }
+  .row .what { grid-area: what; }
+  .row .traffic { grid-area: traffic; justify-content: flex-end; }
+  .row .traffic:empty { display: none; }
+}
+@media (max-width: 999px) {
+  .row, .row.detected { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; padding: 12px; }
+  .row .st { grid-column: 1; grid-row: 1; }
+  .row .patch { grid-column: 1 / -1; grid-row: 2; }
+  .row .what { grid-column: 1 / -1; grid-row: 3; }
+  .row .traffic { grid-column: 1 / -1; grid-row: 4; }
+  .row .traffic:empty { display: none; }
+  .row .acts { grid-column: 2; grid-row: 1; }
+}
+
+/* Under 760 px: the rail becomes a top bar. */
 @media (max-width: 760px) {
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; background: none; }
   .side { position: static; height: auto; flex-direction: row; align-items: center; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px 16px; }
@@ -391,13 +417,6 @@ textarea.toml { width: 100%; min-height: 380px; font: 13px/1.6 var(--mono); resi
   .head h1 { font-size: 22px; }
   .head .tools { margin-left: 0; width: 100%; }
   .tabs { margin-top: 18px; }
-  .row, .row.detected { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; padding: 12px; }
-  .row .st { grid-column: 1; grid-row: 1; }
-  .row .patch { grid-column: 1 / -1; grid-row: 2; }
-  .row .what { grid-column: 1 / -1; grid-row: 3; }
-  .row .traffic { grid-column: 1 / -1; grid-row: 4; }
-  .row .traffic:empty { display: none; }
-  .row .acts { grid-column: 2; grid-row: 1; }
   .row .acts .wide { display: none; }
   .row .acts .btn.icon-only { opacity: 1; }
   .cable { flex-basis: 36px; }
