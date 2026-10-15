@@ -58,9 +58,9 @@ func TestContrast(t *testing.T) {
 		colors[s.Name] = Color{Name: s.Name, Dark: s.Dark, Light: s.Light}
 	}
 	texts := []string{"text", "muted", "active", "paused", "failed", "starting", "connecting", "closed", "accent"}
-	backgrounds := []string{"bg", "surface", "hover", "select"}
+	backgrounds := []string{"bg", "rail", "surface", "raised"}
 	type pair struct{ fg, bg string }
-	pairs := []pair{{"surface", "accent"}, {"surface", "paused"}} // primary buttons, the daemon banner
+	pairs := []pair{{"accent-ink", "accent"}, {"surface", "paused"}} // primary buttons, the daemon banner
 	for _, fg := range texts {
 		for _, bg := range backgrounds {
 			pairs = append(pairs, pair{fg, bg})

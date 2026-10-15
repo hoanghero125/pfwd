@@ -3,12 +3,14 @@
   import Help from "./components/Help.svelte";
   import Home from "./components/Home.svelte";
   import HostView from "./components/HostView.svelte";
+  import Icon from "./components/Icon.svelte";
   import PromptDialog from "./components/PromptDialog.svelte";
   import Settings from "./components/Settings.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import { app } from "./lib/store.svelte";
 
   let help = $state(false);
+  const toastIcon = { info: "info", ok: "ok", warn: "warn", error: "error" } as const;
   const prompt = $derived(app.model.prompts[0]);
   const retryIn = $derived(Math.max(0, Math.ceil((app.retryAt - app.now) / 1000)));
 
@@ -37,13 +39,15 @@
 
 {#if app.link === "login"}
   <div class="banner info" role="alert">
+    <Icon name="key" size={18} />
     This tab isn't logged in to pfwd, or the daemon restarted. Run <code>pfwd ui</code> in a terminal for a new login link.
   </div>
 {:else if app.link === "retrying"}
   <div class="banner">
+    <Icon name="warn" size={18} />
     <span role="alert">Lost the connection to the pfwd daemon.</span>
     <span>Retrying in {retryIn} s.</span>
-    <button class="btn small" onclick={() => app.retryNow()}>Retry now</button>
+    <button class="btn small" onclick={() => app.retryNow()}><Icon name="retry" size={14} /> Retry now</button>
   </div>
 {/if}
 
@@ -76,6 +80,6 @@
 
 <div class="toasts" role="status" aria-live="polite">
   {#each app.toasts as t (t.id)}
-    <div class="toast {t.level}">{t.text}</div>
+    <div class="toast {t.level}"><Icon name={toastIcon[t.level]} size={18} /><span>{t.text}</span></div>
   {/each}
 </div>

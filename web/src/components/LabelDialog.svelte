@@ -13,7 +13,7 @@
   }
 </script>
 
-<Dialog title="Label :{f.remote}" {onclose} {returnTo}>
+<Dialog title="Label :{f.remote}" icon="tag" {onclose} {returnTo}>
   <form onsubmit={submit}>
     <div class="field">
       <label for="label-text">Label</label>

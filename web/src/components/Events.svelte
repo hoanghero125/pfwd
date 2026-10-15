@@ -1,6 +1,7 @@
 <script lang="ts">
   import { clock } from "../lib/format";
   import { app } from "../lib/store.svelte";
+  import Icon from "./Icon.svelte";
 
   // The event log: the TUI's L pane, kept since this page opened.
   let filter = $state("");
@@ -18,19 +19,25 @@
 </script>
 
 <div class="head"><h1>Events</h1></div>
+<p class="lead">What pfwd did since this page opened, newest first.</p>
 <div class="toolbar">
-  <input type="search" class="filter" placeholder="Filter events" aria-label="Filter events" data-filter bind:value={filter} />
-  <select aria-label="Which events" bind:value={level}>
-    <option value="all">All events</option>
-    <option value="problems">Warnings and errors</option>
-  </select>
+  <label class="search">
+    <Icon name="search" />
+    <input type="search" placeholder="Filter events" aria-label="Filter events" data-filter bind:value={filter} />
+    <kbd aria-hidden="true">/</kbd>
+  </label>
+  <div class="seg" role="group" aria-label="Which events">
+    <button aria-pressed={level === "all"} onclick={() => (level = "all")}>All events</button>
+    <button aria-pressed={level === "problems"} onclick={() => (level = "problems")}>Warnings and errors</button>
+  </div>
 </div>
-<div class="log rows" role="log" aria-label="Events, newest first">
+<div class="log" role="log" aria-label="Events, newest first">
   {#each lines as l (l.seq)}
     <div class="line">
-      <span class="muted">{clock(l.at)}</span>
-      <span>{l.host}</span>
-      <span><span class={tone[l.level]} aria-hidden="true">{marks[l.level]}</span> {l.text}</span>
+      <span class="when">{clock(l.at)}</span>
+      <span class="host">{l.host}</span>
+      <span class="st {tone[l.level]}" aria-hidden="true"><span class="glyph">{marks[l.level]}</span></span>
+      <span class="text">{l.text}</span>
     </div>
   {:else}
     <p class="empty">{filter || level !== "all" ? "No event matches." : "Events since this page opened show up here."}</p>
