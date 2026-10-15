@@ -831,8 +831,10 @@ func (m *Model) hostRows(host engine.HostID, v *hostView) (fwdRows, portRows []r
 		r := row{key: "f:" + f.ID, host: host, fwd: f}
 		switch f.Spec.Kind {
 		case engine.Local:
-			forwarded[f.Spec.RemotePort] = true
-			r.port = byPort[f.Spec.RemotePort]
+			if p := byPort[f.Spec.RemotePort]; p != nil && serves(f.Spec.RemoteHost, p) {
+				forwarded[f.Spec.RemotePort] = true
+				r.port = p
+			}
 		case engine.Remote:
 			own[f.Spec.RemotePort] = true
 		}
@@ -1119,4 +1121,17 @@ func target(f engine.Forward) (s string, ok bool) {
 	default:
 		return "http://" + addr, true
 	}
+}
+
+// serves reports whether a forward to remoteHost reaches detected port p:
+// any loopback name reaches a port on loopback or every address, and any
+// other host only a port bound to that address. A forward to another
+// machine doesn't stand for the server's own port.
+func serves(remoteHost string, p *engine.Port) bool {
+	at := detect.Target(p.Addrs)
+	switch remoteHost {
+	case "", "127.0.0.1", "::1", "localhost", "0.0.0.0", "::":
+		return at == "127.0.0.1" || at == "::1"
+	}
+	return remoteHost == at
 }
