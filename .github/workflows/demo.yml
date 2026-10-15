@@ -1,0 +1,60 @@
+name: demo
+
+# Renders the README's TUI demo (vhs) and web UI screenshots against the
+# end-to-end tests' sshd container, and uploads them. Commit the results
+# to demo/ by hand after looking at them.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: [demo/**, .github/workflows/demo.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the latest tag names the version shown
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: Build pfwd
+        run: |
+          mkdir -p "$HOME/bin"
+          make build VERSION="$(git describe --tags --abbrev=0)"
+          cp bin/pfwd "$HOME/bin/pfwd"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Start devbox
+        run: demo/setup.sh
+      - name: Render the TUI demo
+        uses: charmbracelet/vhs-action@f6d7db07a432fcd3b06772628d36a57f96d95dcf # v2.1.1
+        with:
+          version: v0.12.1
+          path: demo/pfwd.tape
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Web UI screenshots
+        run: |
+          (cd web && npm ci && npx playwright install --with-deps chromium)
+          pfwd fwd devbox 5173 8888 --detach
+          for scheme in light dark; do
+            url=$(pfwd ui --url)
+            (cd web && npx playwright screenshot --browser chromium --viewport-size "1280, 640" --color-scheme "$scheme" \
+              --wait-for-timeout 4000 "$url#/host/devbox" "../demo/web-$scheme.png")
+          done
+          pfwd daemon stop
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: demo
+          path: |
+            demo/*.gif
+            demo/*.png
+          retention-days: 14
