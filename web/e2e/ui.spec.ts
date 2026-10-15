@@ -203,6 +203,24 @@ test("Escape closes a row menu and returns focus", async ({ page }) => {
   await expect(more).toBeFocused();
 });
 
+test("a dialog closes on the first Escape with a row menu open", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "More actions for :5173" }).click();
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("the connect dialog says when the ssh config can't be read", async ({ page }) => {
+  const d = new Daemon(page);
+  d.hostsWarning = "read ssh config /home/dev/.ssh/config: permission denied";
+  await d.install();
+  await page.goto("/#/");
+  await page.getByRole("button", { name: "Connect a host" }).first().click();
+  await expect(page.getByRole("dialog")).toContainText("permission denied");
+});
+
 test("a port listening on one address is forwarded there", async ({ page }) => {
   const d = await open(page);
   d.push("ports_changed", {

@@ -45,6 +45,8 @@ export class Daemon {
   failAnswers = new Set<string>();
   // refuseStream closes new event streams at once, as a stopped daemon.
   refuseStream = false;
+  // hostsWarning is what /api/hosts says about the ssh config.
+  hostsWarning = "";
 
   constructor(readonly page: Page) {}
 
@@ -100,6 +102,7 @@ export class Daemon {
           { host: "gpu-node", state: "reconnecting", last_used: new Date(Date.now() - 2 * 3600e3).toISOString(), remembered: 1, forwards: 0 },
           { host: "nas", state: "", last_used: null, remembered: 0, forwards: 0 },
         ],
+        warning: this.hostsWarning,
       });
     }
     if (path === "/api/config" && method === "GET") {

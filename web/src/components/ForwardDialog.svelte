@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { portTarget } from "../lib/format";
+  import { portLabel, portTarget } from "../lib/format";
   import { app } from "../lib/store.svelte";
   import type { Port } from "../lib/types";
   import Dialog from "./Dialog.svelte";
@@ -39,7 +39,7 @@
   }
 </script>
 
-<Dialog title={port ? `Forward :${port.port} to another local port` : `New forward on ${host}`} {onclose} {returnTo}>
+<Dialog title={port ? `Forward ${portLabel(port.port, port.addrs)} to another local port` : `New forward on ${host}`} {onclose} {returnTo}>
   <form onsubmit={submit}>
     <div class="fields">
       {#if !port}

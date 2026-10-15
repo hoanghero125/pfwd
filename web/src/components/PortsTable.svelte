@@ -128,7 +128,8 @@
 
   function onkeydown(e: KeyboardEvent) {
     const t = e.target as HTMLElement | null;
-    if (e.key === "Escape" && menu) {
+    // A dialog open above the menu takes Escape for itself.
+    if (e.key === "Escape" && menu && !document.querySelector("dialog[open]")) {
       const opener = menu;
       menu = "";
       document.getElementById(`more-${opener}`)?.focus();

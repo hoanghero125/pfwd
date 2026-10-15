@@ -64,6 +64,8 @@ class App {
   version = $state("");
   view = $state<View>({ kind: "home" });
   hosts = $state<HostInfo[]>([]);
+  // hostsWarning says why the ssh config's hosts are missing, if they are.
+  hostsWarning = $state("");
   toasts = $state<Toast[]>([]);
   now = $state(Date.now());
   // notify is the opt-in for browser notifications.
@@ -75,12 +77,12 @@ class App {
   #toastId = 0;
   #noticesSeen = 0;
 
-  // start logs in and opens the event stream.
   // ready settles once this tab has tried to log in; views that call the
   // API when they open wait for it, or their first call has no token.
   #loggedIn: () => void = () => {};
   ready = new Promise<void>((resolve) => (this.#loggedIn = resolve));
 
+  // start logs in and opens the event stream.
   async start() {
     this.view = parseHash(location.hash);
     addEventListener("hashchange", () => (this.view = parseHash(location.hash)));
@@ -197,8 +199,9 @@ class App {
 
   async loadHosts() {
     try {
-      const res = await api.get<{ hosts: HostInfo[] }>("/api/hosts");
+      const res = await api.get<{ hosts: HostInfo[]; warning?: string }>("/api/hosts");
       this.hosts = res.hosts;
+      this.hostsWarning = res.warning ?? "";
     } catch (e) {
       this.fail(e);
     }
