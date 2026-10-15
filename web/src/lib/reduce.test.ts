@@ -14,6 +14,17 @@ function fwd(over: Partial<Forward>): Forward {
 }
 
 group("apply", () => {
+  it("cleans the server's text before anything shows it", () => {
+    const m = emptyModel();
+    const ports = [{ port: 22, addrs: ["127.0.0.1"], process: "x\u001b]52;c;Zm9v\u0007y", pid: 1, label: "", ignored: false }];
+    apply(m, { event: "ports_changed", data: { host: "devbox", strategy: "ss", os: "Linux\u202eevil", added: [], removed: [], error: "", ports } }, 1);
+    apply(m, { event: "forward_changed", data: fwd({ state: "failed", error: "line one\nline two" }) }, 2);
+    expect(m.ports.devbox.os).toBe("Linux\ufffdevil");
+    expect(m.ports.devbox.ports?.[0].process).toBe("x\ufffd]52;c;Zm9v\ufffdy");
+    expect(m.forwards["1"].error).toBe("line one line two");
+    expect(m.log.at(-1)?.text).toBe(":5173 failed: line one line two");
+  });
+
   it("tracks sessions and logs their changes once", () => {
     const m = emptyModel();
     apply(m, { event: "session_changed", data: { host: "devbox", state: "connected", error: "", retry_at: null, attempt: 0 } }, 1);
@@ -82,6 +93,7 @@ group("apply", () => {
 group("format", () => {
   it("formats rates like the TUI", () => {
     expect([512, 1024, 12 * 1024, 1.5 * 1024 * 1024].map(formatRate)).toEqual(["512", "1.0K", "12K", "1.5M"]);
+    expect([1023, 10200, 1023 * 1024, 999.6 * 1024].map(formatRate)).toEqual(["1023", "10K", "1.0M", "1.0M"]);
   });
   it("names local addresses", () => {
     expect(localAddr(fwd({}))).toBe("localhost:5173");

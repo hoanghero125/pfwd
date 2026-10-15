@@ -370,3 +370,31 @@ for (const scheme of ["light", "dark"] as const) {
     });
   }
 }
+
+// Between the phone layout and 1240 px, rows take two lines or stack: the
+// page never scrolls sideways.
+for (const width of [900, 1100]) {
+  test(`ports at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await open(page);
+    await page.screenshot({ path: `${test.info().project.outputDir}/screens/ports-${width}.png`, fullPage: true, animations: "disabled" });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, "the ports page scrolls sideways").toBeLessThanOrEqual(0);
+  });
+}
+
+test("menu items and switches show keyboard focus", async ({ page }) => {
+  await open(page);
+  const outline = () => page.evaluate(() => getComputedStyle(document.activeElement as Element).outlineStyle);
+  await page.getByRole("button", { name: "More actions for :5173" }).focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("menuitem").first()).toBeFocused();
+  expect(await outline()).not.toBe("none");
+  await page.keyboard.press("Escape");
+  await page.goto("/#/settings");
+  await page.getByLabel("Only auto-forward these ports").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.getByLabel("Forward new ports automatically")).toBeFocused();
+  expect(await outline()).not.toBe("none");
+});

@@ -2,7 +2,7 @@
 // plain function over a plain object, so tests drive it directly; the app
 // keeps the object in Svelte state.
 
-import { describe, name, pauseText } from "./format";
+import { cleanAll, describe, name, pauseText } from "./format";
 import type { Forward, PortsInfo, Prompt, Session, Stat, WireEvent } from "./types";
 
 export type Level = "info" | "ok" | "warn" | "error";
@@ -84,7 +84,10 @@ function stateText(f: Forward): string {
 }
 
 // apply records one event. now is the time it arrived, in milliseconds.
+// Every string in it is cleaned first: process names, uname output and
+// errors come from the server.
 export function apply(m: Model, ev: WireEvent, now: number) {
+  ev = { ...ev, data: cleanAll(ev.data) };
   switch (ev.event) {
     case "session_changed": {
       const s = ev.data as Session;
