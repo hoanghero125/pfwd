@@ -52,3 +52,9 @@ func TestReferenceUpToDate(t *testing.T) {
 		t.Error("docs/config.md is stale; run `go generate ./internal/config`")
 	}
 }
+
+func TestTableCellEscapesPipes(t *testing.T) {
+	if got := tableCell(`a | b`); got != `a \| b` {
+		t.Errorf("tableCell = %q", got)
+	}
+}

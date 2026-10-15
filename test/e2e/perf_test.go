@@ -164,6 +164,17 @@ func TestPerfStartAndFirstPorts(t *testing.T) {
 	dir := t.TempDir()
 	bin := buildPfwd(t, dir)
 	startServer(t, "ss", "8150")
+	// Time pfwd, not python's start-up: wait until the server listens.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := compose("exec", "ss", "sh", "-c", "ss -ltn | grep -q ':8150 '"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the server on :8150 never listened")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	proxy := startDelayProxy(t, fmt.Sprintf("127.0.0.1:%d", sshPort(t, "ss")), 25*time.Millisecond)
 	cfg := filepath.Join(dir, "slow_config")
 	config := fmt.Sprintf("Host slow\n  HostName 127.0.0.1\n  Port %d\n  User pfwd\n  IdentityFile %s\n  IdentitiesOnly yes\n  IdentityAgent none\n  UserKnownHostsFile %s\n  StrictHostKeyChecking accept-new\n",

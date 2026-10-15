@@ -78,7 +78,7 @@ Every setting is optional. ` + "`pfwd config edit`" + ` creates the file with ev
 			table = t
 			fmt.Fprintf(&b, "\n## [%s]\n\n| Setting | Type | Default | What it does |\n| --- | --- | --- | --- |\n", t)
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | `%s` | %s |\n", key, s.Type, s.Default, sentence(s.Doc))
+		fmt.Fprintf(&b, "| `%s` | %s | `%s` | %s |\n", key, s.Type, tableCell(s.Default), tableCell(sentence(s.Doc)))
 	}
 	b.WriteString(`
 ## [labels]
@@ -110,6 +110,11 @@ auto_ports = [8888, 6006]
 ` + "```" + `
 `)
 	return b.String()
+}
+
+// tableCell escapes text for a Markdown table cell.
+func tableCell(text string) string {
+	return strings.ReplaceAll(text, "|", `\|`)
 }
 
 // sentence starts doc with a capital letter.
