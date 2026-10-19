@@ -23,7 +23,7 @@ func TestKindRows(t *testing.T) {
 	m := connectedWith(newModel(newFakeEngine()), rp(5173, "node"))
 	m = apply(m, engine.ForwardChanged{Forward: remoteFwd}, engine.ForwardChanged{Forward: socksFwd})
 	v := view(m)
-	for _, want := range []string{"rev", ":9000", "localhost:3000", "socks", "localhost:1080", "SOCKS"} {
+	for _, want := range []string{":9000   reverse", "●──", "──○ localhost:3000", "any     SOCKS", "localhost:1080"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view lacks %q:\n%s", want, v)
 		}

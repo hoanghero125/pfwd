@@ -1,22 +1,22 @@
 <script lang="ts">
-  import { exposed, formatRate, localAddr, pauseText, portLabel, portTarget, target } from "../lib/format";
+  import { exposed, localAddr, portLabel, portTarget, remoteAddr, target } from "../lib/format";
   import { forwardsOf } from "../lib/reduce";
   import { app } from "../lib/store.svelte";
   import type { Forward, Port } from "../lib/types";
   import Details from "./Details.svelte";
   import ForwardDialog from "./ForwardDialog.svelte";
   import LabelDialog from "./LabelDialog.svelte";
-  import Icon from "./Icon.svelte";
-  import Sparkline from "./Sparkline.svelte";
-  import State from "./State.svelte";
+  import Tunnel from "./Tunnel.svelte";
 
-  let { host }: { host: string } = $props();
+  // The ports view: a tunnel for each forward, from the server's port to
+  // this computer, then the ports the server listens on that aren't
+  // forwarded. filter narrows both.
+  let { host, filter = "" }: { host: string; filter?: string } = $props();
 
   type Row =
     | { key: string; kind: "forward"; f: Forward; port?: Port }
     | { key: string; kind: "detected"; port: Port };
 
-  let filter = $state("");
   let showHidden = $state(false);
   // The cursor: the row's key, and its port and place, so it stays on the
   // port when the row moves between the groups (as forwarding does), and
@@ -82,7 +82,12 @@
   function select(r: Row) {
     sel = { key: r.key, port: portOf(r), index: Math.max(0, rows.indexOf(r)) };
   }
-  const detailed = $derived(details ? app.model.forwards[details] : undefined);
+  // openDetails shows or hides forward f's details under its row; focus
+  // stays on the row's "More actions" button.
+  function openDetails(f: Forward, key: string) {
+    details = details === f.id ? "" : f.id;
+    back = `more-${key}`;
+  }
 
   // Rows that appear after the table first drew fade in.
   const born = new Map<string, number>();
@@ -90,20 +95,6 @@
   function isNew(key: string): boolean {
     if (!born.has(key)) born.set(key, Date.now());
     return (born.get(key) ?? 0) - mountedAt > 1000;
-  }
-
-  function traffic(f: Forward): string {
-    switch (f.state) {
-      case "paused":
-        return pauseText(f.pause);
-      case "failed":
-        return f.error || "failed";
-      case "starting":
-        return "starting";
-    }
-    const r = app.model.rates[f.id];
-    if (!r) return "↓0 ↑0";
-    return `↓${formatRate(r.in)}/s ↑${formatRate(r.out)}/s`;
   }
 
   function forwardPort(p: Port) {
@@ -138,7 +129,13 @@
       e.preventDefault();
       return;
     }
-    if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input, textarea, select, dialog, .menu-list") || detailed) return;
+    if (e.key === "Escape" && details && !document.querySelector("dialog[open]")) {
+      details = "";
+      document.getElementById(back)?.focus();
+      e.preventDefault();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input, textarea, select, dialog, .menu-list")) return;
     const r = current;
     switch (e.key) {
       case "j":
@@ -193,76 +190,59 @@
 
 <svelte:window {onkeydown} onclick={closeMenu} />
 
-<div class="toolbar">
-  <label class="search">
-    <Icon name="search" />
-    <input type="search" placeholder="Filter by port, process or label" aria-label="Filter ports" data-filter bind:value={filter} />
-    <kbd aria-hidden="true">/</kbd>
-  </label>
-</div>
-
 {#snippet forwardRow(r: Extract<Row, { kind: "forward" }>)}
   {@const f = r.f}
   {@const t = target(f)}
-  {@const rate = app.model.rates[f.id]}
-  {@const live = f.state === "active" && !!rate && rate.in + rate.out > 0}
+  {@const label = f.label || r.port?.label || ""}
+  {@const keep = f.config ? "config" : f.pinned ? "pinned" : ""}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (j/k select rows from the keyboard) -->
   <div
     id="row-{r.key}"
     class="row"
     class:new={isNew(r.key)}
+    class:open={details === f.id}
     role="listitem"
     aria-current={current?.key === r.key ? "true" : undefined}
-    onclick={() => select(r)}
+    onclick={(e) => {
+      select(r);
+      // A click on the row itself, not its buttons or details, opens them.
+      if (!(e.target as HTMLElement).closest("button, a, .expand")) openDetails(f, r.key);
+    }}
     onfocusin={() => select(r)}
   >
-    <State state={f.state} />
-    <span class="patch">
-      <span class="jack">{f.remote_host && !local(f.remote_host) ? `${f.remote_host}:${f.remote}` : `:${f.remote}`}</span>
-      <span class="cable g-{f.state} {f.state}" class:live aria-hidden="true"></span>
-      <span class="jack local">{localAddr(f)}</span>
-    </span>
-    <span class="what">
-      <span class="proc" class:muted={!r.port?.process}>{r.port?.process || "unknown process"}</span>
-      <span class="label">
-        {#if f.label || r.port?.label}<span>{f.label || r.port?.label}</span>{/if}
-        {#if f.pinned}<span class="tag"><Icon name="pin" size={12} /> pinned</span>{/if}
-        {#if f.auto}<span class="tag">auto</span>{/if}
-        {#if exposed(f)}<span class="tag lan" title="Reachable from your network"><Icon name="lan" size={12} /> LAN</span>{/if}
-      </span>
-    </span>
-    <span class="traffic" title={f.state === "failed" ? f.error : undefined}>
-      {#if f.state === "active"}
-        <Sparkline values={rate?.history ?? []} />
-        <span class="rate"><b>↓{formatRate(rate?.in ?? 0)}/s</b> ↑{formatRate(rate?.out ?? 0)}/s</span>
-      {:else}
-        <span class="rate">{traffic(f)}</span>
-      {/if}
-    </span>
+    <span class="port">{remoteAddr(f)}</span>
+    <span class="proc">{#if label}<span class="label">{label}</span>{" "}{/if}{r.port?.process || (label ? "" : "—")}</span>
+    <Tunnel {f} />
+    <span class="addr-cell"
+      ><span class="addr" class:on={f.state === "active"}>{localAddr(f)}</span>{#if keep}<span class="tags">{` ${keep}`}</span>{/if}{#if exposed(f)}<span class="tags">{" "}<span class="lan" title="Reachable from your network">LAN</span></span>{/if}</span
+    >
     <span class="acts">
       {#if (f.state === "active" || f.state === "paused") && t.web}
-        <button class="btn ghost icon-only wide" aria-label="Open" title="Open {t.text}" onclick={() => open(f)}><Icon name="open" /></button>
+        <button class="link go" aria-label="Open" title="Open {t.text}" onclick={() => open(f)}>open ↗</button>
       {/if}
       {#if f.state === "active" || f.state === "paused"}
-        <button class="btn ghost icon-only wide" aria-label={t.web ? "Copy URL" : "Copy address"} title="Copy {t.text}" onclick={() => app.copy(t.text)}><Icon name="copy" /></button>
+        <button class="link quiet" aria-label={t.web ? "Copy URL" : "Copy address"} title="Copy {t.text}" onclick={() => app.copy(t.text)}>copy</button>
       {/if}
       <span class="menu">
-        <button id="more-{r.key}" class="btn ghost icon-only" aria-label="More actions for :{f.remote}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}><Icon name="more" size={18} /></button>
+        <button id="more-{r.key}" class="link" aria-label="More actions for :{f.remote}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
         {#if menu === r.key}
           <span class="menu-list" role="menu">
-            <button role="menuitem" onclick={() => ((details = f.id), (back = `more-${r.key}`), (menu = ""))}><Icon name="info" /> Details</button>
-            {#if t.web}<button role="menuitem" onclick={() => (open(f), (menu = ""))}><Icon name="open" /> Open in the browser</button>{/if}
-            <button role="menuitem" onclick={() => (app.copy(t.text), (menu = ""))}><Icon name="copy" /> {t.web ? "Copy URL" : "Copy address"}</button>
+            <button role="menuitem" onclick={() => (openDetails(f, r.key), (menu = ""))}>{details === f.id ? "Hide details" : "Details"}</button>
+            {#if t.web}<button role="menuitem" onclick={() => (open(f), (menu = ""))}>Open in the browser</button>{/if}
+            <button role="menuitem" onclick={() => (app.copy(t.text), (menu = ""))}>{t.web ? "Copy URL" : "Copy address"}</button>
             {#if !f.config}
-              <button role="menuitem" onclick={() => (app.pin(f, !f.pinned), (menu = ""))}><Icon name="pin" /> {f.pinned ? "Unpin" : "Pin"}</button>
-              <button role="menuitem" onclick={() => ((labeling = f), (back = `more-${r.key}`), (menu = ""))}><Icon name="tag" /> Label…</button>
+              <button role="menuitem" onclick={() => (app.pin(f, !f.pinned), (menu = ""))}>{f.pinned ? "Unpin" : "Pin"}</button>
+              <button role="menuitem" onclick={() => ((labeling = f), (back = `more-${r.key}`), (menu = ""))}>Label…</button>
             {/if}
             <hr />
-            <button role="menuitem" class="danger" onclick={() => (app.stop(f), (menu = ""))}><Icon name="close" /> Stop</button>
+            <button role="menuitem" class="danger" onclick={() => (app.stop(f), (menu = ""))}>Stop</button>
           </span>
         {/if}
       </span>
     </span>
+    {#if details === f.id}
+      <Details {f} onclose={() => ((details = ""), document.getElementById(back)?.focus())} onlabel={() => (labeling = f)} />
+    {/if}
   </div>
 {/snippet}
 
@@ -272,29 +252,26 @@
   <div
     id="row-{r.key}"
     class="row detected"
+    class:ignored={p.ignored}
     class:new={isNew(r.key)}
     role="listitem"
     aria-current={current?.key === r.key ? "true" : undefined}
     onclick={() => select(r)}
     onfocusin={() => select(r)}
   >
-    <span class="st muted"><span aria-hidden="true">—</span><span class="visually-hidden">not forwarded</span></span>
-    <span class="patch"><span class="jack">{portLabel(p.port, p.addrs)}</span></span>
-    <span class="what">
-      <span class="proc" class:muted={!p.process}>{p.process || "unknown process"}</span>
-      <span class="label">
-        {#if p.label}<span>{p.label}</span>{/if}
-        {#if p.ignored}<span class="tag">hidden</span>{/if}
-      </span>
+    <span class="port">{portLabel(p.port, p.addrs)}</span>
+    <span class="proc">{#if p.label}<span class="label">{p.label}</span>{" "}{/if}{p.process || (p.label ? "" : "—")}</span>
+    <span class="stub">
+      <span class="open-end" aria-hidden="true"></span><span class="dash" aria-hidden="true"></span>
+      <button class="link go" onclick={() => forwardPort(p)}>forward</button>
+      {#if p.ignored}<span class="muted">hidden</span>{/if}
     </span>
-    <span class="traffic"></span>
     <span class="acts">
-      <button class="btn soft small" onclick={() => forwardPort(p)}>Forward <Icon name="arrow" size={14} /></button>
       <span class="menu">
-        <button id="more-{r.key}" class="btn ghost icon-only" aria-label="More actions for :{p.port}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}><Icon name="more" size={18} /></button>
+        <button id="more-{r.key}" class="link" aria-label="More actions for :{p.port}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
         {#if menu === r.key}
           <span class="menu-list" role="menu">
-            <button role="menuitem" onclick={() => ((custom = p), (back = `more-${r.key}`), (menu = ""))}><Icon name="arrow" /> Forward to another local port…</button>
+            <button role="menuitem" onclick={() => ((custom = p), (back = `more-${r.key}`), (menu = ""))}>Forward to another local port…</button>
           </span>
         {/if}
       </span>
@@ -309,44 +286,48 @@
 {:else}
   {#if info?.error && connected}
     <div class="notice warn">
-      <Icon name="warn" size={18} />
-      <span class="grow">Detection unavailable: {info.error}. You can still add forwards with New forward; <code>pfwd doctor {host}</code> says more.</span>
+      <span class="mark" aria-hidden="true">◌</span>
+      <span class="grow">Detection unavailable: {info.error}. You can still add forwards with new forward; <code>pfwd doctor {host}</code> says more.</span>
     </div>
   {/if}
 
-  <h2 class="group">Forwarded <span class="n">{forwarded.length}</span></h2>
-  {#if forwarded.length}
-    <div class="rows" role="list" aria-label="Forwarded ports">
-      {#each forwarded as r (r.key)}
-        {#if r.kind === "forward"}{@render forwardRow(r)}{/if}
-      {/each}
+  <section class="stage" aria-labelledby="forwarded-title">
+    <h2 id="forwarded-title" class="visually-hidden">Forwarded {forwarded.length}</h2>
+    <div class="ends" aria-hidden="true">
+      <span class="from">{host}</span>
+      <span class="mid"></span>
+      <span class="to">this computer</span>
     </div>
-  {:else}
-    <p class="empty">{filter ? "No forward matches the filter." : "Nothing forwarded yet. Forward a detected port below, or add one with New forward."}</p>
-  {/if}
+    {#if forwarded.length}
+      <div class="rows" role="list" aria-label="Forwarded ports">
+        {#each forwarded as r (r.key)}
+          {#if r.kind === "forward"}{@render forwardRow(r)}{/if}
+        {/each}
+      </div>
+    {:else}
+      <p class="empty">{filter ? "No forward matches the filter." : "Nothing forwarded yet. Forward a port from the list below, or add one with new forward."}</p>
+    {/if}
 
-  <h2 class="group">Detected, not forwarded <span class="n">{detected.length}</span></h2>
-  {#if detected.length}
-    <div class="rows" role="list" aria-label="Detected ports">
-      {#each detected as r (r.key)}
-        {#if r.kind === "detected"}{@render detectedRow(r)}{/if}
-      {/each}
-    </div>
-  {:else}
-    <p class="empty">
-      {#if filter}No port matches the filter.{:else if connected && info}No other listening ports on {host}. Start a server there and it shows up here.{:else}Looking for listening ports…{/if}
-    </p>
-  {/if}
-  {#if hiddenCount}
-    <p class="more">
-      <button class="btn ghost small" onclick={() => (showHidden = !showHidden)}>{showHidden ? "Hide" : "Show"} {hiddenCount} hidden {hiddenCount === 1 ? "port" : "ports"}</button>
-    </p>
-  {/if}
+    <h2 class="divider">on {host}, not forwarded <span class="n">{detected.length}</span></h2>
+    {#if detected.length}
+      <div class="rows" role="list" aria-label="Detected ports">
+        {#each detected as r (r.key)}
+          {#if r.kind === "detected"}{@render detectedRow(r)}{/if}
+        {/each}
+      </div>
+    {:else}
+      <p class="empty">
+        {#if filter}No port matches the filter.{:else if connected && info}No other listening ports on {host}. Start a server there and it shows up here.{:else}Looking for listening ports…{/if}
+      </p>
+    {/if}
+    {#if hiddenCount}
+      <p class="more">
+        <button class="link" onclick={() => (showHidden = !showHidden)}>{showHidden ? "Hide" : "Show"} {hiddenCount} hidden {hiddenCount === 1 ? "port" : "ports"}</button>
+      </p>
+    {/if}
+  </section>
 {/if}
 
-{#if detailed}
-  <Details f={detailed} onclose={() => (details = "")} returnTo={back} />
-{/if}
 {#if custom}
   <ForwardDialog {host} port={custom} onclose={() => (custom = null)} returnTo={back} />
 {/if}

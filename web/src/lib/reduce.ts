@@ -18,13 +18,19 @@ export interface LogLine {
 
 // Rate is one forward's traffic: bytes per second now, and one point a
 // second for the last five minutes.
+// Sample is a second's traffic, in bytes per second each way.
+export interface Sample {
+  in: number;
+  out: number;
+}
+
 export interface Rate {
   in: number;
   out: number;
   lastIn: number;
   lastOut: number;
   lastAt: number;
-  history: number[];
+  history: Sample[];
 }
 
 export interface Model {
@@ -225,8 +231,24 @@ function rate(m: Model, s: Stat, now: number) {
   r.lastIn = s.bytes_in;
   r.lastOut = s.bytes_out;
   r.lastAt = now;
-  r.history.push(r.in + r.out);
+  r.history.push({ in: r.in, out: r.out });
   if (r.history.length > historyPoints) r.history.splice(0, r.history.length - historyPoints);
+}
+
+// trafficOf is host's traffic, a sample a second, oldest first: its
+// forwards' rates added up, lined up at the newest second.
+export function trafficOf(m: Model, host: string): Sample[] {
+  const all = forwardsOf(m, host).map((f) => m.rates[f.id]?.history ?? []);
+  const n = Math.max(0, ...all.map((h) => h.length));
+  const sum = Array.from({ length: n }, (): Sample => ({ in: 0, out: 0 }));
+  for (const h of all) {
+    h.forEach((s, i) => {
+      const t = sum[n - h.length + i];
+      t.in += s.in;
+      t.out += s.out;
+    });
+  }
+  return sum;
 }
 
 // forwardsOf returns host's forwards of kind, by remote port.

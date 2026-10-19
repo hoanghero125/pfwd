@@ -22,9 +22,9 @@ async function axe(page: Page, what: string) {
 
 test("the ports view shows forwarded and detected ports", async ({ page }) => {
   await open(page);
-  await expect(page.getByRole("heading", { name: "devbox" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Forwarded 3" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Detected, not forwarded 2" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "devbox" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Forwarded 3" })).toBeAttached();
+  await expect(page.getByRole("heading", { name: "on devbox, not forwarded 2" })).toBeVisible();
   const forwarded = page.getByRole("list", { name: "Forwarded ports" });
   await expect(forwarded.getByRole("listitem")).toHaveCount(3);
   await expect(forwarded.getByText("localhost:15432")).toBeVisible();
@@ -61,19 +61,42 @@ test("stop, pin and label from the row menu", async ({ page }) => {
   await expect.poll(() => d.last("DELETE", "/api/forwards/1")).toBeTruthy();
 });
 
-test("the details drawer", async ({ page }) => {
+test("the details under a row", async ({ page }) => {
   const d = await open(page);
   for (let i = 1; i <= 5; i++) d.push("stats", { forwards: [{ id: "1", conns: 2, bytes_in: 3_400_000 + i * 40_000, bytes_out: 210_000 + i * 1000 }] });
   const row = page.getByRole("list", { name: "Forwarded ports" }).getByRole("listitem").filter({ hasText: "localhost:5173" });
   await row.getByRole("button", { name: "More actions for :5173" }).click();
   await page.getByRole("menuitem", { name: "Details" }).click();
-  const drawer = page.getByRole("dialog", { name: ":5173 on devbox" });
-  await expect(drawer.locator(".stats > div").filter({ hasText: "Connections" })).toContainText("2");
-  await expect(drawer.getByRole("img", { name: /Traffic rate/ })).toBeVisible();
-  await expect(drawer.getByRole("listitem").filter({ hasText: /\d active$/ })).toBeVisible(); // the history from the snapshot
+  const details = page.getByRole("region", { name: "Details of :5173" });
+  await expect(details.locator('dt:text-is("connections") + dd')).toHaveText("2");
+  await expect(details.getByRole("img", { name: /Traffic of :5173 rate/ })).toBeVisible();
+  await expect(details.getByRole("listitem").filter({ hasText: /\d active$/ })).toBeVisible(); // the history from the snapshot
   await page.keyboard.press("Escape");
-  await expect(drawer).toHaveCount(0);
+  await expect(details).toHaveCount(0);
   await expect(row.getByRole("button", { name: "More actions for :5173" })).toBeFocused();
+  // A click on the row opens them too, and another closes them.
+  await row.locator(".port").click();
+  await expect(details).toBeVisible();
+  await row.locator(".port").click();
+  await expect(details).toHaveCount(0);
+});
+
+test("the host's traffic, above its tunnels", async ({ page }) => {
+  await page.clock.install();
+  const d = await open(page);
+  // A stopped clock: each tick is exactly a second apart.
+  await page.clock.pauseAt(Date.now() + 60_000);
+  for (let i = 1; i <= 4; i++) {
+    // :5173's connections count up, so the page shows when it has taken
+    // each tick (the paused Postgres forward has 2).
+    d.push("stats", { forwards: [{ id: "1", conns: i, bytes_in: 3_400_000 + i * 1_048_576, bytes_out: 210_000 + i * 2048 }] });
+    await expect(page.locator(".hero .conns dd")).toHaveText(`${i + 2}`);
+    await page.clock.runFor(1000);
+  }
+  const hero = page.getByRole("region", { name: "Traffic on devbox" });
+  await expect(hero.locator(".fig.down dd")).toHaveText("1.0M/s");
+  await expect(hero.locator(".fig.up dd")).toHaveText("2.0K/s");
+  await expect(hero.getByRole("img", { name: /Traffic on devbox rate over the last 3 seconds: download now 1\.0M\/s/ })).toBeVisible();
 });
 
 test("host key and password prompts are answered in the page", async ({ page }) => {
@@ -324,7 +347,7 @@ async function traffic(page: Page, d: Daemon) {
     total["2"][1] += i > 24 ? 12_000 : 500;
     const jupyter = i % 2 ? 1 : 2;
     d.push("stats", { forwards: Object.entries(total).map(([id, [bytes_in, bytes_out]]) => ({ id, conns: id === "1" ? 2 : jupyter, bytes_in, bytes_out })) });
-    await expect(page.locator(".meta")).toContainText(`${6 + jupyter} open connections`);
+    await expect(page.locator(".hero .conns dd")).toHaveText(`${6 + jupyter}`);
     await page.clock.runFor(1000);
   }
 }

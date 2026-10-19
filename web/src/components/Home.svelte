@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, viewHash } from "../lib/store.svelte";
   import ConnectDialog from "./ConnectDialog.svelte";
-  import Icon from "./Icon.svelte";
+  import Logo from "./Logo.svelte";
   import State from "./State.svelte";
 
   let connecting = $state(false);
@@ -9,7 +9,7 @@
 </script>
 
 <div class="welcome">
-  <span class="badge"><Icon name="brand" size={24} /></span>
+  <Logo size={72} />
   <h1>{hosts.length ? "Pick a host" : "Connect a host to start"}</h1>
   {#if hosts.length}
     <p>Choose one to see its ports, or connect another from your ssh config.</p>
@@ -26,7 +26,7 @@
   {:else if app.link === "up"}
     <p>pfwd isn't connected to any host yet. Connect one and its listening ports show up here, ready to forward.</p>
   {/if}
-  <button class="btn primary" onclick={() => (connecting = true)}><Icon name="plus" /> Connect a host</button>
+  <button class="btn primary" onclick={() => (connecting = true)}>+ connect a host</button>
 </div>
 
 {#if connecting}

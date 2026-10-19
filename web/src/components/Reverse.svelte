@@ -2,10 +2,10 @@
   import { localAddr } from "../lib/format";
   import { forwardsOf } from "../lib/reduce";
   import { app } from "../lib/store.svelte";
-  import Icon from "./Icon.svelte";
-  import State from "./State.svelte";
+  import Tunnel from "./Tunnel.svelte";
 
-  // Reverse forwards: a port on this machine, exposed on the server.
+  // Reverse forwards: a port on this machine, exposed on the server. Their
+  // tunnels run from this computer to the server.
   let { host }: { host: string } = $props();
   let local = $state("");
   let remote = $state("");
@@ -41,29 +41,29 @@
     <label for="rv-remote">Server port</label>
     <input id="rv-remote" type="text" inputmode="numeric" bind:value={remote} aria-invalid={remote !== "" && !port(remote)} placeholder="same" />
   </div>
-  <button type="submit" class="btn primary" disabled={busy || !connected || !port(local)}><Icon name="reverse" /> Expose</button>
+  <button type="submit" class="btn primary" disabled={busy || !connected || !port(local)}>expose</button>
 </form>
 
-<h2 class="group">Exposed on {host} <span class="n">{reverse.length}</span></h2>
-{#if reverse.length}
-<div class="rows" role="list" aria-label="Reverse forwards">
-  {#each reverse as f (f.id)}
-    <div class="row" role="listitem">
-      <State state={f.state} />
-      <span class="patch">
-        <span class="jack local">{localAddr(f)}</span>
-        <span class="cable g-{f.state} {f.state}" aria-hidden="true"></span>
-        <span class="jack">{host}:{f.remote}</span>
-      </span>
-      <span class="what">
-        <span class="proc" class:muted={!f.label}>{f.label || "reverse forward"}</span>
-        {#if f.state === "paused" ? f.pause : f.error}<span class="label">{f.state === "paused" ? f.pause : f.error}</span>{/if}
-      </span>
-      <span class="traffic"><span class="rate">{f.conns ? `${f.conns} open` : ""}</span></span>
-      <span class="acts"><button class="btn ghost small danger" onclick={() => app.stop(f)}><Icon name="close" size={14} /> Stop</button></span>
+<section class="stage" aria-labelledby="reverse-title">
+  <h2 id="reverse-title" class="group">exposed on {host} <span class="n">{reverse.length}</span></h2>
+  <div class="ends" aria-hidden="true">
+    <span class="from">{host}</span>
+    <span class="mid"></span>
+    <span class="to">this computer</span>
+  </div>
+  {#if reverse.length}
+    <div class="rows" role="list" aria-label="Reverse forwards">
+      {#each reverse as f (f.id)}
+        <div class="row" role="listitem">
+          <span class="port">:{f.remote}</span>
+          <span class="proc">{#if f.label}<span class="label">{f.label}</span>{:else}reverse forward{/if}</span>
+          <Tunnel {f} />
+          <span class="addr-cell"><span class="addr" class:on={f.state === "active"}>{localAddr(f)}</span></span>
+          <span class="acts"><button class="link danger" onclick={() => app.stop(f)}>stop</button></span>
+        </div>
+      {/each}
     </div>
-  {/each}
-</div>
-{:else}
-  <p class="empty">Nothing exposed yet.</p>
-{/if}
+  {:else}
+    <p class="empty">Nothing exposed yet.</p>
+  {/if}
+</section>

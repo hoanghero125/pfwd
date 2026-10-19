@@ -2,8 +2,7 @@
   import { localAddr } from "../lib/format";
   import { forwardsOf } from "../lib/reduce";
   import { app } from "../lib/store.svelte";
-  import Icon from "./Icon.svelte";
-  import State from "./State.svelte";
+  import Tunnel from "./Tunnel.svelte";
 
   // The host's SOCKS proxy: apps that speak SOCKS5 reach anything the
   // server can.
@@ -26,22 +25,34 @@
 
 <p class="lead">A SOCKS5 proxy on this machine sends each connection through {host}. Point a browser or <code>curl --socks5-hostname</code> at it.</p>
 
-{#each proxies as f (f.id)}
-  <div class="proxy">
-    <span class="badge"><Icon name="socks" size={20} /></span>
-    <div class="grow">
-      <div class="addr">socks5h://{localAddr(f)}</div>
-      <div class="sub"><State state={f.state} />{#if f.error}<span class="muted">{f.error}</span>{:else if f.conns}<span class="muted">{f.conns} open {f.conns === 1 ? "connection" : "connections"}</span>{/if}</div>
+{#if proxies.length}
+  <section class="stage" aria-label="SOCKS proxy">
+    <div class="ends" aria-hidden="true">
+      <span class="from">{host}</span>
+      <span class="mid"></span>
+      <span class="to">this computer</span>
     </div>
-    <button class="btn" onclick={() => app.copy(`socks5h://${localAddr(f)}`)}><Icon name="copy" /> Copy address</button>
-    <button class="btn ghost danger" onclick={() => app.stop(f)}><Icon name="close" /> Stop</button>
-  </div>
+    <div class="rows" role="list" aria-label="SOCKS proxies">
+      {#each proxies as f (f.id)}
+        <div class="row proxy" role="listitem">
+          <span class="port">any</span>
+          <span class="proc">SOCKS proxy</span>
+          <Tunnel {f} />
+          <span class="addr-cell"><span class="addr" class:on={f.state === "active"}>socks5h://{localAddr(f)}</span></span>
+          <span class="acts">
+            <button class="link go" onclick={() => app.copy(`socks5h://${localAddr(f)}`)}>copy address</button>
+            <button class="link danger" onclick={() => app.stop(f)}>stop</button>
+          </span>
+        </div>
+      {/each}
+    </div>
+  </section>
 {:else}
   <form class="inline-form" onsubmit={start}>
     <div class="field">
       <label for="socks-port">Local port</label>
       <input id="socks-port" type="text" inputmode="numeric" bind:value={port} aria-invalid={!valid} />
     </div>
-    <button type="submit" class="btn primary" disabled={busy || !connected || !valid}><Icon name="socks" /> Start the proxy</button>
+    <button type="submit" class="btn primary" disabled={busy || !connected || !valid}>start the proxy</button>
   </form>
-{/each}
+{/if}

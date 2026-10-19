@@ -2,7 +2,6 @@
   import { app } from "../lib/store.svelte";
   import type { Prompt } from "../lib/types";
   import Dialog from "./Dialog.svelte";
-  import Icon from "./Icon.svelte";
 
   // The daemon's questions, one at a time: a new host key, or a
   // passphrase, password or code.
@@ -33,7 +32,7 @@
   }
 </script>
 
-<Dialog {title} icon={prompt.kind === "host_key" ? "key" : "lock"} onclose={() => answer(prompt.kind === "host_key" ? { accept: false } : { cancel: true })}>
+<Dialog {title} onclose={() => answer(prompt.kind === "host_key" ? { accept: false } : { cancel: true })}>
   <form onsubmit={submit}>
     {#if prompt.kind === "host_key"}
       <p class="muted">pfwd has never connected to {prompt.host}. Compare this fingerprint with the server's before you trust it.</p>
@@ -44,7 +43,7 @@
         <button type="submit" class="btn primary">Trust and connect</button>
       </div>
     {:else}
-      {#if prompt.retry}<p class="problems-line" role="alert"><Icon name="error" /> That didn't work. Try again.</p>{/if}
+      {#if prompt.retry}<p class="problems-line" role="alert"><span aria-hidden="true">✗</span> That didn't work. Try again.</p>{/if}
       {#if prompt.instruction}<p class="muted">{prompt.instruction}</p>{/if}
       <div class="field">
         <label for="secret">{prompt.kind === "code" ? prompt.prompt || "Code" : prompt.kind === "passphrase" ? "Passphrase" : "Password"}</label>

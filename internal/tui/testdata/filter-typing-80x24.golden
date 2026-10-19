@@ -1,7 +1,7 @@
   pfwd  devbox ● connected                                   auto: on   ? help
 
-  state   remote   local           process      label       conn traffic
-▌ ● fwd   :8888  → localhost:8888  jupyter-lab  Jupyter pin 0    ↓0 ↑0
+  devbox                                                this computer
+▌ :8888   Jupyter   ○───────────── idle ──────────────● localhost:8888 http pin
 
 
 

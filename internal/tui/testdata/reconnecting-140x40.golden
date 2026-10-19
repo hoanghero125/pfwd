@@ -1,9 +1,9 @@
   pfwd  devbox ◐ reconnecting in 4s                                                                                      auto: on   ? help
 
-  state   remote   local           process                                 label             conn traffic
-▌ ◌ pause :5173  → localhost:5173  disconnected                            Vite http         2    —
-  ◌ pause :8000  → localhost:8000  port closed                                               0    —
-  ◌ pause :8888  → localhost:8888  disconnected                            Jupyter http pin  0    —
+  devbox                                                             this computer
+▌ :5173   Vite      ○╌╌╌╌╌╌╌╌╌╌╌╌ paused, disconnected ╌╌╌╌╌╌╌╌╌╌╌╌● localhost:5173 http
+  :8000   —         ○╌╌╌╌╌╌╌╌╌╌╌╌ paused, port closed ╌╌╌╌╌╌╌╌╌╌╌╌╌● localhost:8000
+  :8888   Jupyter   ○╌╌╌╌╌╌╌╌╌╌╌╌ paused, disconnected ╌╌╌╌╌╌╌╌╌╌╌╌● localhost:8888 http pin
 
 
 

@@ -1,16 +1,17 @@
 <script lang="ts">
   import { formatRate } from "../lib/format";
-  import { forwardsOf } from "../lib/reduce";
+  import { forwardsOf, trafficOf } from "../lib/reduce";
   import { app, viewHash } from "../lib/store.svelte";
   import ForwardDialog from "./ForwardDialog.svelte";
-  import Icon from "./Icon.svelte";
   import PortsTable from "./PortsTable.svelte";
+  import RateChart from "./RateChart.svelte";
   import Reverse from "./Reverse.svelte";
   import Socks from "./Socks.svelte";
   import State from "./State.svelte";
 
   let { host, tab }: { host: string; tab: "ports" | "reverse" | "socks" } = $props();
   let adding = $state(false);
+  let filter = $state("");
 
   const session = $derived(app.model.sessions[host]);
   const info = $derived(app.model.ports[host]);
@@ -18,6 +19,14 @@
   const retryIn = $derived(session?.retry_at ? Math.max(0, Math.ceil((Date.parse(session.retry_at) - app.now) / 1000)) : 0);
   const forwards = $derived(forwardsOf(app.model, host));
   const conns = $derived(forwards.reduce((n, f) => n + (f.conns || 0), 0));
+  // What the tunnels are doing: "2 working, 1 paused".
+  const doing = $derived(
+    (["active", "paused", "failed", "starting"] as const)
+      .map((st) => [forwards.filter((f) => f.state === st).length, st === "active" ? "working" : st] as const)
+      .filter(([n]) => n)
+      .map(([n, what]) => `${n} ${what}`)
+      .join(", "),
+  );
   const rate = $derived(
     forwards.reduce(
       (t, f) => {
@@ -42,59 +51,79 @@
 
 <div class="head">
   <h1 class="host">{host}</h1>
-  {#if session}
-    <State state={session.state} chip word={session.state === "reconnecting" && retryIn ? `reconnecting in ${retryIn} s` : session.state} />
-  {:else}
-    <span class="chip g-closed">not connected</span>
-  {/if}
   <div class="tools">
     {#if session && session.state !== "closed" && session.state !== "failed"}
-      <button class="switch" role="switch" aria-checked={auto} onclick={() => app.setAuto(host, !auto)}>
-        <span class="track" aria-hidden="true"></span> Auto-forward
-      </button>
-      <button class="btn ghost" onclick={() => app.disconnect(host)}><Icon name="disconnect" /> Disconnect</button>
-      <button class="btn primary" onclick={() => (adding = true)}><Icon name="plus" /> New forward</button>
+      <button class="link" role="switch" aria-checked={auto} aria-label="Auto-forward" onclick={() => app.setAuto(host, !auto)}>auto-forward <b class:muted={!auto}>{auto ? "on" : "off"}</b></button>
+      <button class="link go" onclick={() => (adding = true)}>+ new forward</button>
+      <button class="link danger" onclick={() => app.disconnect(host)}>disconnect</button>
     {:else}
-      <button class="btn primary" onclick={() => (session ? app.reconnect(host) : app.connectHost(host))}><Icon name="retry" /> Connect</button>
+      <button class="btn primary" onclick={() => (session ? app.reconnect(host) : app.connectHost(host))}>connect</button>
     {/if}
   </div>
 </div>
 
-{#if session?.state === "connected"}
-  <div class="meta">
-    {#if info?.os}<span><Icon name="terminal" size={14} /> {info.os}{#if info.strategy && info.strategy !== "none"}, ports from <span class="mono">{info.strategy}</span>{/if}</span>{/if}
-    <span><span class="mono">{forwards.length}</span> {forwards.length === 1 ? "forward" : "forwards"}</span>
-    {#if conns}<span><span class="mono">{conns}</span> open {conns === 1 ? "connection" : "connections"}</span>{/if}
-    <span><Icon name="down" size={12} /><span class="mono">{formatRate(rate.in)}/s</span> <Icon name="up" size={12} /><span class="mono">{formatRate(rate.out)}/s</span></span>
-  </div>
+<div class="meta">
+  {#if session}
+    <State state={session.state} word={session.state === "reconnecting" && retryIn ? `reconnecting in ${retryIn} s` : session.state} />
+  {:else}
+    <span>not connected</span>
+  {/if}
+  {#if session?.state === "connected"}
+    {#if info?.os}<span>{info.os.toLowerCase()}</span>{/if}
+    {#if info?.strategy && info.strategy !== "none"}<span>ports from <span class="v">{info.strategy}</span></span>{/if}
+  {/if}
+</div>
+
+{#if session && (session.state === "connected" || forwards.length)}
+  <section class="hero" aria-label="Traffic on {host}">
+    <dl class="figures">
+      <div class="fig down"><dt><span class="key" aria-hidden="true"></span>download</dt><dd>{formatRate(rate.in)}/s</dd></div>
+      <div class="fig up"><dt><span class="key" aria-hidden="true"></span>upload</dt><dd>{formatRate(rate.out)}/s</dd></div>
+      <div class="fig">
+        <dt>tunnels</dt>
+        <dd>{forwards.length} <span class="sub">{doing}</span></dd>
+      </div>
+      <div class="fig conns"><dt>open connections</dt><dd>{conns}</dd></div>
+    </dl>
+    <RateChart series={trafficOf(app.model, host)} height={180} what="Traffic on {host}" />
+  </section>
 {/if}
 
 {#if session?.state === "failed" && session.error}
   <div class="notice" role="alert">
-    <Icon name="error" size={18} />
+    <span class="mark" aria-hidden="true">✗</span>
     <span class="grow">{session.error} <span class="muted"><code>pfwd doctor {host}</code> checks each step.</span></span>
-    <button class="btn small" onclick={() => app.reconnect(host)}><Icon name="retry" size={14} /> Try again</button>
+    <button class="link go" onclick={() => app.reconnect(host)}>try again</button>
   </div>
 {:else if session?.state === "reconnecting"}
   <div class="notice warn">
-    <Icon name="warn" size={18} />
+    <span class="mark" aria-hidden="true">◌</span>
     <span class="grow">{session.error || "The connection was lost."} Forwards stay paused until it is back.</span>
-    <button class="btn small" onclick={() => app.reconnect(host)}><Icon name="retry" size={14} /> Retry now</button>
+    <button class="link go" onclick={() => app.reconnect(host)}>retry now</button>
   </div>
 {/if}
 
-<nav class="tabs" aria-label="Forward types">
-  <a href={viewHash({ kind: "host", host, tab: "ports" })} aria-current={tab === "ports" ? "page" : undefined}>Ports</a>
-  <a href={viewHash({ kind: "host", host, tab: "reverse" })} aria-current={tab === "reverse" ? "page" : undefined}>Reverse</a>
-  <a href={viewHash({ kind: "host", host, tab: "socks" })} aria-current={tab === "socks" ? "page" : undefined}>SOCKS</a>
-</nav>
+<div class="tabsbar">
+  <nav class="tabs" aria-label="Forward types">
+    <a href={viewHash({ kind: "host", host, tab: "ports" })} aria-current={tab === "ports" ? "page" : undefined}>ports</a>
+    <a href={viewHash({ kind: "host", host, tab: "reverse" })} aria-current={tab === "reverse" ? "page" : undefined}>reverse</a>
+    <a href={viewHash({ kind: "host", host, tab: "socks" })} aria-current={tab === "socks" ? "page" : undefined}>socks</a>
+  </nav>
+  <span class="grow"></span>
+  {#if tab === "ports"}
+    <label class="filter">
+      <kbd aria-hidden="true">/</kbd>
+      <input type="search" placeholder="filter by port, process or label" aria-label="Filter ports" data-filter bind:value={filter} />
+    </label>
+  {/if}
+</div>
 
 {#if tab === "reverse"}
   <Reverse {host} />
 {:else if tab === "socks"}
   <Socks {host} />
 {:else}
-  <PortsTable {host} />
+  <PortsTable {host} {filter} />
 {/if}
 
 {#if adding}

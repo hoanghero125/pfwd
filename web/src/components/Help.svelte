@@ -18,7 +18,7 @@
   ];
 </script>
 
-<Dialog title="Keyboard shortcuts" icon="keyboard" {onclose}>
+<Dialog title="Keyboard shortcuts" {onclose}>
   <div class="keys">
     {#each keys as [k, what] (k)}
       <span class="k">{#each k.split(", ") as group, i (group)}{#if i}<span class="muted">or</span>{/if}{#each group.split(" / ") as key, j (key)}{#if j}<span class="muted">/</span>{/if}<kbd>{key}</kbd>{/each}{/each}</span>

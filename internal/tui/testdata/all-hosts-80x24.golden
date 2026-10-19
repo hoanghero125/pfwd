@@ -1,10 +1,10 @@
   pfwd  all hosts  devbox ●  gpu ●                                      ? help
 
-  host    state   remote   local           process             label       conn
-▌ gpu     ● fwd   :8888  → localhost:8888  jupyter-lab                     0
+  host    remote                                                this computer
+▌ gpu     :8888   jupyter-lab  ○──────────── idle ────────────● localhost:8888
 
-  detected, not forwarded
-  devbox  —       :5173                    node
+  not forwarded
+  devbox  :5173   node         ○╌╌╌
 
 
 

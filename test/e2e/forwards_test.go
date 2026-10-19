@@ -78,7 +78,7 @@ func TestE2ESOCKS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start the SOCKS proxy: %v", err)
 	}
-	d.waitFor(t, "socks", 5*time.Second)
+	d.waitFor(t, "SOCKS", 5*time.Second)
 	proxy := &url.URL{Scheme: "socks5", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(int(f.Spec.LocalPort)))}
 	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}}
 	resp, err := client.Get("http://localhost:8130/")
@@ -117,7 +117,7 @@ func TestE2ERemoteForward(t *testing.T) {
 	// pfwd's own listener shows up in the server's ports but is not
 	// offered as a port to forward back.
 	d.runFor(3 * time.Second)
-	if _, rest, ok := strings.Cut(d.view(), "detected, not forwarded"); ok && strings.Contains(rest, ":9100") {
+	if _, rest, ok := strings.Cut(d.view(), "not forwarded"); ok && strings.Contains(rest, ":9100") {
 		t.Errorf("the server's :9100, pfwd's own listener, is listed as a port to forward:\n%s", d.view())
 	}
 }

@@ -26,7 +26,7 @@
   }
 </script>
 
-<Dialog title="Connect a host" icon="brand" {onclose}>
+<Dialog title="Connect a host" {onclose}>
   <form onsubmit={submit}>
     <div class="field">
       <label for="connect-q">Host from your ssh config, or user@host:port</label>

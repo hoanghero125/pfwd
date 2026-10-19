@@ -1,7 +1,7 @@
   pfwd  devbox ● connected                                              ? help
 
-  state   remote   local           process      label       conn traffic
-▌ —       :5173                    node
+  devbox                                                        this computer
+▌ :5173   node      ○╌╌╌
 
 
 

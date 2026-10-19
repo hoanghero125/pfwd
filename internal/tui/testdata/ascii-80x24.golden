@@ -1,13 +1,13 @@
   pfwd  devbox * connected                                   auto: on   ? help
 
-  state   remote    local           process     label       conn traffic
-> * fwd   :5173  -> localhost:5173  node        Vite http   2    v12K/s ^1.0K/s
-  o pause :8000  -> localhost:8000  port closed             0    -
-  * fwd   :8888  -> localhost:8888  jupyter-lab Jupyter pin 0    v0 ^0
+  devbox                                                this computer
+> :5173   Vite        o-=---= v 12K/s  ^ 1.0K/s =---=-* localhost:5173 http
+  :8000   -           o..... paused, port closed .....* localhost:8000
+  :8888   Jupyter     o------------ idle -------------* localhost:8888 http pin
 
-  detected, not forwarded
-  -       :6379                     redis-serv~ Redis
-  -       :9090                     ?           Prometheus
+  on devbox, not forwarded
+  :6379   Redis       o...
+  :9090   Prometheus  o...
 
 
 
