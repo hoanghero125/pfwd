@@ -1,4 +1,9 @@
-# pfwd
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/pfwd-horizontal-dark.svg">
+    <img alt="pfwd" src="assets/logo/pfwd-horizontal.svg" height="64">
+  </picture>
+</h1>
 
 The VS Code Ports panel for any terminal. Agentless, one binary, every OS.
 
