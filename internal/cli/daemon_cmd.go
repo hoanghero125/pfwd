@@ -74,6 +74,10 @@ func daemonRun(cmd *cobra.Command, f *rootFlags) error {
 
 	ctx, stop := interruptible(cmd.Context())
 	defer stop()
+	// The socket closes last: pfwd daemon stop returns when it goes, and by
+	// then the forwards have ended and the state is saved.
+	serveCtx, stopServing := context.WithCancel(ctx)
+	defer stopServing()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -106,7 +110,15 @@ func daemonRun(cmd *cobra.Command, f *rootFlags) error {
 		case <-ctx.Done():
 		}
 	}()
-	serveErr := ipc.NewServer(h, logger).Serve(ctx, ln)
+	served := make(chan error, 1)
+	go func() { served <- ipc.NewServer(h, logger).Serve(serveCtx, ln) }()
+	var serveErr error
+	serving := true
+	select {
+	case <-ctx.Done():
+	case serveErr = <-served:
+		serving = false
+	}
 	cancel()
 	<-ran
 	<-stopper
@@ -115,6 +127,10 @@ func daemonRun(cmd *cobra.Command, f *rootFlags) error {
 	h.webMu.Unlock()
 	if err := eng.Close(); err != nil {
 		logger.Warn("engine shutdown", "err", err)
+	}
+	stopServing()
+	if serving {
+		serveErr = <-served
 	}
 	logger.Info("daemon stopped")
 	return serveErr
