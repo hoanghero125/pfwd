@@ -39,20 +39,21 @@ The first time you connect to a server, pfwd shows its host key fingerprint and 
 ```
   pfwd  devbox ● connected                                   auto: on   ? help
 
-  state   remote   local           process      label       conn traffic
-▌ ● fwd   :5173  → localhost:5173  node         Vite http   2    ↓12K/s ↑1.0K/s
-  ● fwd   :8888  → localhost:8888  jupyter-lab  Jupyter     0    ↓0 ↑0
+  devbox                                                this computer
+▌ :5173   Vite        ○─•───• ↓ 12K/s  ↑ 1.0K/s •───•─● localhost:5173 http
+  :8000   —           ○╌╌╌╌╌ paused, port closed ╌╌╌╌╌● localhost:8000
+  :8888   Jupyter     ○──────────── idle ─────────────● localhost:8888 http pin
 
-  detected, not forwarded
-  —       :6379                    redis-server Redis
-  —       :9090                    ?            Prometheus
+  on devbox, not forwarded
+  :6379   Redis       ○╌╌╌
+  :9090   Prometheus  ○╌╌╌
 
   1 ignored hidden, h shows
-  ✓ Forwarded :5173 to localhost:5173 (auto)
-  enter stop  o open  y copy  a auto  / filter  L log  ? help  q quit
+  ✓ Forwarded :5173 to localhost:5173
+  enter stop  o open  y copy  p pin  a auto  / filter  L log  ? help  q quit
 ```
 
-In a wider terminal, each active forward also gets a sparkline of its last eight seconds of traffic.
+Each forward is a tunnel from the server's port (`○`) to the one on your machine (`●`). A working tunnel is a solid line, and dots move along it while traffic flows. A paused or failed one is a broken line that says why.
 
 | Key | Does |
 | --- | --- |

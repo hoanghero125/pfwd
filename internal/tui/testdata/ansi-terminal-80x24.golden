@@ -1,13 +1,13 @@
   \e[2mpfwd\e[m  \e[1mdevbox\e[m \e[32m●\e[m connected                                   auto: \e[32mon\e[m   \e[36m?\e[m \e[2mhelp\e[m  
                                                                                 
-\e[2m  state   remote   local           process      label       conn traffic\e[m        
-\e[48;5;236m\e[36m▌\e[m\e[48;5;236m \e[32m●\e[m\e[48;5;236m fwd   :5173  \e[2m→\e[m\e[48;5;236m \e[1mlocalhost:5173\e[m\e[48;5;236m  node         Vite \e[2mhttp\e[m\e[48;5;236m   2    ↓12K/s \e[2m↑1.0K/s\e[m\e[48;5;236m \e[m
-  \e[33m◌\e[m pause :8000  \e[2m→\e[m localhost:8000  \e[2mport closed\e[m              0    \e[2m—\e[m              
-  \e[32m●\e[m fwd   :8888  \e[2m→\e[m \e[1mlocalhost:8888\e[m  jupyter-lab  Jupyter \e[2mpin\e[m 0    \e[2m↓0 ↑0\e[m          
+\e[2m  devbox                                                this computer\e[m           
+\e[48;5;236m\e[36m▌\e[m\e[48;5;236m \e[1m:5173   \e[m\e[48;5;236mVite        \e[32m○\e[m\e[48;5;236m\e[32m─•───•\e[m\e[48;5;236m ↓ 12K/s  \e[2m↑ 1.0K/s\e[m\e[48;5;236m \e[32m•───•─\e[m\e[48;5;236m\e[32m●\e[m\e[48;5;236m \e[1mlocalhost:5173\e[m\e[48;5;236m \e[2mhttp\e[m\e[48;5;236m     \e[m
+  \e[1m:8000   \e[m\e[2m—\e[m           \e[33m○\e[m\e[33m╌╌╌╌╌\e[m \e[33mpaused, port closed\e[m \e[33m╌╌╌╌╌\e[m\e[33m●\e[m localhost:8000          
+  \e[1m:8888   \e[mJupyter     \e[32m○\e[m\e[2m────────────\e[m \e[2midle\e[m \e[2m─────────────\e[m\e[32m●\e[m \e[1mlocalhost:8888\e[m \e[2mhttp pin\e[m 
                                                                                 
-  \e[2mdetected, not forwarded\e[m                                                       
-  \e[2m—\e[m       :6379                    redis-server Redis                           
-  \e[2m—\e[m       :9090                    \e[2m?\e[m            Prometheus                      
+  \e[2mon devbox, not forwarded\e[m                                                      
+  \e[1m:6379   \e[mRedis       \e[2m○╌╌╌\e[m                                                      
+  \e[1m:9090   \e[mPrometheus  \e[2m○╌╌╌\e[m                                                      
                                                                                 
                                                                                 
                                                                                 

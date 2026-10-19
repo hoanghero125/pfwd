@@ -136,7 +136,7 @@ func TestHostPicker(t *testing.T) {
 	if !strings.Contains(v, "Connect another host") || !strings.Contains(v, "staging") || !strings.Contains(v, "2h ago") {
 		t.Fatalf("picker:\n%s", v)
 	}
-	if strings.Contains(v, "▶ devbox") || strings.Contains(v, "  devbox  ") {
+	if strings.Contains(v, "▶ devbox") || strings.Contains(v, "│   devbox") {
 		t.Errorf("the picker offers a host that is already open:\n%s", v)
 	}
 	m, _ = press(t, m, "w", "e", "enter")

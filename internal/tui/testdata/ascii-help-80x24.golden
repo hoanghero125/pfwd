@@ -1,13 +1,13 @@
   pfwd  devb+------------------------------------------------------+n   ? help
             | Keys                                                 |
-  state   re|                                                      |ffic
-> * fwd   :5| up down  j k move                                    |K/s ^1.0K/s
-  o pause :8| g G          first, last                             |
-  * fwd   :8| enter  f     forward the port, or stop it            |^0
+  devbox    |                                                      |r
+> :5173   Vi| up down  j k move                                    |73 http
+  :8000   - | g G          first, last                             |00
+  :8888   Ju| enter  f     forward the port, or stop it            |88 http pin
             | F            forward to another local port           |
-  detected, | x            stop the forward                        |
-  -       :6| o            open in the browser                     |
-  -       :9| y            copy the URL                            |
+  on devbox,| x            stop the forward                        |
+  :6379   Re| o            open in the browser                     |
+  :9090   Pr| y            copy the URL                            |
             | p            pin: remember the forward next time     |
             | a            turn auto-forward on or off             |
             | /            filter by port, process or label        |

@@ -50,7 +50,7 @@ func lineWith(t *testing.T, m Model, s string) string {
 	return ""
 }
 
-func TestLabelAndSchemeColumn(t *testing.T) {
+func TestLabelAndScheme(t *testing.T) {
 	e := newFakeEngine()
 	m := connectedWith(newModel(e), withLabel(5173, "node", "Vite"), withLabel(6379, "redis-server", "Redis"))
 	m, _ = press(t, m, "enter")
@@ -58,52 +58,43 @@ func TestLabelAndSchemeColumn(t *testing.T) {
 	fw.Scheme = forward.SchemeHTTPS
 	fw.Spec.Label = "Vite"
 	m = apply(m, engine.ForwardChanged{Forward: fw})
-	if l := lineWith(t, m, ":5173"); !strings.Contains(l, "Vite https") {
+	if l := lineWith(t, m, ":5173"); !strings.Contains(l, "Vite") || strings.Contains(l, "node") || !strings.Contains(l, "localhost:5173 https") {
 		t.Errorf("forward row = %q; want the label and the scheme", l)
 	}
 	if l := lineWith(t, m, ":6379"); !strings.Contains(l, "Redis") {
 		t.Errorf("detected row = %q; want its label", l)
 	}
-	if h := lineWith(t, m, "state"); !strings.Contains(h, "label") {
-		t.Errorf("header = %q; want label", h)
-	}
 }
 
-// TestLongLabelKeepsScheme: a label too long for the column is cut before
-// the scheme, so the scheme always shows.
+// TestLongLabelKeepsScheme: a label too long for its column is cut, and
+// the scheme still shows after the local address.
 func TestLongLabelKeepsScheme(t *testing.T) {
 	e := newFakeEngine()
-	m := connectedWith(newModel(e), withLabel(6006, "tensorboard", "TensorBoard on the GPU node"))
+	m := connectedWith(newModel(e), withLabel(6006, "tensorboard", "TensorBoard for the experiments on the GPU node"))
 	m, _ = press(t, m, "enter")
 	fw := e.Forwards()[0]
 	fw.Scheme = forward.SchemeHTTP
 	m = apply(m, engine.ForwardChanged{Forward: fw})
-	if l := lineWith(t, m, ":6006"); !strings.Contains(l, "… http") {
-		t.Errorf("row = %q; want the label cut before \"http\"", l)
+	if l := lineWith(t, m, ":6006"); !strings.Contains(l, "…") || !strings.Contains(l, "localhost:6006 http") {
+		t.Errorf("row = %q; want the label cut and \"http\" after the local address", l)
 	}
 }
 
-func TestColumnsDropInOrder(t *testing.T) {
-	m := connectedWith(newModel(newFakeEngine()), withLabel(5173, "node", "Vite"))
-	for _, tc := range []struct {
-		width     int
-		want, not []string
-	}{
-		{140, []string{"process", "label", "conn", "traffic"}, nil},
-		{80, []string{"process", "label", "conn", "traffic"}, nil},
-		{76, []string{"process", "label", "conn"}, []string{"traffic"}},
-		{61, []string{"process", "label"}, []string{"conn", "traffic"}},
-	} {
-		h := lineWith(t, sized(m, tc.width, 24), "state")
-		for _, w := range tc.want {
-			if !strings.Contains(h, w) {
-				t.Errorf("%d columns: header %q lacks %s", tc.width, h, w)
-			}
+// TestTunnelTakesTheRoomLeft: the tunnel grows and shrinks with the
+// window, between its narrowest and widest, and the local address always
+// shows whole.
+func TestTunnelTakesTheRoomLeft(t *testing.T) {
+	e := newFakeEngine()
+	m := connectedWith(newModel(e), withLabel(5173, "node", "Vite"))
+	m, _ = press(t, m, "enter")
+	for _, w := range []int{60, 80, 120, 200} {
+		l := lineWith(t, sized(m, w, 24), ":5173")
+		from, to := strings.Index(l, "○"), strings.Index(l, "●")
+		if from < 0 || to < from || !strings.Contains(l, "Vite") || !strings.Contains(l, "● localhost:5173") {
+			t.Fatalf("%d columns: row %q", w, l)
 		}
-		for _, n := range tc.not {
-			if strings.Contains(h, n) {
-				t.Errorf("%d columns: header %q still has %s", tc.width, h, n)
-			}
+		if n := ansi.StringWidth(l[from:to]) + 1; n < minTunnel || n > maxTunnel {
+			t.Errorf("%d columns: a tunnel of %d cells", w, n)
 		}
 	}
 }
@@ -112,7 +103,7 @@ func TestColumnsDropInOrder(t *testing.T) {
 // next column.
 func TestCellsNeverTouch(t *testing.T) {
 	e := newFakeEngine()
-	m := sized(connectedWith(newModel(e), rp(5173, "a-very-long-process-name")), 80, 24)
+	m := sized(connectedWith(newModel(e), rp(5173, "a-very-long-process-name-from-a-build-tool")), 80, 24)
 	m, _ = press(t, m, "enter")
 	l := lineWith(t, m, ":5173")
 	if !strings.Contains(l, "… ") {
@@ -647,7 +638,7 @@ func TestMouseSkipsSeparator(t *testing.T) {
 	m := sized(connectedWith(newModelWith(e, Options{Mouse: true}), rp(5000, "a"), rp(5001, "b"), rp(5002, "c")), 80, 24)
 	m, _ = press(t, m, "enter") // forward 5000, so the separator shows
 	lines := strings.Split(view(m), "\n")
-	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "detected, not forwarded") })
+	y := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "not forwarded") })
 	if y < 1 || strings.TrimSpace(lines[y-1]) != "" {
 		t.Fatalf("no blank line and title over the detected ports:\n%s", view(m))
 	}
@@ -664,37 +655,84 @@ func TestMouseSkipsSeparator(t *testing.T) {
 	}
 }
 
-// TestSparkline: levels scale to the largest value, and the seconds not
-// measured yet and the idle ones are a faint baseline.
-func TestSparkline(t *testing.T) {
-	th := newTheme(true, false, hexPalette)
-	got := th.sparkline([]float64{0, 1, 2, 4}, 2)
-	if want := th.faint.Render("▁▁▁") + th.accent.Render("▃▅█"); got != want {
-		t.Errorf("sparkline = %q; want %q", got, want)
-	}
-	if got := ansi.Strip(th.sparkline(nil, sparkLen)); got != strings.Repeat("▁", sparkLen) {
-		t.Errorf("empty sparkline = %q", got)
-	}
-}
-
-// TestTrafficHistory: a forward keeps the rates of its last sparkLen
-// seconds, oldest first.
-func TestTrafficHistory(t *testing.T) {
+// TestTunnelPacketsMove: packets move along a tunnel a cell for each
+// second with traffic, and stay put while it is idle.
+func TestTunnelPacketsMove(t *testing.T) {
 	e := newFakeEngine()
 	m := connectedWith(newModel(e), rp(5173, "node"))
 	m, _ = press(t, m, "enter")
-	for i := range sparkLen + 4 {
+	id := e.forwards[0].ID
+	tick := func(i int, in int64) {
 		e.mu.Lock()
-		e.forwards[0].Stats = forward.Stats{BytesIn: int64(i * i * 100)}
+		e.forwards[0].Stats = forward.Stats{BytesIn: in}
 		e.mu.Unlock()
 		m, _ = update(t, m, tickMsg(t0.Add(time.Duration(i)*time.Second)))
 	}
-	got := m.rates[e.forwards[0].ID].recent
-	want := make([]float64, 0, sparkLen)
-	for i := 4; i < sparkLen+4; i++ {
-		want = append(want, float64((i*i-(i-1)*(i-1))*100))
+	packets := func() string {
+		got := ansi.Strip(m.tunnel(m.forwards[id], 40))
+		return strings.Map(func(r rune) rune {
+			if r == '•' {
+				return r
+			}
+			return ' '
+		}, got)
 	}
-	if !slices.Equal(got, want) {
-		t.Errorf("recent = %v; want %v", got, want)
+	tick(0, 0)
+	tick(1, 0)
+	if got := packets(); strings.TrimSpace(got) != "" {
+		t.Fatalf("an idle tunnel has packets: %q", got)
+	}
+	tick(2, 100_000)
+	first := packets()
+	if strings.TrimSpace(first) == "" {
+		t.Fatalf("a busy tunnel has no packets:\n%s", ansi.Strip(m.tunnel(m.forwards[id], 40)))
+	}
+	tick(3, 200_000)
+	// Packets sit every packetEvery cells; a second with traffic moves them
+	// one cell toward localhost.
+	second := packets()
+	f1, f2 := strings.IndexRune(first, '•'), strings.IndexRune(second, '•')
+	if (f2-1)%packetEvery != f1%packetEvery {
+		t.Errorf("packets didn't move a cell to the right:\n%q\n%q", first, second)
+	}
+	moved := m.rates[id].moved
+	tick(4, 200_000)
+	if m.rates[id].moved != moved {
+		t.Errorf("packets moved in a second without traffic")
+	}
+}
+
+// TestTunnelStates: each state draws its own line and says itself on it,
+// so it reads without color; a reverse forward runs the other way.
+func TestTunnelStates(t *testing.T) {
+	m := newModel(newFakeEngine())
+	spec := engine.ForwardSpec{Kind: engine.Local, LocalPort: 8888, RemoteHost: "127.0.0.1", RemotePort: 8888}
+	for _, tc := range []struct {
+		name string
+		f    engine.Forward
+		want string
+	}{
+		{"idle", engine.Forward{ID: "1", Spec: spec, State: engine.Active}, "○───────────── idle ─────────────●"},
+		{"paused", engine.Forward{ID: "2", Spec: spec, State: engine.Paused, Pause: engine.PortGone}, "○╌╌╌╌╌ paused, port closed ╌╌╌╌╌╌●"},
+		{"starting", engine.Forward{ID: "3", Spec: spec, State: engine.Starting}, "○╌╌╌╌╌╌╌╌╌╌ starting… ╌╌╌╌╌╌╌╌╌╌╌●"},
+		{"reverse", engine.Forward{ID: "4", Spec: engine.ForwardSpec{Kind: engine.Remote, LocalPort: 3000, RemotePort: 8080}, State: engine.Active}, "●───────────── idle ─────────────○"},
+	} {
+		got := ansi.Strip(m.tunnel(tc.f, 34))
+		if got != tc.want {
+			t.Errorf("%s tunnel:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+	failed := engine.Forward{ID: "5", Spec: spec, State: engine.Failed, Err: errors.New("administratively prohibited: the server disallows TCP forwarding")}
+	if got := ansi.Strip(m.tunnel(failed, 34)); !strings.HasPrefix(got, "○╌╌╌ failed: administrativ") || !strings.HasSuffix(got, "… ╌╌╌●") || ansi.StringWidth(got) != 34 {
+		t.Errorf("a long error is cut to fit: %q", got)
+	}
+	if got := ansi.Strip(m.tunnel(failed, 12)); got != "○╌ failed ╌●" {
+		t.Errorf("a narrow failed tunnel: %q", got)
+	}
+	ascii := newModel(newFakeEngine())
+	ascii.opts.ASCII = true
+	ascii.restyle()
+	if got := ansi.Strip(ascii.tunnel(engine.Forward{ID: "1", Spec: spec, State: engine.Paused}, 20)); got != "o..... paused .....*" {
+		t.Errorf("an ASCII paused tunnel: %q", got)
 	}
 }

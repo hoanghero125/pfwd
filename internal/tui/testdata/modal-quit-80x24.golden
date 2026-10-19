@@ -1,13 +1,13 @@
   pfwd  devbox ● connected                                   auto: on   ? help
 
-  state   remote   local           process      label       conn traffic
-▌ ● fwd   :5173  → localhost:5173  node         Vite http   2    ↓12K/s ↑1.0K/s
-  ◌ pause :8000  → localhost:8000  port closed              0    —
-  ● fwd   :8888  → localhost:8888  jupyter-lab  Jupyter pin 0    ↓0 ↑0
+  devbox                                                this computer
+▌ :5173   Vite        ○─•───• ↓ 12K/s  ↑ 1.0K/s •───•─● localhost:5173 http
+  :8000   —           ○╌╌╌╌╌ paused, port closed ╌╌╌╌╌● localhost:8000
+  :8888   Jupyter     ○──────────── idle ─────────────● localhost:8888 http pin
 
-  detected, not forwarded
-  —       :6╭──────────────────────────────────────────────────────╮
-  —       :9│ Quit pfwd?                                           │
+  on devbox, not forwarded
+  :6379   Re╭──────────────────────────────────────────────────────╮
+  :9090   Pr│ Quit pfwd?                                           │
             │                                                      │
             │ 3 forwards are active. Quitting stops them.          │
             │                                                      │

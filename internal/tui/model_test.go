@@ -501,7 +501,7 @@ func TestStatsTickShowsTrafficAndConns(t *testing.T) {
 	e.forwards[0].Stats = forward.Stats{Conns: 2, BytesIn: 12 * 1024, BytesOut: 1024}
 	e.mu.Unlock()
 	m, _ = update(t, m, tickMsg(t0.Add(time.Second)))
-	if v := view(m); !strings.Contains(v, "↓12K/s ↑1.0K/s") {
+	if v := view(m); !strings.Contains(v, "↓ 12K/s  ↑ 1.0K/s  2 conns") {
 		t.Errorf("traffic not shown:\n%s", v)
 	}
 }
@@ -589,14 +589,14 @@ func TestForwardErrorsReachTheStatusLine(t *testing.T) {
 
 	fw.Err = errors.New("devbox could not connect to 127.0.0.1:8123: connection refused")
 	m = apply(m, engine.ForwardChanged{Forward: fw})
-	if v := view(m); !strings.Contains(v, "✗ :8123: devbox could not connect") || !strings.Contains(v, "● fwd") {
+	if v := view(m); !strings.Contains(v, "✗ :8123: devbox could not connect") || !strings.Contains(v, "─ idle ─") {
 		t.Errorf("an active forward's dial error is not shown:\n%s", v)
 	}
 
 	fw.State = engine.Failed
 	fw.Err = &sshx.Error{Kind: sshx.ErrForwardingRefused, Msg: "devbox refuses TCP forwarding"}
 	m = apply(m, engine.ForwardChanged{Forward: fw})
-	if v := view(m); !strings.Contains(v, "✗ :8123: devbox refuses TCP forwarding") || !strings.Contains(v, "✗ fail") {
+	if v := view(m); !strings.Contains(v, "✗ :8123: devbox refuses TCP forwarding") || !strings.Contains(v, "╌ failed: devbox refuses") {
 		t.Errorf("a refused forward is not shown as failed:\n%s", v)
 	}
 }

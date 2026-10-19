@@ -10,7 +10,7 @@ pfwd devbox
 
 `devbox` is an alias from `~/.ssh/config`; `user@host` works too, and so do ssh's `-p`, `-l`, `-i`, `-J` and `-F`. Start the server on devbox (`npm run dev`, `jupyter lab`, `python -m http.server`) and a few seconds later the TUI shows its port forwarded: `localhost:5173` on your machine reaches it. `o` opens it in the browser and `y` copies the URL.
 
-Ports that were already listening when pfwd connected wait in the "detected, not forwarded" group: `enter` forwards one to the same local port, `F` to another.
+Ports that were already listening when pfwd connected wait in the "not forwarded" group: `enter` forwards one to the same local port, `F` to another.
 
 ## Reach a database behind the server
 

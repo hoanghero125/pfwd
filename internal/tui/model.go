@@ -112,15 +112,12 @@ type sample struct {
 	at      time.Time
 }
 
-// rate is a forward's traffic, in bytes per second: the latest, and the
-// last sparkLen totals (in and out) for its sparkline, oldest first.
+// rate is a forward's traffic, in bytes per second, and how far its
+// tunnel's packets have moved: a cell for every second with traffic.
 type rate struct {
 	in, out float64
-	recent  []float64
+	moved   int
 }
-
-// sparkLen is how many seconds of traffic a sparkline shows.
-const sparkLen = 8
 
 // row is one table line: a forward (with the detected port it forwards,
 // if the server still lists it) or a detected port that is not forwarded.
@@ -751,10 +748,10 @@ func (m *Model) applyStats(msg statsMsg) {
 				in:  max(0, float64(f.Stats.BytesIn-prev.in)/dt),
 				out: max(0, float64(f.Stats.BytesOut-prev.out)/dt),
 			}
-			// A new slice each time: Models are copied, and a copy must not
-			// see this one's history change under it.
-			recent := m.rates[f.ID].recent
-			r.recent = append(slices.Clone(recent[max(0, len(recent)-sparkLen+1):]), r.in+r.out)
+			r.moved = m.rates[f.ID].moved
+			if r.in+r.out > 0 {
+				r.moved++
+			}
 			m.rates[f.ID] = r
 		}
 		m.samples[f.ID] = sample{in: f.Stats.BytesIn, out: f.Stats.BytesOut, at: msg.at}

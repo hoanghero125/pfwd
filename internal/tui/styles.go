@@ -20,8 +20,10 @@ type glyphs struct {
 	ok, none, rule, ellipsis, down, up               string
 	topLeft, topRight, bottomLeft, bottomRight, side string
 	upDown, dots, block, mask                        string
-	// spark is a sparkline's levels, lowest first.
-	spark []string
+	// A tunnel runs from an open end (the port it forwards) to a solid one
+	// (where the port arrives): wire for a working tunnel, gap for one that
+	// isn't, and packets moving along it while traffic flows.
+	from, to, wire, gap, packet string
 }
 
 var unicodeGlyphs = glyphs{
@@ -31,7 +33,7 @@ var unicodeGlyphs = glyphs{
 	ok: "✓", none: "—", rule: "─", ellipsis: "…", down: "↓", up: "↑",
 	topLeft: "╭", topRight: "╮", bottomLeft: "╰", bottomRight: "╯", side: "│",
 	upDown: "↑ ↓", dots: "…", block: "█", mask: "•",
-	spark: []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"},
+	from: "○", to: "●", wire: "─", gap: "╌", packet: "•",
 }
 
 // asciiGlyphs are for consoles whose fonts lack the Unicode ones, such as
@@ -43,7 +45,7 @@ var asciiGlyphs = glyphs{
 	ok: "+", none: "-", rule: "-", ellipsis: "~", down: "v", up: "^",
 	topLeft: "+", topRight: "+", bottomLeft: "+", bottomRight: "+", side: "|",
 	upDown: "up down", dots: "...", block: "_", mask: "*",
-	spark: []string{"_", ".", ",", "-", "=", "+", "*", "#"},
+	from: "o", to: "*", wire: "-", gap: ".", packet: "=",
 }
 
 // palette is where a theme's colors come from.
@@ -156,46 +158,6 @@ func (th theme) selected(line string, w int) string {
 		return line
 	}
 	return th.selectBg + strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+th.selectBg) + "\x1b[m"
-}
-
-// sparkline draws a sparkline: missing faint baseline glyphs for the
-// seconds not measured yet, then values, oldest first, one glyph each,
-// scaled to the largest. Zeros are faint too, so an idle forward is a faint
-// line and traffic is in the accent color.
-func (th theme) sparkline(values []float64, missing int) string {
-	peak := 0.0
-	for _, v := range values {
-		peak = max(peak, v)
-	}
-	top := len(th.g.spark) - 1
-	var b, run strings.Builder
-	runFaint := true
-	flush := func() {
-		if run.Len() == 0 {
-			return
-		}
-		if runFaint {
-			b.WriteString(th.faint.Render(run.String()))
-		} else {
-			b.WriteString(th.accent.Render(run.String()))
-		}
-		run.Reset()
-	}
-	run.WriteString(strings.Repeat(th.g.spark[0], missing))
-	for _, v := range values {
-		faint := v <= 0
-		if faint != runFaint {
-			flush()
-			runFaint = faint
-		}
-		level := 0
-		if !faint {
-			level = max(1, int(v/peak*float64(top)+0.5))
-		}
-		run.WriteString(th.g.spark[level])
-	}
-	flush()
-	return b.String()
 }
 
 // formatRate formats bytes per second with binary units in at most four

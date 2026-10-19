@@ -324,7 +324,7 @@ func autoForward(t *testing.T, service string) {
 	started := startServer(t, service, "6006")
 	d.waitFor(t, "Forwarded :6006 to localhost:6006 (auto)", 3*interval)
 	t.Logf("%s: :6006 was forwarded %v after the server started", service, time.Since(started).Round(time.Millisecond))
-	d.waitFor(t, "TensorBoard http", 5*time.Second)
+	d.waitFor(t, "localhost:6006 http", 5*time.Second)
 	get(t, "6006")
 
 	d.selectPort(t, "6006")

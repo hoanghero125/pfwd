@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/hoanghero125/pfwd/internal/detect"
@@ -370,75 +371,57 @@ func (m Model) unavailable() []string {
 	}
 }
 
-// columns is the table layout for a width; 0 means the column is not
-// shown.
+// columns is the table layout for a width. A row reads from the server to
+// this computer: the remote port and its process, the tunnel, then the
+// local address. host is 0 unless every host shows.
 type columns struct {
-	host, state, remote, local, process, label, conn, traffic int
-	// arrow is the cells at the end of remote for the arrow to local.
-	arrow int
-	// spark says traffic starts with a sparkline.
-	spark bool
+	host, remote, process, tunnel, local int
 }
 
-// minProcess is the narrowest process column before optional columns go;
-// sparkProcess, the narrowest that leaves room for sparklines.
+// The tunnel takes what the other columns leave, between minTunnel and
+// maxTunnel cells; process gets its widest name, between minProcess and
+// maxProcess. Room the tunnel can't use stays at the end of the line.
 const (
-	minProcess   = 10
-	sparkProcess = 16
+	minTunnel  = 7
+	maxTunnel  = 48
+	minProcess = 8
+	maxProcess = 32
 )
 
-// columns lays out the table. process takes what is left, up to 40
-// cells; when it would get fewer than minProcess, traffic goes, then
-// conn, then label. Sparklines show only when process keeps
-// sparkProcess cells.
+// columns lays out the table for width w.
 func (m Model) columns(w int) columns {
-	c := columns{state: 8, remote: 7, local: 16, label: 12, conn: 5, traffic: 15}
+	c := columns{remote: 8, process: 10, local: 16}
 	for _, r := range m.rows {
-		c.remote = max(c.remote, ansi.StringWidth(remoteText(r))+1)
+		c.remote = max(c.remote, ansi.StringWidth(remoteText(r))+2)
+		c.process = max(c.process, ansi.StringWidth(m.processText(r))+2)
+		if r.fwd != nil {
+			c.local = max(c.local, ansi.StringWidth(m.localText(*r.fwd))+1)
+		}
 	}
-	c.arrow = ansi.StringWidth(m.th.g.arrow) + 1
-	c.remote = min(c.remote, 24) + c.arrow
-	if w >= 100 {
-		c.label = 18
-	}
+	c.remote, c.process, c.local = min(c.remote, 24), min(c.process, maxProcess), min(c.local, 32)
 	if m.all {
 		for _, h := range m.hosts {
 			c.host = max(c.host, ansi.StringWidth(safetext.Clean(string(h)))+2)
 		}
 		c.host = min(max(c.host, 6), 16)
 	}
-	fixed := 2 + c.host + c.state + c.remote + c.local
-	if w-fixed-c.label-c.conn-c.traffic-(sparkLen+1) >= sparkProcess {
-		c.traffic += sparkLen + 1
-		c.spark = true
+	// 2 for the cursor, 1 between the tunnel and the local address.
+	rest := w - 2 - c.host - c.remote - c.local - 1
+	if rest-c.process < minTunnel {
+		c.process = max(minProcess, rest-minTunnel)
 	}
-	for {
-		rest := w - fixed - c.label - c.conn - c.traffic
-		switch {
-		case rest >= minProcess:
-			c.process = min(40, rest)
-			return c
-		case c.traffic > 0:
-			c.traffic, c.spark = 0, false
-		case c.conn > 0:
-			c.conn = 0
-		case c.label > 0:
-			c.label = 0
-		default:
-			c.process = max(0, rest)
-			return c
-		}
-	}
+	c.tunnel = min(maxTunnel, max(3, rest-c.process))
+	return c
 }
 
 func (m Model) table(w, h int) []string {
 	th := m.th
 	c := m.columns(w)
-	header := "  " + th.cell("host", c.host) + th.cell("state", c.state) + th.cell("remote", c.remote) + th.cell("local", c.local) + th.cell("process", c.process) +
-		th.cell("label", c.label) + th.cell("conn", c.conn)
-	if c.traffic > 0 {
-		header += "traffic"
+	from := "remote"
+	if !m.all {
+		from = safetext.Clean(string(m.host))
 	}
+	header := "  " + th.cell("host", c.host) + th.cell(from, c.remote+c.process+c.tunnel+1) + "this computer"
 	lines := []string{th.faint.Render(header)}
 
 	sep := m.separatorAt()
@@ -464,7 +447,11 @@ func (m Model) table(w, h int) []string {
 
 // separator titles the detected ports under the forwards.
 func (m Model) separator() string {
-	return "  " + m.th.faint.Render("detected, not forwarded")
+	text := "not forwarded"
+	if !m.all {
+		text = "on " + safetext.Clean(string(m.host)) + ", not forwarded"
+	}
+	return "  " + m.th.faint.Render(text)
 }
 
 func remoteText(r row) string {
@@ -493,128 +480,205 @@ func (m Model) rowLine(r row, selected bool, c columns) string {
 	if selected {
 		cursor = th.accent.Render(g.cursor) + " "
 	}
-	dash := th.faint.Render(g.none)
-	cursor += th.cell(safetext.Clean(string(r.host)), c.host)
-	// The arrow from remote to local is only on forwards.
-	remote := th.cell(remoteText(r), c.remote-c.arrow) + strings.Repeat(" ", c.arrow)
-	if r.fwd != nil {
-		remote = th.cell(remoteText(r), c.remote-c.arrow) + th.faint.Render(g.arrow) + " "
-	}
-
-	if r.fwd == nil && r.port.Ignored {
+	start := th.cell(safetext.Clean(string(r.host)), c.host) + th.cell(remoteText(r), c.remote)
+	switch {
+	case r.fwd == nil && r.port.Ignored:
 		// Shown only while h is on, and quiet: never auto-forwarded.
-		line := th.cell("ignored", c.state) + remote + th.cell("", c.local) +
-			th.cell(m.processName(*r.port, "?"), c.process) + th.cell(safetext.Clean(rowLabel(r)), c.label)
-		return cursor + th.faint.Render(line)
+		return cursor + th.faint.Render(start+th.cell(ansi.Strip(m.processText(r)), c.process)+"ignored")
+	case r.fwd == nil:
+		// A detected port: the start of a tunnel, for enter to finish.
+		stub := g.from + strings.Repeat(g.gap, 3)
+		if selected {
+			stub = th.accent.Render(stub)
+		} else {
+			stub = th.faint.Render(stub)
+		}
+		return cursor + th.bold.Render(start) + th.cell(m.processText(r), c.process) + stub
 	}
-
-	var state, local, process, conn, traffic string
-	if f := r.fwd; f != nil {
-		word := "fwd"
-		switch f.Spec.Kind {
-		case engine.Remote:
-			word = "rev"
-		case engine.Dynamic:
-			word = "socks"
-		}
-		switch f.State {
-		case engine.Active:
-			state = th.ok.Render(g.active) + " " + word
-			local = th.bold.Render(localAddr(f.Spec))
-		case engine.Failed:
-			state = th.bad.Render(g.failed) + " fail"
-			local = localAddr(f.Spec)
-		case engine.Paused:
-			state = th.warn.Render(g.paused) + " pause"
-			local = localAddr(f.Spec)
-		default:
-			state = g.starting + " start"
-			local = localAddr(f.Spec)
-		}
-		switch {
-		case f.State == engine.Failed && f.Err != nil:
-			process = th.faint.Render(safetext.Clean(f.Err.Error()))
-		case f.State == engine.Paused && f.Pause != engine.NotPaused:
-			process = th.faint.Render(f.Pause.String())
-		case f.Spec.Kind == engine.Remote:
-			process = th.faint.Render("this machine")
-		case f.Spec.Kind == engine.Dynamic:
-			process = th.faint.Render("SOCKS proxy")
-		case r.port == nil:
-			process = th.faint.Render("not listening")
-		default:
-			process = m.processName(*r.port, th.faint.Render("?"))
-		}
-		conn = itoa(int(f.Stats.Conns))
-		traffic = dash
-		if f.State == engine.Active {
-			traffic = m.trafficText(f.ID, c.spark)
-		}
-	} else {
-		state = dash
-		process = m.processName(*r.port, th.faint.Render("?"))
-	}
-
-	line := cursor + th.cell(state, c.state) + remote + th.cell(local, c.local) + th.cell(process, c.process) +
-		m.labelCell(r, c.label) + th.cell(conn, c.conn)
-	if c.traffic > 0 {
-		line += traffic
-	}
-	return line
+	return cursor + th.bold.Render(start) + th.cell(m.processText(r), c.process) + m.tunnel(*r.fwd, c.tunnel) + " " + m.localText(*r.fwd)
 }
 
-// labelCell is the LABEL column: the label, then tags: the scheme once the
-// probe found one, and "pin" or "cfg" for forwards remembered across runs.
-// When they don't all fit, the scheme goes first, then the label is cut,
-// so the tags show.
-func (m Model) labelCell(r row, w int) string {
+// processText is what listens on the server's side of a row: its label,
+// or else the process.
+func (m Model) processText(r row) string {
 	th := m.th
-	label := safetext.Clean(rowLabel(r))
-	var scheme, keep string
-	if f := r.fwd; f != nil {
-		if f.Scheme == forward.SchemeHTTP || f.Scheme == forward.SchemeHTTPS {
-			scheme = f.Scheme.String()
-		}
-		switch {
-		case f.Spec.Config:
-			keep = "cfg"
-		case f.Spec.Pinned:
-			keep = "pin"
-		}
+	var proc string
+	switch {
+	case r.fwd != nil && r.fwd.Spec.Kind == engine.Remote:
+		proc = "reverse"
+	case r.fwd != nil && r.fwd.Spec.Kind == engine.Dynamic:
+		proc = "proxy"
+	case r.port == nil:
+		// The server doesn't list the port (or isn't connected): the
+		// tunnel says why.
+	case r.port.Process == "":
+		proc = "?"
+	default:
+		proc = safetext.Clean(r.port.Process)
 	}
-	suffix := strings.TrimSpace(scheme + " " + keep)
-	if keep != "" && scheme != "" && ansi.StringWidth(label)+1+len(suffix) > w-1 {
-		suffix = keep
+	switch label := safetext.Clean(rowLabel(r)); {
+	case label != "":
+		return label
+	case proc == "":
+		return th.faint.Render(th.g.none)
+	case r.port != nil && r.port.Process != "":
+		return proc
 	}
-	if suffix == "" || w == 0 {
-		return th.cell(label, w)
-	}
-	if room := w - 2 - len(suffix); label != "" && room > 1 {
-		return th.cell(ansi.Truncate(label, room, th.g.ellipsis)+" "+th.faint.Render(suffix), w)
-	}
-	return th.cell(th.faint.Render(suffix), w)
+	return th.faint.Render(proc)
 }
 
-// processName is the cleaned process name, or unknown when the server
-// hides it.
-func (m Model) processName(p engine.Port, unknown string) string {
-	if p.Process == "" {
-		return unknown
+// localText is a forward's address on this computer, then its tags: the
+// scheme once the probe found one, and "pin" or "cfg" when it is
+// remembered across runs.
+func (m Model) localText(f engine.Forward) string {
+	addr := localAddr(f.Spec)
+	if f.State == engine.Active {
+		addr = m.th.bold.Render(addr)
 	}
-	return safetext.Clean(p.Process)
+	var tags []string
+	if f.Scheme == forward.SchemeHTTP || f.Scheme == forward.SchemeHTTPS {
+		tags = append(tags, f.Scheme.String())
+	}
+	switch {
+	case f.Spec.Config:
+		tags = append(tags, "cfg")
+	case f.Spec.Pinned:
+		tags = append(tags, "pin")
+	}
+	if len(tags) == 0 {
+		return addr
+	}
+	return addr + " " + m.th.faint.Render(strings.Join(tags, " "))
 }
 
-// trafficText is an active forward's rate, after a sparkline of its last
-// seconds when spark is set. Idle traffic is faint.
-func (m Model) trafficText(id string, spark bool) string {
+// packetEvery is the distance between a tunnel's packets, in cells.
+const packetEvery = 4
+
+// tunnel draws forward f as a line w cells wide, from the server's side to
+// this computer's: an open end where the forwarded port listens, a solid
+// one where it arrives (a reverse forward runs the other way), and its
+// state on the line. While traffic flows, packets move along it a cell a
+// second. Working tunnels are solid lines, the others broken ones, so the
+// state shows without color.
+func (m Model) tunnel(f engine.Forward, w int) string {
 	th, g := m.th, m.th.g
-	r := m.rates[id]
-	var line string
-	if spark {
-		line = th.sparkline(r.recent, sparkLen-len(r.recent)) + " "
+	if w < 3 {
+		return strings.Repeat(" ", max(0, w))
 	}
+	from, to := g.from, g.to
+	if f.Spec.Kind == engine.Remote {
+		from, to = to, from
+	}
+	r := m.rates[f.ID]
+	busy := f.State == engine.Active && r.in+r.out > 0
+	line, ends := th.faint, th.faint
+	wire := g.gap
+	var labels []tunnelLabel
+	switch f.State {
+	case engine.Active:
+		line, ends, wire = th.faint, th.ok, g.wire
+		if busy {
+			line = th.ok
+		}
+		labels = m.rateLabels(f, r)
+	case engine.Paused:
+		line, ends = th.warn, th.warn
+		labels = []tunnelLabel{{text: "paused", style: th.warn}}
+		if f.Pause != engine.NotPaused {
+			labels = append([]tunnelLabel{{text: "paused, " + f.Pause.String(), style: th.warn}}, labels...)
+		}
+	case engine.Failed:
+		line, ends = th.bad, th.bad
+		labels = []tunnelLabel{{text: "failed", style: th.bad}}
+		if f.Err != nil {
+			labels = append([]tunnelLabel{{text: "failed: " + safetext.Clean(f.Err.Error()), style: th.bad, cut: true}}, labels...)
+		}
+	default:
+		labels = []tunnelLabel{{text: "starting" + g.dots, style: th.faint}}
+	}
+
+	// A label keeps three cells of line on each side, so the tunnel still
+	// reads as one; the last, shortest one makes do with one.
+	inner := w - 2
+	var label tunnelLabel
+	for i, l := range labels {
+		room := inner - 2 - 6
+		if i == len(labels)-1 {
+			room = inner - 2 - 2
+		}
+		if ansi.StringWidth(l.text) <= room {
+			label = l
+			break
+		}
+		// An error is cut to fit rather than dropped, while a useful part
+		// of it shows.
+		if l.cut && room >= 16 {
+			label = l
+			label.text = ansi.Truncate(l.text, room, g.ellipsis)
+			break
+		}
+	}
+	lw := 0
+	if label.text != "" {
+		lw = ansi.StringWidth(label.text) + 2
+	}
+	left := (inner - lw) / 2
+	// wires draws cells [a, b) of the line, with the packets on it.
+	wires := func(a, b int) string {
+		var s strings.Builder
+		for i := a; i < b; i++ {
+			pos := i - r.moved
+			if f.Spec.Kind == engine.Remote {
+				pos = i + r.moved
+			}
+			if busy && ((pos%packetEvery)+packetEvery)%packetEvery == 0 {
+				s.WriteString(g.packet)
+			} else {
+				s.WriteString(wire)
+			}
+		}
+		return line.Render(s.String())
+	}
+	out := ends.Render(from) + wires(0, left)
+	if lw > 0 {
+		out += " " + label.styled() + " "
+	}
+	return out + wires(left+lw, inner) + ends.Render(to)
+}
+
+// tunnelLabel is the text on a tunnel; cut lets it be shortened to fit.
+type tunnelLabel struct {
+	text  string
+	style lipgloss.Style
+	// parts, when set, style the text in pieces; text is their plain sum.
+	parts []string
+	cut   bool
+}
+
+func (l tunnelLabel) styled() string {
+	if len(l.parts) == 0 {
+		return l.style.Render(l.text)
+	}
+	return strings.Join(l.parts, "")
+}
+
+// rateLabels are an active tunnel's labels, longest first: the rates and
+// the open connections, the rates, the download rate. Idle traffic says
+// so.
+func (m Model) rateLabels(f engine.Forward, r rate) []tunnelLabel {
+	th, g := m.th, m.th.g
 	if r.in == 0 && r.out == 0 {
-		return line + th.faint.Render(g.down+"0 "+g.up+"0")
+		return []tunnelLabel{{text: "idle", style: th.faint}}
 	}
-	return line + g.down + formatRate(r.in) + "/s " + th.faint.Render(g.up+formatRate(r.out)+"/s")
+	down := g.down + " " + formatRate(r.in) + "/s"
+	up := g.up + " " + formatRate(r.out) + "/s"
+	labels := []tunnelLabel{
+		{text: down + "  " + up, parts: []string{down, "  ", th.faint.Render(up)}},
+		{text: down, parts: []string{down}},
+	}
+	if n := int(f.Stats.Conns); n > 0 {
+		conns := itoa(n) + " " + plural(n, "conn", "conns")
+		labels = append([]tunnelLabel{{text: down + "  " + up + "  " + conns, parts: []string{down, "  ", th.faint.Render(up + "  " + conns)}}}, labels...)
+	}
+	return labels
 }
