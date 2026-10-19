@@ -186,6 +186,27 @@ func TestFwdDetachLsStop(t *testing.T) {
 	}
 }
 
+// TestDaemonStopEndsForwardsFirst: when pfwd daemon stop returns, the
+// daemon's forwards have ended, so their local ports are free again.
+func TestDaemonStopEndsForwardsFirst(t *testing.T) {
+	headlessEnv(t)
+	echo := echoListener(t)
+	h := newTestHost(t, sshtest.Options{Exec: fakeLinux(ssLine(echo, "echo"))}, true)
+	startDaemon(t, "-F", h.sshConfig)
+	local := freeLocalPort(t)
+	if code, out, errOut := run(t, "fwd", "testbox", fmt.Sprintf("%d:%d", local, echo), "--detach"); code != 0 {
+		t.Fatalf("pfwd fwd --detach: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if code, out, _ := run(t, "daemon", "stop"); code != 0 {
+		t.Fatalf("pfwd daemon stop: code %d:\n%s", code, out)
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", local))
+	if err != nil {
+		t.Fatalf("port %d is still in use after pfwd daemon stop: %v", local, err)
+	}
+	_ = ln.Close()
+}
+
 // TestFwdDetachUnknownHostKeyWithoutTerminal: the daemon's host-key prompt
 // reaches the client, which has no terminal to ask: exit 5 with the fix.
 func TestFwdDetachUnknownHostKeyWithoutTerminal(t *testing.T) {
