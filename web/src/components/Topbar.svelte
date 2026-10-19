@@ -3,6 +3,7 @@
   import { forwardsOf } from "../lib/reduce";
   import { app, viewHash } from "../lib/store.svelte";
   import ConnectDialog from "./ConnectDialog.svelte";
+  import Logo from "./Logo.svelte";
 
   // The top line, like the TUI's host bar: pfwd, the hosts with their
   // states, then the pages.
@@ -15,7 +16,7 @@
 </script>
 
 <nav class="top" aria-label="pfwd">
-  <span class="brand">pfwd</span>
+  <span class="brand"><Logo size={22} />pfwd</span>
   <span class="hosts">
     {#each hosts as host (host)}
       {@const s = app.model.sessions[host]}

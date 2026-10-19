@@ -1,9 +1,10 @@
 <script lang="ts">
   import { formatRate } from "../lib/format";
-  import { forwardsOf } from "../lib/reduce";
+  import { forwardsOf, trafficOf } from "../lib/reduce";
   import { app, viewHash } from "../lib/store.svelte";
   import ForwardDialog from "./ForwardDialog.svelte";
   import PortsTable from "./PortsTable.svelte";
+  import RateChart from "./RateChart.svelte";
   import Reverse from "./Reverse.svelte";
   import Socks from "./Socks.svelte";
   import State from "./State.svelte";
@@ -18,6 +19,14 @@
   const retryIn = $derived(session?.retry_at ? Math.max(0, Math.ceil((Date.parse(session.retry_at) - app.now) / 1000)) : 0);
   const forwards = $derived(forwardsOf(app.model, host));
   const conns = $derived(forwards.reduce((n, f) => n + (f.conns || 0), 0));
+  // What the tunnels are doing: "2 working, 1 paused".
+  const doing = $derived(
+    (["active", "paused", "failed", "starting"] as const)
+      .map((st) => [forwards.filter((f) => f.state === st).length, st === "active" ? "working" : st] as const)
+      .filter(([n]) => n)
+      .map(([n, what]) => `${n} ${what}`)
+      .join(", "),
+  );
   const rate = $derived(
     forwards.reduce(
       (t, f) => {
@@ -62,11 +71,23 @@
   {#if session?.state === "connected"}
     {#if info?.os}<span>{info.os.toLowerCase()}</span>{/if}
     {#if info?.strategy && info.strategy !== "none"}<span>ports from <span class="v">{info.strategy}</span></span>{/if}
-    <span><span class="v">{forwards.length}</span> {forwards.length === 1 ? "forward" : "forwards"}</span>
-    {#if conns}<span><span class="v">{conns}</span> open {conns === 1 ? "connection" : "connections"}</span>{/if}
-    <span>↓ <span class="v">{formatRate(rate.in)}/s</span>&nbsp;&nbsp;↑ <span class="v">{formatRate(rate.out)}/s</span></span>
   {/if}
 </div>
+
+{#if session && (session.state === "connected" || forwards.length)}
+  <section class="hero" aria-label="Traffic on {host}">
+    <dl class="figures">
+      <div class="fig down"><dt><span class="key" aria-hidden="true"></span>download</dt><dd>{formatRate(rate.in)}/s</dd></div>
+      <div class="fig up"><dt><span class="key" aria-hidden="true"></span>upload</dt><dd>{formatRate(rate.out)}/s</dd></div>
+      <div class="fig">
+        <dt>tunnels</dt>
+        <dd>{forwards.length} <span class="sub">{doing}</span></dd>
+      </div>
+      <div class="fig conns"><dt>open connections</dt><dd>{conns}</dd></div>
+    </dl>
+    <RateChart series={trafficOf(app.model, host)} height={180} what="Traffic on {host}" />
+  </section>
+{/if}
 
 {#if session?.state === "failed" && session.error}
   <div class="notice" role="alert">

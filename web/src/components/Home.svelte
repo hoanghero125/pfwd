@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app, viewHash } from "../lib/store.svelte";
   import ConnectDialog from "./ConnectDialog.svelte";
+  import Logo from "./Logo.svelte";
   import State from "./State.svelte";
 
   let connecting = $state(false);
@@ -8,6 +9,7 @@
 </script>
 
 <div class="welcome">
+  <Logo size={72} />
   <h1>{hosts.length ? "Pick a host" : "Connect a host to start"}</h1>
   {#if hosts.length}
     <p>Choose one to see its ports, or connect another from your ssh config.</p>

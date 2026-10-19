@@ -2,7 +2,7 @@ import { describe as group, expect, it } from "vitest";
 
 import { formatRate, localAddr, portLabel, portTarget, target } from "./format";
 import { parseHash } from "./store.svelte";
-import { apply, emptyModel, forwardsOf, historyPoints, startSync } from "./reduce";
+import { apply, emptyModel, forwardsOf, historyPoints, startSync, trafficOf } from "./reduce";
 import type { Forward } from "./types";
 
 function fwd(over: Partial<Forward>): Forward {
@@ -74,11 +74,41 @@ group("apply", () => {
     apply(m, { event: "stats", data: { forwards: [{ id: "1", conns: 2, bytes_in: 3048, bytes_out: 20 }] } }, 2000);
     expect(m.rates["1"].in).toBe(2048);
     expect(m.rates["1"].out).toBe(10);
+    expect(m.rates["1"].history).toEqual([{ in: 2048, out: 10 }]);
     expect(m.forwards["1"].conns).toBe(2);
     for (let i = 3; i < historyPoints + 20; i++) {
       apply(m, { event: "stats", data: { forwards: [{ id: "1", conns: 2, bytes_in: 3048 + i, bytes_out: 20 }] } }, i * 1000);
     }
     expect(m.rates["1"].history.length).toBe(historyPoints);
+  });
+
+  it("adds up a host's traffic, second by second, newest last", () => {
+    const m = emptyModel();
+    apply(m, { event: "forward_changed", data: fwd({ id: "1" }) }, 0);
+    apply(m, { event: "forward_changed", data: fwd({ id: "2", remote: 8888, local: 8888 }) }, 0);
+    apply(m, { event: "forward_changed", data: fwd({ id: "3", host: "other" }) }, 0);
+    const tick = (at: number, one: number, two?: number) =>
+      apply(m, {
+        event: "stats",
+        data: {
+          forwards: [
+            { id: "1", conns: 0, bytes_in: one, bytes_out: one / 10 },
+            ...(two === undefined ? [] : [{ id: "2", conns: 0, bytes_in: two, bytes_out: 0 }]),
+            { id: "3", conns: 0, bytes_in: at * 1000, bytes_out: 0 },
+          ],
+        },
+      }, at);
+    tick(0, 0);
+    tick(1000, 1000);
+    tick(2000, 3000, 0);
+    tick(3000, 6000, 500);
+    // :8888 started a second later: its seconds line up with the newest.
+    expect(trafficOf(m, "devbox")).toEqual([
+      { in: 1000, out: 100 },
+      { in: 2000, out: 200 },
+      { in: 3500, out: 300 },
+    ]);
+    expect(trafficOf(m, "nowhere")).toEqual([]);
   });
 
   it("lists a host's forwards by port", () => {

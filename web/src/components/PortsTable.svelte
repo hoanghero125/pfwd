@@ -82,7 +82,12 @@
   function select(r: Row) {
     sel = { key: r.key, port: portOf(r), index: Math.max(0, rows.indexOf(r)) };
   }
-  const detailed = $derived(details ? app.model.forwards[details] : undefined);
+  // openDetails shows or hides forward f's details under its row; focus
+  // stays on the row's "More actions" button.
+  function openDetails(f: Forward, key: string) {
+    details = details === f.id ? "" : f.id;
+    back = `more-${key}`;
+  }
 
   // Rows that appear after the table first drew fade in.
   const born = new Map<string, number>();
@@ -124,7 +129,13 @@
       e.preventDefault();
       return;
     }
-    if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input, textarea, select, dialog, .menu-list") || detailed) return;
+    if (e.key === "Escape" && details && !document.querySelector("dialog[open]")) {
+      details = "";
+      document.getElementById(back)?.focus();
+      e.preventDefault();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey || t?.closest("input, textarea, select, dialog, .menu-list")) return;
     const r = current;
     switch (e.key) {
       case "j":
@@ -189,9 +200,14 @@
     id="row-{r.key}"
     class="row"
     class:new={isNew(r.key)}
+    class:open={details === f.id}
     role="listitem"
     aria-current={current?.key === r.key ? "true" : undefined}
-    onclick={() => select(r)}
+    onclick={(e) => {
+      select(r);
+      // A click on the row itself, not its buttons or details, opens them.
+      if (!(e.target as HTMLElement).closest("button, a, .expand")) openDetails(f, r.key);
+    }}
     onfocusin={() => select(r)}
   >
     <span class="port">{remoteAddr(f)}</span>
@@ -211,7 +227,7 @@
         <button id="more-{r.key}" class="link" aria-label="More actions for :{f.remote}" aria-haspopup="menu" aria-expanded={menu === r.key} onclick={() => (menu = menu === r.key ? "" : r.key)}>⋯</button>
         {#if menu === r.key}
           <span class="menu-list" role="menu">
-            <button role="menuitem" onclick={() => ((details = f.id), (back = `more-${r.key}`), (menu = ""))}>Details</button>
+            <button role="menuitem" onclick={() => (openDetails(f, r.key), (menu = ""))}>{details === f.id ? "Hide details" : "Details"}</button>
             {#if t.web}<button role="menuitem" onclick={() => (open(f), (menu = ""))}>Open in the browser</button>{/if}
             <button role="menuitem" onclick={() => (app.copy(t.text), (menu = ""))}>{t.web ? "Copy URL" : "Copy address"}</button>
             {#if !f.config}
@@ -224,6 +240,9 @@
         {/if}
       </span>
     </span>
+    {#if details === f.id}
+      <Details {f} onclose={() => ((details = ""), document.getElementById(back)?.focus())} onlabel={() => (labeling = f)} />
+    {/if}
   </div>
 {/snippet}
 
@@ -309,9 +328,6 @@
   </section>
 {/if}
 
-{#if detailed}
-  <Details f={detailed} onclose={() => (details = "")} returnTo={back} />
-{/if}
 {#if custom}
   <ForwardDialog {host} port={custom} onclose={() => (custom = null)} returnTo={back} />
 {/if}
