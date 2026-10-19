@@ -39,7 +39,7 @@
   }
 </script>
 
-<Dialog title={port ? `Forward ${portLabel(port.port, port.addrs)} to another local port` : `New forward on ${host}`} icon="arrow" {onclose} {returnTo}>
+<Dialog title={port ? `Forward ${portLabel(port.port, port.addrs)} to another local port` : `New forward on ${host}`} {onclose} {returnTo}>
   <form onsubmit={submit}>
     <div class="fields">
       {#if !port}

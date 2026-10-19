@@ -2,7 +2,6 @@
   import * as api from "../lib/api";
   import { app } from "../lib/store.svelte";
   import type { Problem } from "../lib/types";
-  import Icon from "./Icon.svelte";
 
   // Settings: a form for the common keys of config.toml, and the file
   // itself. Nothing is written until the whole file is valid.
@@ -135,11 +134,11 @@
 <div class="head">
   <h1>Settings</h1>
 </div>
-{#if path}<p class="meta"><span><Icon name="settings" size={14} /> <span class="mono">{path}</span></span></p>{/if}
-<nav class="tabs" aria-label="Settings views">
-  <a href="#/settings" aria-current={tab === "form" ? "page" : undefined} onclick={(e) => (e.preventDefault(), (tab = "form"))}>Common settings</a>
+{#if path}<p class="meta"><span>from <span class="v">{path}</span></span></p>{/if}
+<div class="tabsbar"><nav class="tabs" aria-label="Settings views">
+  <a href="#/settings" aria-current={tab === "form" ? "page" : undefined} onclick={(e) => (e.preventDefault(), (tab = "form"))}>common settings</a>
   <a href="#/settings" aria-current={tab === "file" ? "page" : undefined} onclick={(e) => (e.preventDefault(), (tab = "file"))}>config.toml</a>
-</nav>
+</nav></div>
 
 {#if !loaded}
   <p class="empty">Loading the settings…</p>

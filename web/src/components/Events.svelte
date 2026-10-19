@@ -1,7 +1,6 @@
 <script lang="ts">
   import { clock } from "../lib/format";
   import { app } from "../lib/store.svelte";
-  import Icon from "./Icon.svelte";
 
   // The event log: the TUI's L pane, kept since this page opened.
   let filter = $state("");
@@ -20,16 +19,16 @@
 
 <div class="head"><h1>Events</h1></div>
 <p class="lead">What pfwd did since this page opened, newest first.</p>
-<div class="toolbar">
-  <label class="search">
-    <Icon name="search" />
-    <input type="search" placeholder="Filter events" aria-label="Filter events" data-filter bind:value={filter} />
-    <kbd aria-hidden="true">/</kbd>
-  </label>
+<div class="tabsbar">
   <div class="seg" role="group" aria-label="Which events">
-    <button aria-pressed={level === "all"} onclick={() => (level = "all")}>All events</button>
-    <button aria-pressed={level === "problems"} onclick={() => (level = "problems")}>Warnings and errors</button>
+    <button aria-pressed={level === "all"} onclick={() => (level = "all")}>all events</button>
+    <button aria-pressed={level === "problems"} onclick={() => (level = "problems")}>warnings and errors</button>
   </div>
+  <span class="grow"></span>
+  <label class="filter">
+    <kbd aria-hidden="true">/</kbd>
+    <input type="search" placeholder="filter events" aria-label="Filter events" data-filter bind:value={filter} />
+  </label>
 </div>
 <div class="log" role="log" aria-label="Events, newest first">
   {#each lines as l (l.seq)}

@@ -22,9 +22,9 @@ async function axe(page: Page, what: string) {
 
 test("the ports view shows forwarded and detected ports", async ({ page }) => {
   await open(page);
-  await expect(page.getByRole("heading", { name: "devbox" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Forwarded 3" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Detected, not forwarded 2" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "devbox" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Forwarded 3" })).toBeAttached();
+  await expect(page.getByRole("heading", { name: "on devbox, not forwarded 2" })).toBeVisible();
   const forwarded = page.getByRole("list", { name: "Forwarded ports" });
   await expect(forwarded.getByRole("listitem")).toHaveCount(3);
   await expect(forwarded.getByText("localhost:15432")).toBeVisible();
